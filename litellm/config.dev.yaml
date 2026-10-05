@@ -1,0 +1,25 @@
+model_list:
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: test-model
+    litellm_params:
+      model: openai/test-model
+      api_key: os.environ/OPENAI_API_KEY
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 60
+  success_callback: ["prometheus"]
+  failure_callback: ["prometheus"]
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
+  disable_spend_logs: false
+
+environment_variables:
+  PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
+  PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000

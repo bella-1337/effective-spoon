@@ -1,0 +1,246 @@
+{
+  "uid": "litellm-cost",
+  "title": "LiteLLM Cost Attribution",
+  "tags": [
+    "litellm",
+    "cost",
+    "postgres"
+  ],
+  "timezone": "utc",
+  "refresh": "5m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "model",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "litellm-pg"
+        },
+        "query": "SELECT DISTINCT model AS __text, model AS __value FROM \"LiteLLM_SpendLogs\" WHERE model <> '' UNION ALL SELECT 'All' AS __text, '$__all' AS __value ORDER BY 1",
+        "rawSql": "SELECT DISTINCT model AS __text, model AS __value FROM \"LiteLLM_SpendLogs\" WHERE model <> '' UNION ALL SELECT 'All' AS __text, '$__all' AS __value ORDER BY 1",
+        "format": "table",
+        "includeAll": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Total spend (selected window)",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-pg"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT SUM(spend)::float AS \"Spend ($)\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND model = ANY(ARRAY[${model:sqlstring}]::text[])",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Requests (selected window)",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-pg"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*)::float AS \"Requests\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND model = ANY(ARRAY[${model:sqlstring}]::text[])",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Avg cost / request",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-pg"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT AVG(spend)::float AS \"$ / request\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND model = ANY(ARRAY[${model:sqlstring}]::text[])",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Daily spend by model",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-pg"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('day', \"startTime\") AS time, model AS metric, SUM(spend)::float AS value FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND model = ANY(ARRAY[${model:sqlstring}]::text[]) GROUP BY 1, 2 ORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Tokens per day (prompt vs completion)",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-pg"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('day', \"startTime\") AS time, 'prompt' AS metric, SUM(prompt_tokens)::float AS value FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND model = ANY(ARRAY[${model:sqlstring}]::text[]) GROUP BY 1 UNION ALL SELECT date_trunc('day', \"startTime\"), 'completion', SUM(completion_tokens)::float FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND model = ANY(ARRAY[${model:sqlstring}]::text[]) GROUP BY 1 ORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "piechart",
+      "title": "Spend share by model",
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 13
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-pg"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT model AS metric, SUM(spend)::float AS value FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND model = ANY(ARRAY[${model:sqlstring}]::text[]) GROUP BY 1 ORDER BY 2 DESC",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "barchart",
+      "title": "Spend by API key alias (top 10)",
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 8,
+        "y": 13
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-pg"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(keys.key_alias, 'unknown') AS metric, SUM(logs.spend)::float AS value FROM \"LiteLLM_SpendLogs\" logs LEFT JOIN \"LiteLLM_VerificationToken\" keys ON keys.token = logs.api_key WHERE $__timeFilter(logs.\"startTime\") AND logs.model = ANY(ARRAY[${model:sqlstring}]::text[]) GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Most expensive requests (selected window)",
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 13
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "litellm-pg"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT \"request_id\", model, spend, total_tokens, \"startTime\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND model = ANY(ARRAY[${model:sqlstring}]::text[]) ORDER BY spend DESC LIMIT 20",
+          "format": "table"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

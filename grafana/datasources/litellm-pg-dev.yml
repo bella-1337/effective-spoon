@@ -1,0 +1,18 @@
+apiVersion: 1
+
+datasources:
+  - name: LiteLLM PG (dev)
+    uid: litellm-pg-dev
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: litellm_dev
+    user: ${PG_USER}
+    secureJsonData:
+      password: ${PG_PASSWORD}
+    jsonData:
+      database: litellm_dev
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    editable: false

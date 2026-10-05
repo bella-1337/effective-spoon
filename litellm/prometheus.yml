@@ -1,0 +1,45 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: litellm-prod
+    metrics_path: /metrics
+    static_configs: [{ targets: ["litellm-prod:4000"] }]
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/litellm-master-key
+
+  - job_name: litellm-dev
+    metrics_path: /metrics
+    static_configs: [{ targets: ["litellm-dev:4000"] }]
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/litellm-master-key
+
+  - job_name: traefik
+    static_configs: [{ targets: ["traefik:8082"] }]
+
+  - job_name: postgres
+    static_configs: [{ targets: ["postgres-exporter:9187"] }]
+
+  - job_name: node
+    static_configs: [{ targets: ["node-exporter:9100"] }]
+
+  - job_name: cadvisor
+    static_configs: [{ targets: ["cadvisor:8080"] }]
+
+  - job_name: blackbox-http
+    metrics_path: /probe
+    params: { module: [http_2xx] }
+    static_configs:
+      - targets:
+          - http://presidio-analyzer:3000/health
+          - http://presidio-anonymizer:3000/health
+          - http://searxng:8080/
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115

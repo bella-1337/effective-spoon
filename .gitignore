@@ -1,0 +1,26 @@
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+.envrc
+
+# Locally generated TLS material
+traefik/certs/*
+!traefik/certs/.gitkeep
+traefik/acme.json
+acme.json
+litellm/secrets/
+
+# Runtime output
+*.log
+logs/
+
+# OS and editor state
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
