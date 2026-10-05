@@ -9,7 +9,6 @@ volumes:
   grafana-data: {}
   prometheus-data: {}
   loki-data: {}
-  promtail-positions: {}
 
 services:
   traefik:
@@ -29,6 +28,7 @@ services:
       - --metrics.prometheus.entrypoint=metrics
       - --metrics.prometheus.addEntryPointsLabels=true
       - --metrics.prometheus.addServicesLabels=true
+      - --accesslog=true
     ports:
       - "80:80"
       - "443:443"
@@ -138,13 +138,12 @@ services:
       retries: 12
       start_period: 15s
 
-  promtail:
-    image: grafana/promtail:3.5.12
+  alloy:
+    image: grafana/alloy:v1.10.2
     user: "0:0"
-    command: -config.file=/etc/promtail/config.yml
+    command: run /etc/alloy/config.alloy
     volumes:
-      - ./promtail/config.yml:/etc/promtail/config.yml:ro
-      - promtail-positions:/run/promtail
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       loki:

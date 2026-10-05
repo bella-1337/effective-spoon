@@ -2,7 +2,7 @@
 
 A Docker Compose stack for running separate LiteLLM production and development
 proxies behind Traefik, with PostgreSQL, Presidio, SearXNG, Prometheus, Grafana,
-Loki, Promtail, and host/container exporters.
+Loki, Grafana Alloy, and host/container exporters.
 
 The `prod` and `dev` names below describe LiteLLM runtime profiles. The bundled
 `mkcert` TLS setup is intended only for a private workstation or trusted local
@@ -54,8 +54,12 @@ Use literal values in `.env`; Compose does **not** execute commands such as
 `$(openssl rand ...)`. Generate values separately, then paste their output:
 
 ```sh
-openssl rand -base64 32
+# PG_PASSWORD is embedded in DATABASE_URL, so it must not contain URL-reserved
+# characters such as @, :, /, ?, #, [, or ].
 openssl rand -hex 32
+
+# Suitable for the other secrets.
+openssl rand -base64 32
 ```
 
 Do not commit `.env`, provider keys, database passwords, or TLS private keys.
@@ -211,7 +215,7 @@ sign in with the Grafana admin password from `.env`.
 
 ## 9. View container logs in Grafana
 
-Promtail sends container standard output and standard error to Loki, so raw
+Grafana Alloy sends container standard output and standard error to Loki, so raw
 container logs are now available in Grafana. To view them:
 
 1. Open Grafana and select **Explore**.
@@ -219,7 +223,7 @@ container logs are now available in Grafana. To view them:
 3. Open the label browser, choose a label and value to identify a container,
    and run the query. You can add more labels to narrow the stream.
 
-Promtail provides `compose_project`, `compose_service`, `container`, and
+Grafana Alloy provides `compose_project`, `compose_service`, `container`, and
 `stream` (`stdout` or `stderr`) labels, plus `job="docker"`. For example, run
 either of these Loki label selectors to show all discovered container streams
 or one Compose service:
@@ -236,7 +240,7 @@ assuming that every example value is present.
 
 Use each Grafana data source for its intended telemetry:
 
-- **Loki** contains raw container log lines collected by Promtail.
+- **Loki** contains raw container log lines collected by Grafana Alloy.
 - **Prometheus** contains time-series service and infrastructure metrics.
 - **LiteLLM PG (prod)** and **LiteLLM PG (dev)** query structured LiteLLM
   database telemetry, such as spend records; they are not log stores.
