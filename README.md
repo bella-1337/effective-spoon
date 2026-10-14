@@ -29,13 +29,15 @@ SEARXNG_HOST=search.example.test
 
 PG_USER=litellm
 PG_PASSWORD=<strong-random-password>
+PG_VECTOR_PASSWORD=<strong-random-password>
+PG_VECTOR_API_KEY=sk-<strong-random-value>
 LITELLM_MASTER_KEY=sk-<strong-random-value>
 OPENAI_API_KEY=<provider-api-key>
 GRAFANA_ADMIN_PASSWORD=<strong-random-password>
 SEARXNG_SECRET=<strong-random-secret>
 ```
 
-All ten values are required:
+All twelve values are required:
 
 | Variable | Purpose |
 | --- | --- |
@@ -45,6 +47,8 @@ All ten values are required:
 | `SEARXNG_HOST` | Public base hostname advertised by SearXNG |
 | `PG_USER` | PostgreSQL/LiteLLM database user |
 | `PG_PASSWORD` | PostgreSQL password |
+| `PG_VECTOR_PASSWORD` | Password for the isolated pgvector database |
+| `PG_VECTOR_API_KEY` | Authentication key for the internal LiteLLM pgvector connector |
 | `LITELLM_MASTER_KEY` | Administrative/authentication key for LiteLLM |
 | `OPENAI_API_KEY` | Provider credential used by the configured models |
 | `GRAFANA_ADMIN_PASSWORD` | Initial Grafana administrator password |
@@ -54,8 +58,8 @@ Use literal values in `.env`; Compose does **not** execute commands such as
 `$(openssl rand ...)`. Generate values separately, then paste their output:
 
 ```sh
-# PG_PASSWORD is embedded in DATABASE_URL, so it must not contain URL-reserved
-# characters such as @, :, /, ?, #, [, or ].
+# Both PostgreSQL passwords are embedded in DATABASE_URL values, so they must
+# not contain URL-reserved characters such as @, :, /, ?, #, [, or ].
 openssl rand -hex 32
 
 # Suitable for the other secrets.
@@ -65,6 +69,117 @@ openssl rand -base64 32
 Do not commit `.env`, provider keys, database passwords, or TLS private keys.
 The example `.test` names are reserved for testing. If you choose other names,
 use the same names in `.env`, the certificate command, and host resolution.
+
+### Automatic virtual-key rotation
+
+LiteLLM 1.104 exposes per-key auto-rotation settings in the UI, but key
+regeneration and scheduled rotation require a LiteLLM Enterprise license. The
+current stack has no `LITELLM_LICENSE`, so the background worker is intentionally
+disabled. Enabling only the UI toggle or worker would leave due rotations
+failing with an Enterprise-feature error.
+
+After obtaining a valid license, pass `LITELLM_LICENSE` securely to both proxy
+services and add these stack-owned worker settings:
+
+```yaml
+LITELLM_KEY_ROTATION_ENABLED: "true"
+LITELLM_KEY_ROTATION_CHECK_INTERVAL_SECONDS: "3600"
+LITELLM_KEY_ROTATION_GRACE_PERIOD: 24h
+```
+
+Then use **Virtual Keys**, select a key, enable **Auto-Rotation**, and choose its
+rotation interval. The worker generates a replacement key, keeps the previous
+key valid for the configured grace period, and carries the rotation schedule to
+the replacement.
+
+The check interval is how often LiteLLM looks for due keys; it is not the
+per-key rotation interval selected in the UI. A rotation may therefore occur up
+to one check interval after its scheduled time. In a multi-replica deployment,
+configure LiteLLM's supported distributed locking before relying on one
+rotation execution per schedule.
+
+#### Optional email delivery for generated and rotated keys
+
+Email is not enabled by default because this repository has no mail credentials.
+LiteLLM's
+[email notification documentation](https://docs.litellm.ai/docs/proxy/email)
+supports SMTP, Resend, and SendGrid callbacks. For SMTP, add the callback to
+`litellm_settings` in both profile configuration files:
+
+```yaml
+litellm_settings:
+  callbacks: ["smtp_email"]
+```
+
+Pass these variables to each LiteLLM service from the ignored local `.env`:
+
+```dotenv
+SMTP_HOST=smtp.example.com
+SMTP_TLS=True
+SMTP_PORT=587
+SMTP_USERNAME=<smtp-user>
+SMTP_PASSWORD=<smtp-password>
+SMTP_SENDER_EMAIL=ai-notifications@example.com
+
+# Recommended: do not place live API keys in email.
+EMAIL_INCLUDE_API_KEY=false
+```
+
+For Resend use `callbacks: ["resend_email"]` with `RESEND_API_KEY`; for
+SendGrid use `callbacks: ["sendgrid_email"]` with `SENDGRID_API_KEY` and
+`SENDGRID_SENDER_EMAIL`. Keep every provider secret in `.env` or a production
+secrets manager, never in the YAML files.
+
+The same callback handles both key-generation and key-rotation notifications.
+For a generated key, select an owner with a valid email address and enable
+**Advanced Settings > Send Email** in the Virtual Keys creation dialog. API
+clients must send the equivalent request flag:
+
+```json
+{
+  "user_id": "<owner-user-id>",
+  "send_invite_email": true
+}
+```
+
+LiteLLM does not send a key-generation message when `send_invite_email` is
+omitted or false. The owner and opt-in must therefore be supplied for every key
+that should trigger a notification.
+
+The SMTP callback, key-generation event, and owner-email lookup were validated
+locally with a disposable user and key while `EMAIL_INCLUDE_API_KEY=false`; the
+notification was delivered to the owner's address and contained no plaintext
+API key. Rotation-email delivery could not be exercised because this unlicensed
+deployment cannot regenerate a virtual key.
+
+For generated and rotated keys, the recipient is resolved from the key's
+`user_id`, then from that owner's `user_email` in LiteLLM's user table. A key
+without an owning user or an owner without an email address cannot receive a
+notification. Team membership or the identity of the administrator who created
+the key is not a substitute for explicit key ownership.
+
+With `EMAIL_INCLUDE_API_KEY=true` (LiteLLM's upstream default), the email
+contains the new plaintext key. This is convenient but exposes a credential to
+mail transport, mailboxes, forwarding, retention, and account compromise. The
+recommended `false` setting sends a notification with a placeholder instead;
+the owner retrieves the generated or replacement key from the authenticated
+LiteLLM dashboard. For rotation, the owner updates clients during the 24-hour
+grace period, after which the old key is revoked.
+
+Before enabling key email in production:
+
+1. Confirm every notified human-owned key has the correct `user_id`, the owner
+   has a verified `user_email`, and key creation sets `send_invite_email: true`.
+2. Install and validate the Enterprise license before enabling rotation or its
+   worker; generation notifications do not require the rotation license.
+3. Use a TLS-enabled mail provider and a narrowly scoped sending credential.
+4. Keep `EMAIL_INCLUDE_API_KEY=false` unless an approved risk assessment
+   explicitly permits sending plaintext credentials by email.
+5. Test generation with a disposable user and key and verify delivery. If
+   rotation is licensed, also update a test client and confirm the previous key
+   works only during the grace period.
+6. Alert on rotation or email failures; do not assume the UI setting proves
+   delivery.
 
 ## 2. Create local TLS certificates
 
@@ -245,7 +360,323 @@ Use each Grafana data source for its intended telemetry:
 - **LiteLLM PG (prod)** and **LiteLLM PG (dev)** query structured LiteLLM
   database telemetry, such as spend records; they are not log stores.
 
-## 10. Verify the LiteLLM database schema
+## 10. Use SearXNG search through LiteLLM
+
+Both LiteLLM profiles expose the internal SearXNG service as the native
+`searxng-search` search tool. SearXNG stays on the internal Compose network for
+gateway requests; clients authenticate to LiteLLM rather than calling the
+internal service directly.
+
+Test production search with:
+
+```sh
+curl --fail --show-error --silent \
+  https://llm.example.test/v1/search/searxng-search \
+  -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"LiteLLM SearXNG integration","max_results":5}'
+```
+
+Use `https://llm-dev.example.test` to test the development profile. SearXNG
+returns a fixed page of results, so `max_results` may not reduce the number of
+results returned by the upstream service.
+
+The beta LiteLLM Chat UI is enabled only for the development profile at
+`https://llm-dev.example.test/ui/chat`. Production keeps the Chat UI disabled.
+Users must sign in and can only select models allowed by their LiteLLM access
+policy. The native `searxng-search` endpoint is available through both gateways;
+it is separate from the Chat UI's MCP tool picker.
+
+The development profile also exposes the host's existing Ollama
+`qwen3.5:4b` model through LiteLLM under the same model name. It connects to
+`http://host.docker.internal:11434` and does not deploy another Ollama container.
+Start Ollama on the Docker host and install the model before starting the
+development profile:
+
+```sh
+ollama list
+ollama run qwen3.5:4b
+```
+
+Test it through LiteLLM rather than calling Ollama directly:
+
+```sh
+curl --fail --silent https://llm-dev.example.test/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3.5:4b",
+    "messages": [{"role": "user", "content": "Reply with exactly: ollama-ready"}],
+    "temperature": 0
+  }'
+```
+
+This host integration is development-only. On Linux Docker Engine, define the
+`host.docker.internal` host-gateway mapping if the name is not already supplied
+by the runtime.
+
+## 11. Presidio PII masking
+
+Both LiteLLM profiles use the internal Presidio Analyzer and Anonymizer through
+the `presidio-pii` guardrail. It runs in `pre_call` and `post_call` modes by
+the globally attached `eu-data-protection` policy, masks detected
+English-language PII before input reaches the model provider and before output
+reaches the user. The analyzer's NLP configuration includes `PERSON` for
+individual/client names and `ORGANIZATION` for company/client organization
+names; organization matches require a minimum confidence of 0.7.
+
+Clients may also select the guardrail explicitly by including:
+
+```json
+{
+  "guardrails": ["presidio-pii"]
+}
+```
+
+Presidio masking is pseudonymisation, not anonymisation. It is language,
+endpoint, model, and confidence dependent; test it against the data and API
+surfaces used by each deployment. Do not claim that all personal data is
+detected or that no personal data reaches a provider.
+
+### Manage the configured guardrails
+
+Guardrail behavior is owned by three repository files:
+
+1. `litellm/modules/guardrails/presidio.yaml` defines the LiteLLM guardrail,
+   its execution modes, Presidio endpoints, language, filtering scope, and
+   per-entity confidence thresholds.
+2. `litellm/modules/policies/eu-data-protection.yaml` adds that guardrail to a
+   policy and attaches the policy globally.
+3. `presidio/analyzer.yaml` controls the analyzer's NLP model and maps model
+   labels such as `PER` and `ORG` to Presidio entities.
+
+Both `litellm/config.prod.yaml` and `litellm/config.dev.yaml` include the
+guardrail and policy modules. A name must match exactly across the guardrail
+definition, policy, and any request that selects it explicitly.
+
+#### Change the existing Presidio guardrail
+
+Edit `litellm/modules/guardrails/presidio.yaml` to change when or where it runs:
+
+```yaml
+guardrails:
+  - guardrail_name: presidio-pii
+    litellm_params:
+      guardrail: presidio
+      mode: [pre_call, post_call]
+      presidio_language: en
+      presidio_filter_scope: both
+      presidio_score_thresholds:
+        ORGANIZATION: 0.7
+```
+
+- Remove `post_call` only if model output must intentionally remain unscanned.
+- Remove `pre_call` only if unmasked input may intentionally reach the model
+  provider.
+- Change `presidio_filter_scope` only after testing the effect on request and
+  response fields.
+- Raise an entity threshold to reduce false positives; lower it to increase
+  detection sensitivity. Validate both false positives and false negatives.
+
+Edit `presidio/analyzer.yaml` when changing the spaCy model or entity-label
+mapping. Removing `ORG: ORGANIZATION`, for example, disables that model label as
+a source of organisation detections; it does not guarantee that no other
+Presidio recognizer can detect an organisation. This file configures NLP
+mapping, not arbitrary LiteLLM policies. Exact company/client deny lists or new
+custom entity types require a supported Presidio recognizer implementation and
+representative tests; do not place sensitive production client lists in Git.
+
+#### Add another LiteLLM guardrail
+
+Add a new item under `guardrails:` in a file under
+`litellm/modules/guardrails/`, or create a separate module and add its path to
+the `include:` list in both profile configurations. Give it a unique
+`guardrail_name` and use only parameters supported by the selected LiteLLM
+guardrail provider.
+
+To apply it automatically, add its exact name to the policy:
+
+```yaml
+policies:
+  eu-data-protection:
+    guardrails:
+      add:
+        - presidio-pii
+        - new-guardrail-name
+```
+
+Defining a guardrail does not apply it globally by itself. It must be added by
+an attached policy, selected explicitly in a request, or attached through
+another supported LiteLLM scope. Keep global privacy controls in the shared
+policy rather than duplicating them in individual model definitions.
+
+#### Disable or remove a guardrail
+
+Use the least destructive option that matches the intended change:
+
+- **Stop automatic application but keep it available:** remove its name from
+  `guardrails.add` in `eu-data-protection.yaml`. Callers can still request a
+  guardrail that remains defined.
+- **Disable the entire global policy:** remove its entry from
+  `policy_attachments`. The policy remains defined but is not applied.
+- **Remove the guardrail completely:** first remove every policy and request
+  reference, then remove its definition. A dangling policy reference can stop
+  LiteLLM from loading successfully.
+- **Remove Presidio from the stack:** only after removing the guardrail and
+  policy references, remove the Analyzer and Anonymizer services and their
+  Compose dependencies. Do not leave a configured guardrail pointing at absent
+  services.
+
+Disabling `pre_call`, removing the global attachment, or removing Presidio
+changes the data-protection boundary and may allow personal data to reach model
+providers. Review that change before deployment rather than treating it as a
+routine operational toggle.
+
+#### Apply and verify a change
+
+Restart the components that consume the changed files:
+
+```sh
+# LiteLLM guardrail or policy module changed
+docker compose --profile prod up -d --force-recreate litellm-prod
+docker compose --profile dev up -d --force-recreate litellm-dev
+
+# Presidio analyzer configuration changed
+docker compose up -d --force-recreate presidio-analyzer
+```
+
+Check both profiles after shared-module changes. Resolve the live policy and
+send representative positive and negative examples:
+
+```sh
+curl --fail --silent https://llm.example.test/policies/resolve \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-mini"}'
+
+curl --fail --silent https://llm-dev.example.test/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model":"qwen3.5:4b",
+    "messages":[{"role":"user","content":"Reply exactly: Example Client Limited"}],
+    "temperature":0
+  }'
+```
+
+The resolved policy must list every automatically applied guardrail. For the
+masking test, the response must not contain the original organisation name.
+Also test harmless text that should remain unchanged, inspect LiteLLM and
+Presidio logs for errors, and confirm prompt/response bodies were not written to
+logs. Never use real personal or client data in a guardrail test.
+
+## 12. EU technical-control baseline
+
+The stack includes a repository-owned technical baseline informed by:
+
+- [GDPR Articles 5, 25, 30, 32, 33, 35, and 44](https://eur-lex.europa.eu/eli/reg/2016/679/oj)
+- [EU AI Act Articles 4, 12, 14, 26, and 50](https://eur-lex.europa.eu/eli/reg/2024/1689/oj)
+- [EDPB Opinion 28/2024 on AI models](https://www.edpb.europa.eu/documents/opinion-of-the-board-art-64/opinion-282024-on-certain-data-protection-aspects-related-to_en)
+- [ENISA's multilayer framework for AI cybersecurity](https://www.enisa.europa.eu/publications/multilayer-framework-for-good-cybersecurity-practices-for-ai)
+
+This is a technical-control baseline, not legal advice, certification, or a claim
+that a deployment complies with the GDPR or EU AI Act.
+
+### Modular configuration
+
+Both profile roots use LiteLLM's native `include` support:
+
+- `litellm/modules/search.yaml` defines the internal SearXNG integration.
+- `litellm/modules/guardrails/presidio.yaml` defines bidirectional PII masking.
+- `litellm/modules/policies/eu-data-protection.yaml` defines and globally
+  attaches the `eu-data-protection` policy.
+- `litellm/config.prod.yaml` and `litellm/config.dev.yaml` retain only
+  profile-specific models, timeouts, UI behavior, and shared privacy settings.
+
+Policy attachments are required: defining a policy without attaching it does not
+apply its guardrails. Check the live configuration with:
+
+```sh
+curl --fail --silent https://llm.example.test/policies/list \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY"
+
+curl --fail --silent https://llm.example.test/policies/resolve \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-mini"}'
+```
+
+The resolved policy must include `presidio-pii`. Repeat the check on the
+development hostname after policy changes.
+
+### Data minimisation and retention
+
+- LiteLLM message logging is disabled while non-content spend metadata remains
+  available for accountability and operations.
+- Prompt and response bodies are explicitly excluded from spend logs.
+- LiteLLM spend metadata is retained for 180 days, then deleted by a daily
+  cleanup job. This duration supports the six-month high-risk deployer logging
+  period in AI Act Article 26(6) when that obligation applies; it does not by
+  itself establish that a system is high risk or that the retention period is
+  appropriate for every purpose.
+- LiteLLM health-check rows are retained for 7 days.
+- Loki container logs are retained for 7 days.
+- Prometheus metrics are retained for 15 days.
+- Traefik omits `ClientHost` from access logs to avoid persisting client IP
+  addresses in Loki.
+- LiteLLM audit logging is enabled for supported administrative changes.
+
+These periods must be recorded in the deployment's retention schedule and
+reviewed against its documented purposes. Restrict proxy-admin access because
+database-backed UI settings can alter runtime behavior. If another callback,
+cache, object store, tracing system, or provider logging feature is enabled, add
+that system to the data-flow and retention review.
+
+### Integrity and transport
+
+Every registry image is pinned to an immutable digest. The development
+`litellm-pgvector` image is built from the official BerriAI repository at a
+full, signed Git commit. Renovate or manually review upstream release notes,
+update the matching digest or source commit, and re-run the complete validation
+before deploying an update.
+
+External routes use TLS through Traefik. The LiteLLM containers trust forwarded
+headers because they are not published directly and only Traefik is expected to
+reach them on the edge network. Internal Compose traffic, including PostgreSQL,
+Loki, Presidio, and SearXNG traffic, is not encrypted. Treat the isolated Docker
+networks as a compensating control for local use; enable authenticated internal
+TLS before using an untrusted or multi-host network.
+
+### Required deployment decisions outside this repository
+
+Before operating the stack with personal data, the responsible organisation
+must separately:
+
+- identify controller, processor, provider, and deployer roles;
+- document purposes, lawful basis, data categories, recipients, retention, and
+  technical measures in its record of processing;
+- assess whether a DPIA is required and classify every AI Act use case,
+  including prohibited and high-risk uses;
+- execute processor agreements and subprocessor controls;
+- establish a valid Chapter V transfer mechanism and transfer impact assessment
+  for non-EU recipients, or configure an eligible EU-resident provider;
+- implement data-subject access, correction, export, restriction, and deletion
+  procedures across PostgreSQL, Loki, provider systems, and backups;
+- define breach detection, documentation, escalation, and the GDPR 72-hour
+  notification process;
+- appoint trained human oversight with the authority to revoke keys, disable
+  models, stop processing, and override model output;
+- inform users when they interact with AI and address provider-side marking of
+  AI-generated content where Article 50 applies; and
+- test Presidio and policy effectiveness regularly with representative,
+  multilingual data. The bundled analyzer supports English only.
+
+The default models call OpenAI and this configuration does not prove EU data
+residency. Confirm the provider account's region, retention, training, and abuse
+monitoring settings plus the applicable contractual transfer safeguards before
+sending personal data.
+
+## 13. Verify the LiteLLM database schema
 
 LiteLLM schema and column names can change between image releases. After the
 selected proxy has completed migrations (and preferably served a request), run
@@ -266,6 +697,150 @@ docker compose exec -T postgres sh -c \
 Compare the reported `LiteLLM_SpendLogs` columns with the SQL used by the cost
 dashboard before relying on its figures. The script's index and read-only-role
 statements are comments; review and apply them manually only when appropriate.
+
+## 14. pgvector storage
+
+The stack deploys a separate PostgreSQL 16 database with pgvector 0.8.1. Its
+named `pgvector-data` volume starts with an empty `sme-knowledge` store and grows
+only when an approved ingestion process inserts document chunks and embeddings.
+Docker named volumes grow with stored data; Compose does not preallocate 50 GB.
+Monitor the volume and host filesystem and alert before either is exhausted.
+
+The schema uses 1,024-dimensional vectors for the host's multilingual `bge-m3`
+embedding model, an HNSW cosine-distance index, JSON metadata filtering,
+cascading deletion by store, and content length constraints. The database is
+only reachable on the internal Compose network. A separate PostgreSQL exporter
+exposes database metrics to Prometheus.
+
+The development profile builds BerriAI's official `litellm-pgvector` connector
+from commit `5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24`. The connector is internal
+only, authenticates every vector-store request, and uses development LiteLLM to
+embed search queries with the host's `bge-m3` model. `sme-knowledge` is declared
+in `litellm/config.dev.yaml`, so it appears in the development LiteLLM Vector
+Stores UI and survives proxy database resets because the registration is
+repository-owned configuration.
+
+Set `PG_VECTOR_API_KEY` to a separate, cryptographically random secret in
+`.env`. Start the host's existing Ollama service and ensure `bge-m3` is present,
+then build and start the development profile:
+
+```sh
+ollama list
+docker compose --profile dev up -d --build
+```
+
+The official connector is intentionally development-only. Production neither
+lists the store nor depends on a host Ollama process. Before enabling it in
+production, select and validate a production embedding model, data residency,
+credentials, capacity, and availability independently.
+
+Validate the empty state and rejection controls with:
+
+```sh
+sh scripts/verify-pgvector.sh
+```
+
+The check verifies unauthenticated rejection at LiteLLM and the connector,
+confirms the managed store appears in LiteLLM, searches the empty store through
+the official connector and local embedding model, and attempts invalid database
+writes with an unknown store, the wrong vector dimensions, and empty content.
+Every invalid attempt must fail and the final vector row count must remain zero.
+
+Before production ingestion, select a reviewed component that provides:
+
+- authenticated ingestion and search APIs;
+- document-, tenant-, and team-level authorization;
+- chunking, embedding, and prompt-injection controls;
+- source identifiers that support complete update and erasure;
+- bounded request sizes, rate limits, and generic errors; and
+- retention, backup, restore, and data-subject deletion procedures.
+
+## 15. Back up the databases
+
+Run the repository-owned backup script while `postgres` and `vector-postgres`
+are healthy:
+
+```bash
+./scripts/backup-databases.sh
+```
+
+It creates PostgreSQL custom-format dumps for `litellm_prod`, `litellm_dev`, and
+`vector_store`, validates that each archive can be read by `pg_restore`, writes
+SHA-256 checksums, and atomically publishes the completed directory under
+`backups/`. Backup directories and files are private to the current operating
+system user. Partial backups are removed on failure and are never published as
+complete.
+
+If a configured database service is unavailable or a database does not exist,
+the script writes a warning, records the reason in `metadata.txt`, and continues
+with the next database. A backup containing the remaining resources is still
+published and its checksum manifest includes only files that were created. The
+script fails without publishing an empty backup when no configured database is
+available. Errors while dumping or validating an existing database remain fatal
+so a corrupt archive is never reported as successful.
+
+Choose a destination on encrypted storage and change the default 14-day
+retention when needed:
+
+```bash
+BACKUP_DIR=/secure/litellm-backups \
+BACKUP_RETENTION_DAYS=30 \
+./scripts/backup-databases.sh
+```
+
+Only directories created by the script with the expected name, metadata,
+checksum manifest, and at least one known database dump are eligible for
+retention cleanup. A directory containing an unexpected file, subdirectory, or
+symbolic link is retained and produces a warning.
+
+For a daily cron job at 02:15 UTC, use an absolute repository path:
+
+```cron
+CRON_TZ=UTC
+15 2 * * * cd /absolute/path/to/litellm-stack && BACKUP_DIR=/secure/litellm-backups BACKUP_RETENTION_DAYS=30 ./scripts/backup-databases.sh >>/var/log/litellm-backup.log 2>&1
+```
+
+The script intentionally does not copy `.env`, TLS private keys, or live
+Grafana, Loki, and Prometheus volume files. Keep secrets in their existing
+secret-management system. Use storage-level snapshots designed for those
+observability volumes if their historical data must be retained. Replicate
+completed backups to access-controlled, encrypted off-host storage and test
+restores regularly; a local backup alone does not protect against host loss.
+
+To restore into a new instance, copy the complete timestamped backup directory
+to the target host, configure its `.env`, and start only the database services:
+
+```bash
+docker compose up -d --wait postgres vector-postgres
+./scripts/restore-databases.sh \
+  --confirm-restore \
+  /secure/litellm-backups/<backup>
+```
+
+The confirmation flag is mandatory because each database found in the backup is
+dropped and recreated. The restore script refuses to run while `litellm-prod`,
+`litellm-dev`, or `litellm-pgvector` is running. It rejects symbolic links,
+unexpected files, unknown databases, malformed metadata, unsafe checksum
+entries, and checksum mismatches before changing a target database.
+
+Full and fault-tolerant partial backups are supported. A database omitted from
+the backup metadata is skipped. If a required target database service is
+unavailable, the script records that restore as failed, continues with the
+remaining databases, and exits nonzero after reporting all failures. Each
+archive is restored with a single transaction into a staging database and
+checked for restored tables before the existing target is replaced. An archive
+error therefore leaves the existing target untouched. If the final staging
+promotion fails after the old target is dropped, the script reports the
+staging-database name so the successfully restored data can be recovered.
+
+`SHA256SUMS` detects accidental corruption but is not a cryptographic signature:
+someone able to replace both a dump and its manifest can produce matching new
+checksums. Use access-controlled backup storage and add signed manifests through
+the organization's backup system when integrity against a malicious writer is
+required.
+
+Test the procedure in a non-production instance regularly. After a successful
+restore, start the application services and rerun the stack verification checks.
 
 ## Stop, restart, and remove
 
@@ -289,7 +864,6 @@ PostgreSQL, Grafana, and Prometheus data. That operation is destructive.
 - Rotate any credential that is accidentally exposed.
 - The Docker socket mounted by Traefik is security-sensitive; restrict host
   access.
-- Development detailed-debug logs may contain request metadata. Do not expose
-  the `dev` profile or its logs to untrusted users.
-- Review and pin container image versions before relying on this stack beyond a
-  local environment; floating `latest`/branch tags can change unexpectedly.
+- Do not expose the `dev` profile or its logs to untrusted users.
+- Keep image digests immutable in deployed revisions and review updates rather
+  than returning to floating tags.

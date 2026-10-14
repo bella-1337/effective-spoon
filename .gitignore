@@ -15,6 +15,7 @@ litellm/secrets/
 # Runtime output
 *.log
 logs/
+backups/
 
 # OS and editor state
 .DS_Store

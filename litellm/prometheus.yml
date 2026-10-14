@@ -22,6 +22,9 @@ scrape_configs:
   - job_name: postgres
     static_configs: [{ targets: ["postgres-exporter:9187"] }]
 
+  - job_name: pgvector
+    static_configs: [{ targets: ["pgvector-exporter:9187"] }]
+
   - job_name: node
     static_configs: [{ targets: ["node-exporter:9100"] }]
 

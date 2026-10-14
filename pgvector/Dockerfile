@@ -1,0 +1,26 @@
+FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends build-essential curl postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=upstream requirements.txt .
+RUN pip install --no-cache-dir --requirement requirements.txt
+
+COPY --from=upstream . .
+RUN prisma generate \
+    && useradd --create-home --uid 65532 pgvector \
+    && chown --recursive pgvector:pgvector /app /root/.cache \
+    && chmod 0755 /root
+
+USER pgvector
+
+EXPOSE 8000
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
