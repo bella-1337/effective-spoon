@@ -68,5 +68,12 @@ WHERE id = 'sme-knowledge';
 
 CREATE INDEX IF NOT EXISTS embeddings_embedding_hnsw_idx
     ON embeddings USING hnsw (embedding vector_cosine_ops);
+CREATE UNIQUE INDEX IF NOT EXISTS embeddings_source_chunk_idx
+    ON embeddings (
+        vector_store_id,
+        (metadata->>'source_id'),
+        ((metadata->>'chunk_index')::integer)
+    )
+    WHERE metadata ? 'source_id' AND metadata ? 'chunk_index';
 
 COMMIT;

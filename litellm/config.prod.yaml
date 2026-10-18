@@ -13,6 +13,17 @@ model_list:
       model: openai/gpt-4o-mini
       api_key: os.environ/OPENAI_API_KEY
 
+mcp_servers:
+  xberg:
+    url: http://xberg:8001/mcp
+    transport: http
+    description: Internal Xberg document and website extraction server
+    allowed_tools:
+      - extract
+      - detect_mime_type
+      - get_version
+      - list_formats
+
 litellm_settings:
   drop_params: true
   request_timeout: 120

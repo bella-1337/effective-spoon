@@ -1,8 +1,8 @@
 # LiteLLM stack
 
 A Docker Compose stack for running separate LiteLLM production and development
-proxies behind Traefik, with PostgreSQL, Presidio, SearXNG, Prometheus, Grafana,
-Loki, Grafana Alloy, and host/container exporters.
+proxies behind Traefik, with PostgreSQL, Presidio, SearXNG, Xberg MCP,
+Prometheus, Grafana, Loki, Grafana Alloy, and host/container exporters.
 
 The `prod` and `dev` names below describe LiteLLM runtime profiles. The bundled
 `mkcert` TLS setup is intended only for a private workstation or trusted local
@@ -387,6 +387,54 @@ Users must sign in and can only select models allowed by their LiteLLM access
 policy. The native `searxng-search` endpoint is available through both gateways;
 it is separate from the Chat UI's MCP tool picker.
 
+### Use Xberg MCP document extraction
+
+Both LiteLLM profiles register the internal Xberg Streamable HTTP MCP server as
+`xberg`. The container has no published host port and LiteLLM is the
+authentication boundary. Only the `extract`, `detect_mime_type`, `get_version`,
+and `list_formats` tools are exposed; cache mutation and warming tools are
+intentionally excluded.
+
+List the available tools:
+
+```sh
+curl --fail --show-error --silent \
+  "https://llm.example.test/mcp-rest/tools/list?server_id=xberg" \
+  -H "x-litellm-api-key: ******"
+```
+
+Extract the official Xberg Docker guide through LiteLLM:
+
+```sh
+curl --fail --show-error --silent \
+  https://llm.example.test/mcp-rest/tools/call \
+  -H "x-litellm-api-key: ******" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "server_id": "xberg",
+    "name": "extract",
+    "arguments": {
+      "input": {
+        "kind": "uri",
+        "uri": "https://docs.xberg.io/guides/docker/"
+      }
+    }
+  }'
+```
+
+Use `https://llm-dev.example.test` for the development profile. Xberg accepts
+remote URLs and therefore acts as a server-side fetcher. Grant MCP access only
+to trusted keys and teams. The Compose-internal placement prevents direct
+client access but does not by itself block Xberg from requesting private
+network destinations.
+
+The development gateway uses the local `bge-m3` Ollama model to semantically
+select up to three relevant MCP tools with a minimum similarity score of `0.3`.
+This affects MCP tools offered automatically through Chat Completions and the
+Responses API; it does not change MCP permissions or direct
+`/mcp-rest/tools/call` requests. Production keeps semantic filtering disabled
+because `bge-m3` and host Ollama are intentionally development-only.
+
 The development profile also exposes the host's existing Ollama
 `qwen3.5:4b` model through LiteLLM under the same model name. It connects to
 `http://host.docker.internal:11434` and does not deploy another Ollama container.
@@ -701,8 +749,10 @@ statements are comments; review and apply them manually only when appropriate.
 ## 14. pgvector storage
 
 The stack deploys a separate PostgreSQL 16 database with pgvector 0.8.1. Its
-named `pgvector-data` volume starts with an empty `sme-knowledge` store and grows
-only when an approved ingestion process inserts document chunks and embeddings.
+named `pgvector-data` volume starts with an empty `sme-knowledge` store. In the
+development profile, every successful Xberg `extract` call automatically
+chunks and indexes the extracted text in this store using local `bge-m3`
+embeddings.
 Docker named volumes grow with stored data; Compose does not preallocate 50 GB.
 Monitor the volume and host filesystem and alert before either is exhausted.
 
@@ -734,17 +784,34 @@ lists the store nor depends on a host Ollama process. Before enabling it in
 production, select and validate a production embedding model, data residency,
 credentials, capacity, and availability independently.
 
-Validate the empty state and rejection controls with:
+Validate the store and rejection controls with:
 
 ```sh
 sh scripts/verify-pgvector.sh
 ```
 
 The check verifies unauthenticated rejection at LiteLLM and the connector,
-confirms the managed store appears in LiteLLM, searches the empty store through
-the official connector and local embedding model, and attempts invalid database
+confirms the managed store appears in LiteLLM, searches it through the official
+connector and local embedding model, and attempts invalid database
 writes with an unknown store, the wrong vector dimensions, and empty content.
-Every invalid attempt must fail and the final vector row count must remain zero.
+Every invalid attempt must fail and the final vector row count must remain
+unchanged.
+
+Automatic indexing is implemented by
+`litellm/modules/xberg_auto_index.py` through LiteLLM's
+`async_post_mcp_tool_call_hook`. It applies only to the `xberg` server's
+`extract` tool. Each source is limited to 1,000,000 extracted characters and
+256 chunks; chunks are approximately 4,000 characters with overlap. Repeating
+an extraction atomically replaces that source's existing chunks instead of
+creating duplicates. URL query strings, fragments, and credentials are not
+stored in source metadata.
+
+Indexing is best effort and runs as a bounded background task after extraction:
+an Ollama, embedding, or vector-database failure is logged while the original
+Xberg response is still returned to the caller. The task times out after three
+minutes and can be lost if the development proxy stops before it finishes; call
+`extract` again to retry. The callback is enabled only in development because
+the pgvector connector and host `bge-m3` model are development-only.
 
 Before production ingestion, select a reviewed component that provides:
 
@@ -841,6 +908,120 @@ required.
 
 Test the procedure in a non-production instance regularly. After a successful
 restore, start the application services and rerun the stack verification checks.
+
+## 16. Validate and roll back a LiteLLM image upgrade
+
+The single maintenance entry point exposes the routine operational workflows:
+
+```bash
+./scripts/maintenance.sh help
+./scripts/maintenance.sh doctor
+./scripts/maintenance.sh status
+./scripts/maintenance.sh backup
+./scripts/maintenance.sh post-upgrade
+```
+
+It delegates to the focused scripts below without weakening their validation,
+confirmation flags, or exit codes. Restore and rollback remain explicit:
+
+```bash
+./scripts/maintenance.sh restore \
+  --confirm-restore \
+  /secure/litellm-backups/<backup>
+
+./scripts/maintenance.sh rollback \
+  --confirm-rollback \
+  --mode image-only
+```
+
+Use an immutable candidate reference containing both a tag and digest. Run the
+compatibility check before editing `docker-compose.yml`; `--pull` is required
+only when the candidate is not already present locally:
+
+```bash
+CANDIDATE_IMAGE='ghcr.io/berriai/litellm-database:<version>@sha256:<digest>'
+
+./scripts/check-litellm-upgrade-compatibility.sh \
+  --candidate-image "$CANDIDATE_IMAGE" \
+  --pull
+```
+
+The compatibility check and rollback-point preparation can also run as one
+fail-fast command:
+
+```bash
+./scripts/maintenance.sh pre-upgrade \
+  --candidate-image "$CANDIDATE_IMAGE" \
+  --pull
+```
+
+The compatibility script never reads `.env`, connects to the stack databases,
+or changes running services. It performs static configuration checks and runs
+the candidate's own configuration validator in network-isolated, read-only,
+capability-dropped containers with placeholder credentials.
+
+Immediately before changing the image digest, capture the deployed images,
+configuration checksums, and a fresh database backup:
+
+```bash
+./scripts/prepare-litellm-upgrade.sh
+```
+
+The resulting private state is stored under ignored `upgrade-state/`. Do not
+edit or move its files independently: the rollback script validates their
+checksums and configuration drift. `--skip-backup` is available only when an
+image-only rollback is sufficient and the database schema cannot become
+incompatible.
+
+After updating both LiteLLM image references to the tested digest and recreating
+the proxies, run the complete regression suite:
+
+```bash
+./scripts/verify-litellm-upgrade.sh
+```
+
+List or select checks when diagnosing a failure:
+
+```bash
+./scripts/verify-litellm-upgrade.sh --list
+./scripts/verify-litellm-upgrade.sh --only compose-health,prod-auth,logs
+```
+
+The suite checks Compose health and exposure, authentication, prod/dev
+isolation, development Ollama chat and embeddings, pgvector, Presidio behavior,
+SearXNG, Xberg MCP extraction, Prometheus targets, Grafana datasources, and
+Loki log delivery. A
+missing optional prerequisite is reported as `SKIP`; once a prerequisite is
+present, a failed assertion makes the command exit nonzero.
+
+If the prior image can read the current schema, roll back images only:
+
+```bash
+./scripts/rollback-litellm-upgrade.sh \
+  --confirm-rollback \
+  --mode image-only
+```
+
+If the upgrade migrated the database incompatibly, restore the pre-upgrade
+backup and images together:
+
+```bash
+./scripts/rollback-litellm-upgrade.sh \
+  --confirm-rollback \
+  --mode restore-db
+```
+
+Rollback refuses configuration drift by default, uses an exclusive lock,
+validates immutable image references and state checksums, stops application
+services before database restoration, checks proxy liveliness afterward, and
+writes a private report. It leaves application services stopped when database
+restoration fails.
+
+The runtime rollback uses a generated Compose override saved as
+`upgrade-state/<state>/reports/active-rollback-override.yml`. Before any later
+plain `docker compose up`, either update `docker-compose.yml` to pin the
+rollback digest or include that saved override with `-f`; otherwise Compose
+will reapply the image currently declared in the main file.
 
 ## Stop, restart, and remove
 

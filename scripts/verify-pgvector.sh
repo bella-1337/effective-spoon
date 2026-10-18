@@ -27,8 +27,8 @@ extension_version="$(scalar "SELECT extversion FROM pg_extension WHERE extname =
 initial_count="$(scalar "SELECT COUNT(*) FROM embeddings WHERE vector_store_id = '$store_id';")"
 
 test -n "$extension_version"
-test "$initial_count" = "0"
-printf 'PASS: pgvector %s is installed and the knowledge store is empty\n' "$extension_version"
+printf 'PASS: pgvector %s is installed and the knowledge store contains %s vector row(s)\n' \
+  "$extension_version" "$initial_count"
 
 unauthenticated_status="$(
   curl --silent --output /dev/null --write-out '%{http_code}' \
@@ -77,9 +77,9 @@ search_response="$(
     --data '{"query":"empty store verification","max_num_results":1}'
 )"
 printf '%s' "$search_response" |
-  jq --exit-status '.object == "vector_store.search_results.page" and (.data | length) == 0' \
+  jq --exit-status '.object == "vector_store.search_results.page" and (.data | type) == "array"' \
     >/dev/null
-printf 'PASS: LiteLLM searched the empty store through the official connector\n'
+printf 'PASS: LiteLLM searched the managed store through the official connector\n'
 
 malformed_status="$(
   curl --silent --output /dev/null --write-out '%{http_code}' \

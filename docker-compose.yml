@@ -156,6 +156,47 @@ services:
       - traefik.http.routers.searxng.tls=true
       - traefik.http.services.searxng.loadbalancer.server.port=8080
 
+  xberg:
+    profiles: [prod, dev]
+    image: ghcr.io/xberg-io/xberg:core@sha256:f0a66d39f7322c273bb4ba2b53f5ca00dee9f2f1b3ebbec26a283017e07a865b
+    command:
+      - mcp
+      - --transport
+      - http
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+      - --allowed-host
+      - xberg
+      - --allowed-host
+      - xberg:8001
+    environment:
+      RUST_LOG: info
+      XBERG_CACHE_DIR: /tmp/xberg-cache
+      HF_HOME: /tmp/huggingface
+      XBERG_MAX_REQUEST_BODY_BYTES: "10485760"
+      XBERG_MAX_MULTIPART_FIELD_BYTES: "10485760"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1g
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "xberg", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   prometheus:
     image: prom/prometheus:latest@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
     command:
@@ -222,7 +263,7 @@ services:
 
   litellm-prod:
     profiles: [prod]
-    image: ghcr.io/berriai/litellm-database:main-stable@sha256:fbe28229d2d02181c0a7d9df9599de614b491f3d897d2d7da18404f088310218
+    image: ghcr.io/berriai/litellm:v1.105.1@sha256:b7b9e2c306343721802253d0dd9436b9634a2eb4e14da7c7cf06c5c7b7530802
     command:
       - --config=/app/config.yaml
       - --port=4000
@@ -243,6 +284,8 @@ services:
         condition: service_started
       presidio-anonymizer:
         condition: service_started
+      xberg:
+        condition: service_healthy
     networks: [edge, internal]
     restart: unless-stopped
     labels:
@@ -254,7 +297,7 @@ services:
 
   litellm-dev:
     profiles: [dev]
-    image: ghcr.io/berriai/litellm-database:main-stable@sha256:fbe28229d2d02181c0a7d9df9599de614b491f3d897d2d7da18404f088310218
+    image: ghcr.io/berriai/litellm:v1.107.0-dev.3@sha256:e7f68da02ed3ec52f0b8d386dbb278a0aa06dbc879f5ddda5a3cf87b2bff194c
     command:
       - --config=/app/config.yaml
       - --port=4000
@@ -268,6 +311,9 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       PG_VECTOR_API_BASE: http://litellm-pgvector:8000
       PG_VECTOR_API_KEY: ${PG_VECTOR_API_KEY}
+      VECTOR_DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD}@vector-postgres:5432/vector_store
+      XBERG_INDEX_EMBEDDING_MODEL: ollama/bge-m3
+      XBERG_INDEX_EMBEDDING_API_BASE: http://host.docker.internal:11434
       PROXY_BASE_URL: https://${LITELLM_DEV_HOST}
       FORWARDED_ALLOW_IPS: "*"
     depends_on:
@@ -277,6 +323,8 @@ services:
         condition: service_started
       presidio-anonymizer:
         condition: service_started
+      xberg:
+        condition: service_healthy
     networks: [edge, internal]
     restart: unless-stopped
     labels:

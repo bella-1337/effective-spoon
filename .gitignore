@@ -16,6 +16,7 @@ litellm/secrets/
 *.log
 logs/
 backups/
+upgrade-state/
 
 # OS and editor state
 .DS_Store
