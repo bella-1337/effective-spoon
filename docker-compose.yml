@@ -1,5 +1,36 @@
 name: litellm-stack
 
+x-langfuse-environment: &langfuse-environment
+  HOSTNAME: 0.0.0.0
+  NEXTAUTH_URL: https://${LANGFUSE_WEB_HOST}
+  DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASSWORD:?Set LANGFUSE_POSTGRES_PASSWORD in .env}@langfuse-postgres:5432/langfuse
+  SALT: ${LANGFUSE_SALT:?Set LANGFUSE_SALT in .env}
+  ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?Set LANGFUSE_ENCRYPTION_KEY in .env}
+  TELEMETRY_ENABLED: "false"
+  LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+  CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+  CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+  CLICKHOUSE_USER: langfuse
+  CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?Set LANGFUSE_CLICKHOUSE_PASSWORD in .env}
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:?Set LANGFUSE_MINIO_PASSWORD in .env}
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:?Set LANGFUSE_MINIO_PASSWORD in .env}
+  LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+  LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+  REDIS_HOST: langfuse-redis
+  REDIS_PORT: "6379"
+  REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:?Set LANGFUSE_REDIS_AUTH in .env}
+  REDIS_TLS_ENABLED: "false"
+
 networks:
   edge: {}
   internal: {}
@@ -10,6 +41,11 @@ volumes:
   grafana-data: {}
   prometheus-data: {}
   loki-data: {}
+  langfuse-postgres-data: {}
+  langfuse-clickhouse-data: {}
+  langfuse-clickhouse-logs: {}
+  langfuse-minio-data: {}
+  langfuse-redis-data: {}
 
 services:
   traefik:
@@ -240,6 +276,151 @@ services:
     networks: [internal]
     restart: unless-stopped
 
+  langfuse-postgres:
+    image: postgres:17@sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:?Set LANGFUSE_POSTGRES_PASSWORD in .env}
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - langfuse-postgres-data:/var/lib/postgresql/data
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:25.12@sha256:8a790dd3468db22b1d4e7b18a176f378ff5ff6053b9c48dd4ea1fa71a24c5ba6
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?Set LANGFUSE_CLICKHOUSE_PASSWORD in .env}
+    volumes:
+      - langfuse-clickhouse-data:/var/lib/clickhouse
+      - langfuse-clickhouse-logs:/var/log/clickhouse-server
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  langfuse-minio:
+    image: cgr.dev/chainguard/minio:latest@sha256:c47b1779bfd12cdf5a4fcd3bd50671b8d66465fdae45271babc2fb467958b712
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && exec minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: langfuse
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:?Set LANGFUSE_MINIO_PASSWORD in .env}
+    volumes:
+      - langfuse-minio-data:/data
+    networks: [edge, internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.langfuse-s3.rule=Host(`${LANGFUSE_S3_HOST}`)
+      - traefik.http.routers.langfuse-s3.entrypoints=websecure
+      - traefik.http.routers.langfuse-s3.tls=true
+      - traefik.http.services.langfuse-s3.loadbalancer.server.port=9000
+
+  langfuse-redis:
+    image: redis:7.4.11@sha256:44960b3100c48159a66d28c18b0588c193492e25f7551d60e51dd464fc3eca5b
+    command:
+      - redis-server
+      - --requirepass
+      - ${LANGFUSE_REDIS_AUTH:?Set LANGFUSE_REDIS_AUTH in .env}
+      - --maxmemory-policy
+      - noeviction
+    environment:
+      REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:?Set LANGFUSE_REDIS_AUTH in .env}
+    volumes:
+      - langfuse-redis-data:/data
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_AUTH redis-cli ping | grep -q PONG"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+  langfuse-worker:
+    image: docker.langfuse.com/langfuse/langfuse-worker:4@sha256:48f8af2c4b6bbf929380f301ade18cf99e7b31331fd26dfaf253ce670e5b39a2
+    environment:
+      <<: *langfuse-environment
+    depends_on:
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3030/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  langfuse-web:
+    image: docker.langfuse.com/langfuse/langfuse:4@sha256:e4cc4bfd0f77285d7454135e1bd14020abdd5c4217a2f0e824b8abcbf3e3cc0f
+    environment:
+      <<: *langfuse-environment
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?Set LANGFUSE_NEXTAUTH_SECRET in .env}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: https://${LANGFUSE_S3_HOST}
+      LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_INIT_ORG_ID: litellm-stack
+      LANGFUSE_INIT_ORG_NAME: LiteLLM Stack
+      LANGFUSE_INIT_PROJECT_ID: litellm
+      LANGFUSE_INIT_PROJECT_NAME: LiteLLM
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?Set LANGFUSE_PUBLIC_KEY in .env}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?Set LANGFUSE_SECRET_KEY in .env}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:?Set LANGFUSE_INIT_USER_EMAIL in .env}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:?Set LANGFUSE_INIT_USER_NAME in .env}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:?Set LANGFUSE_INIT_USER_PASSWORD in .env}
+      LANGFUSE_TRUSTED_PROXY_COUNT: "1"
+      LANGFUSE_DISABLE_SIGNUP_ONBOARDING: "true"
+    depends_on:
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+    networks: [edge, internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/api/public/health?failIfDatabaseUnavailable=true"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.langfuse.rule=Host(`${LANGFUSE_WEB_HOST}`)
+      - traefik.http.routers.langfuse.entrypoints=websecure
+      - traefik.http.routers.langfuse.tls=true
+      - traefik.http.services.langfuse.loadbalancer.server.port=3000
+
   grafana:
     image: grafana/grafana:latest@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572
     environment:
@@ -275,6 +456,16 @@ services:
       STORE_MODEL_IN_DB: "True"
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LITELLM_OTEL_V2: "true"
+      LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""
+      LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""
+      LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: no_content
+      OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: ".*"
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?Set LANGFUSE_PUBLIC_KEY in .env}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?Set LANGFUSE_SECRET_KEY in .env}
+      LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:?Set LANGFUSE_USER_ID_SALT in .env}
+      LANGFUSE_HOST: http://langfuse-web:3000
       PROXY_BASE_URL: https://${LITELLM_PROD_HOST}
       FORWARDED_ALLOW_IPS: "*"
     depends_on:
@@ -286,14 +477,45 @@ services:
         condition: service_started
       xberg:
         condition: service_healthy
+      langfuse-web:
+        condition: service_healthy
     networks: [edge, internal]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
     labels:
       - traefik.enable=true
       - traefik.http.routers.litellm-prod.rule=Host(`${LITELLM_PROD_HOST}`)
       - traefik.http.routers.litellm-prod.entrypoints=websecure
       - traefik.http.routers.litellm-prod.tls=true
       - traefik.http.services.litellm-prod.loadbalancer.server.port=4000
+
+  litellm-demo-data-prod:
+    profiles: [demo]
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      PGHOST: postgres
+      PGDATABASE: litellm_prod
+      PGUSER: ${PG_USER}
+      PGPASSWORD: ${PG_PASSWORD}
+    command:
+      - psql
+      - --no-psqlrc
+      - --set
+      - ON_ERROR_STOP=1
+      - --file
+      - /seed/demo-data.sql
+    volumes:
+      - ./litellm/demo-data.sql:/seed/demo-data.sql:ro
+    depends_on:
+      litellm-prod:
+        condition: service_healthy
+    networks: [internal]
+    restart: "no"
 
   litellm-dev:
     profiles: [dev]
@@ -309,6 +531,16 @@ services:
       STORE_MODEL_IN_DB: "True"
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LITELLM_OTEL_V2: "true"
+      LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""
+      LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""
+      LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: no_content
+      OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: ".*"
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?Set LANGFUSE_PUBLIC_KEY in .env}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?Set LANGFUSE_SECRET_KEY in .env}
+      LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:?Set LANGFUSE_USER_ID_SALT in .env}
+      LANGFUSE_HOST: http://langfuse-web:3000
       PG_VECTOR_API_BASE: http://litellm-pgvector:8000
       PG_VECTOR_API_KEY: ${PG_VECTOR_API_KEY}
       VECTOR_DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD}@vector-postgres:5432/vector_store
@@ -325,14 +557,45 @@ services:
         condition: service_started
       xberg:
         condition: service_healthy
+      langfuse-web:
+        condition: service_healthy
     networks: [edge, internal]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
     labels:
       - traefik.enable=true
       - traefik.http.routers.litellm-dev.rule=Host(`${LITELLM_DEV_HOST}`)
       - traefik.http.routers.litellm-dev.entrypoints=websecure
       - traefik.http.routers.litellm-dev.tls=true
       - traefik.http.services.litellm-dev.loadbalancer.server.port=4000
+
+  litellm-demo-data-dev:
+    profiles: [dev]
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      PGHOST: postgres
+      PGDATABASE: litellm_dev
+      PGUSER: ${PG_USER}
+      PGPASSWORD: ${PG_PASSWORD}
+    command:
+      - psql
+      - --no-psqlrc
+      - --set
+      - ON_ERROR_STOP=1
+      - --file
+      - /seed/demo-data.sql
+    volumes:
+      - ./litellm/demo-data.sql:/seed/demo-data.sql:ro
+    depends_on:
+      litellm-dev:
+        condition: service_healthy
+    networks: [internal]
+    restart: "no"
 
   litellm-pgvector:
     profiles: [dev]

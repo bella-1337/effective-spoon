@@ -1,0 +1,144 @@
+{
+  "uid": "litellm-admin",
+  "title": "LiteLLM Admin Overview",
+  "tags": [
+    "litellm",
+    "admin",
+    "postgres"
+  ],
+  "timezone": "utc",
+  "refresh": "1m",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PG",
+        "label": "LiteLLM database",
+        "type": "datasource",
+        "query": "postgres",
+        "regex": "/LiteLLM PG/",
+        "current": {
+          "text": "LiteLLM PG (prod)",
+          "value": "litellm-pg"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Users",
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COUNT(*)::float AS \"Users\" FROM \"LiteLLM_UserTable\"", "format": "table"}]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Usable virtual keys",
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COUNT(*)::float AS \"Keys\" FROM \"LiteLLM_VerificationToken\" WHERE COALESCE(blocked, false) = false AND (expires IS NULL OR expires > NOW())", "format": "table"}]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Teams",
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COUNT(*)::float AS \"Teams\" FROM \"LiteLLM_TeamTable\" WHERE blocked = false", "format": "table"}]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Requests",
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COUNT(*)::float AS \"Requests\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")", "format": "table"}]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Provider errors",
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COUNT(*)::float AS \"Errors\" FROM \"LiteLLM_ErrorLogs\" WHERE $__timeFilter(\"startTime\")", "format": "table"}]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Spend",
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(SUM(spend), 0)::float AS \"Spend\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD"}, "overrides": []}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Request and error volume",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 4},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [
+        {"rawSql": "SELECT $__timeGroupAlias(\"startTime\", '1h'), 'requests' AS metric, COUNT(*)::float AS value FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") GROUP BY 1 ORDER BY 1", "format": "time_series"},
+        {"rawSql": "SELECT $__timeGroupAlias(\"startTime\", '1h'), 'errors' AS metric, COUNT(*)::float AS value FROM \"LiteLLM_ErrorLogs\" WHERE $__timeFilter(\"startTime\") GROUP BY 1 ORDER BY 1", "format": "time_series"}
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Spend by team",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 4},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT $__timeGroupAlias(logs.\"startTime\", '1h'), COALESCE(teams.team_alias, logs.team_id, 'unassigned') AS metric, SUM(logs.spend)::float AS value FROM \"LiteLLM_SpendLogs\" logs LEFT JOIN \"LiteLLM_TeamTable\" teams ON teams.team_id = logs.team_id WHERE $__timeFilter(logs.\"startTime\") GROUP BY 1, 2 ORDER BY 1", "format": "time_series"}],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD", "custom": {"stacking": {"mode": "normal"}}}, "overrides": []}
+    },
+    {
+      "id": 9,
+      "type": "barchart",
+      "title": "Spend by user (top 15)",
+      "gridPos": {"h": 9, "w": 8, "x": 0, "y": 13},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(users.user_alias, users.user_id, keys.user_id, 'unassigned') AS metric, SUM(logs.spend)::float AS value FROM \"LiteLLM_SpendLogs\" logs LEFT JOIN \"LiteLLM_VerificationToken\" keys ON keys.token = logs.api_key LEFT JOIN \"LiteLLM_UserTable\" users ON users.user_id = keys.user_id WHERE $__timeFilter(logs.\"startTime\") GROUP BY 1 ORDER BY 2 DESC LIMIT 15", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD"}, "overrides": []}
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Virtual key budget and status",
+      "gridPos": {"h": 9, "w": 8, "x": 8, "y": 13},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(key_alias, key_name, 'unnamed') AS \"Key\", COALESCE(user_id, 'unassigned') AS \"Owner\", COALESCE(team_id, 'none') AS \"Team\", spend AS \"Window spend\", total_spend AS \"Total spend\", max_budget AS \"Budget\", expires AS \"Expires\", COALESCE(blocked, false) AS \"Blocked\" FROM \"LiteLLM_VerificationToken\" ORDER BY COALESCE(blocked, false) DESC, spend DESC LIMIT 100", "format": "table"}]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Recent provider errors",
+      "gridPos": {"h": 9, "w": 8, "x": 16, "y": 13},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT \"startTime\" AS \"Time\", model_group AS \"Model group\", litellm_model_name AS \"Provider model\", exception_type AS \"Type\", status_code AS \"Status\" FROM \"LiteLLM_ErrorLogs\" WHERE $__timeFilter(\"startTime\") ORDER BY \"startTime\" DESC LIMIT 100", "format": "table"}]
+    },
+    {
+      "id": 12,
+      "type": "table",
+      "title": "Users and budgets",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 22},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(user_alias, user_id) AS \"User\", user_role AS \"Role\", COALESCE(team_id, 'none') AS \"Default team\", spend AS \"Spend\", max_budget AS \"Budget\", budget_reset_at AS \"Budget reset\", created_at AS \"Created\" FROM \"LiteLLM_UserTable\" ORDER BY spend DESC LIMIT 100", "format": "table"}]
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "Recent administrative changes",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 22},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT updated_at AS \"Time\", changed_by AS \"Actor\", action AS \"Action\", table_name AS \"Object type\", object_id AS \"Object\" FROM \"LiteLLM_AuditLog\" WHERE $__timeFilter(updated_at) ORDER BY updated_at DESC LIMIT 100", "format": "table"}]
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

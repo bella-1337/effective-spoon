@@ -2,7 +2,8 @@
 
 A Docker Compose stack for running separate LiteLLM production and development
 proxies behind Traefik, with PostgreSQL, Presidio, SearXNG, Xberg MCP,
-Prometheus, Grafana, Loki, Grafana Alloy, and host/container exporters.
+Langfuse, Prometheus, Grafana, Loki, Grafana Alloy, and host/container
+exporters.
 
 The `prod` and `dev` names below describe LiteLLM runtime profiles. The bundled
 `mkcert` TLS setup is intended only for a private workstation or trusted local
@@ -26,6 +27,8 @@ LITELLM_PROD_HOST=llm.example.test
 LITELLM_DEV_HOST=llm-dev.example.test
 GRAFANA_HOST=grafana.example.test
 SEARXNG_HOST=search.example.test
+LANGFUSE_WEB_HOST=langfuse.example.test
+LANGFUSE_S3_HOST=langfuse-s3.example.test
 
 PG_USER=litellm
 PG_PASSWORD=<strong-random-password>
@@ -35,9 +38,22 @@ LITELLM_MASTER_KEY=sk-<strong-random-value>
 OPENAI_API_KEY=<provider-api-key>
 GRAFANA_ADMIN_PASSWORD=<strong-random-password>
 SEARXNG_SECRET=<strong-random-secret>
+LANGFUSE_POSTGRES_PASSWORD=<strong-url-safe-random-password>
+LANGFUSE_CLICKHOUSE_PASSWORD=<strong-random-password>
+LANGFUSE_REDIS_AUTH=<strong-random-password>
+LANGFUSE_MINIO_PASSWORD=<strong-random-password>
+LANGFUSE_NEXTAUTH_SECRET=<strong-random-secret>
+LANGFUSE_SALT=<strong-random-salt>
+LANGFUSE_ENCRYPTION_KEY=<64-character-hex-key>
+LANGFUSE_PUBLIC_KEY=pk-lf-<strong-random-value>
+LANGFUSE_SECRET_KEY=sk-lf-<strong-random-value>
+LANGFUSE_USER_ID_SALT=<strong-random-secret>
+LANGFUSE_INIT_USER_EMAIL=<admin-email>
+LANGFUSE_INIT_USER_NAME=<admin-name>
+LANGFUSE_INIT_USER_PASSWORD=<strong-random-password>
 ```
 
-All twelve values are required:
+All values are required:
 
 | Variable | Purpose |
 | --- | --- |
@@ -45,6 +61,8 @@ All twelve values are required:
 | `LITELLM_DEV_HOST` | Traefik hostname for the development-profile proxy |
 | `GRAFANA_HOST` | Traefik hostname for Grafana |
 | `SEARXNG_HOST` | Public base hostname advertised by SearXNG |
+| `LANGFUSE_WEB_HOST` | Traefik hostname for the Langfuse UI and API |
+| `LANGFUSE_S3_HOST` | Traefik hostname for Langfuse's signed media uploads |
 | `PG_USER` | PostgreSQL/LiteLLM database user |
 | `PG_PASSWORD` | PostgreSQL password |
 | `PG_VECTOR_PASSWORD` | Password for the isolated pgvector database |
@@ -53,17 +71,37 @@ All twelve values are required:
 | `OPENAI_API_KEY` | Provider credential used by the configured models |
 | `GRAFANA_ADMIN_PASSWORD` | Initial Grafana administrator password |
 | `SEARXNG_SECRET` | Secret used to sign SearXNG data |
+| `LANGFUSE_POSTGRES_PASSWORD` | Password for Langfuse's isolated PostgreSQL database |
+| `LANGFUSE_CLICKHOUSE_PASSWORD` | Password for Langfuse trace storage |
+| `LANGFUSE_REDIS_AUTH` | Password for Langfuse's internal queue |
+| `LANGFUSE_MINIO_PASSWORD` | Password for Langfuse event and media object storage |
+| `LANGFUSE_NEXTAUTH_SECRET` | Secret used to protect Langfuse web sessions |
+| `LANGFUSE_SALT` | Salt used by Langfuse for encrypted credentials |
+| `LANGFUSE_ENCRYPTION_KEY` | 32-byte hex key used by Langfuse encryption |
+| `LANGFUSE_PUBLIC_KEY` | Pre-provisioned LiteLLM project public key |
+| `LANGFUSE_SECRET_KEY` | Pre-provisioned LiteLLM project secret key |
+| `LANGFUSE_USER_ID_SALT` | HMAC salt used to pseudonymize LiteLLM principals in Langfuse |
+| `LANGFUSE_INIT_USER_EMAIL` | Initial Langfuse administrator email |
+| `LANGFUSE_INIT_USER_NAME` | Initial Langfuse administrator display name |
+| `LANGFUSE_INIT_USER_PASSWORD` | Initial Langfuse administrator password |
 
 Use literal values in `.env`; Compose does **not** execute commands such as
 `$(openssl rand ...)`. Generate values separately, then paste their output:
 
 ```sh
-# Both PostgreSQL passwords are embedded in DATABASE_URL values, so they must
+# PostgreSQL passwords are embedded in DATABASE_URL values, so they must
 # not contain URL-reserved characters such as @, :, /, ?, #, [, or ].
 openssl rand -hex 32
 
 # Suitable for the other secrets.
 openssl rand -base64 32
+
+# Required format for LANGFUSE_ENCRYPTION_KEY.
+openssl rand -hex 32
+
+# Pre-provisioned Langfuse project keys.
+printf 'pk-lf-%s\n' "$(openssl rand -hex 16)"
+printf 'sk-lf-%s\n' "$(openssl rand -hex 16)"
 ```
 
 Do not commit `.env`, provider keys, database passwords, or TLS private keys.
@@ -192,7 +230,8 @@ mkdir -p traefik/certs
 mkcert \
   -cert-file traefik/certs/litellm-stack.pem \
   -key-file traefik/certs/litellm-stack-key.pem \
-  llm.example.test llm-dev.example.test grafana.example.test search.example.test
+  llm.example.test llm-dev.example.test grafana.example.test search.example.test \
+  langfuse.example.test langfuse-s3.example.test
 ```
 
 The filenames must remain exactly:
@@ -200,7 +239,7 @@ The filenames must remain exactly:
 - `traefik/certs/litellm-stack.pem`
 - `traefik/certs/litellm-stack-key.pem`
 
-If `.env` uses different hostnames, substitute all four names in the final
+If `.env` uses different hostnames, substitute all six names in the final
 command. Confirm that the certificate covers them:
 
 ```sh
@@ -220,7 +259,7 @@ key-management procedures.
 For a stack running on this machine, add one line to `/etc/hosts`:
 
 ```text
-127.0.0.1 llm.example.test llm-dev.example.test grafana.example.test search.example.test
+127.0.0.1 llm.example.test llm-dev.example.test grafana.example.test search.example.test langfuse.example.test langfuse-s3.example.test
 ```
 
 On Windows, edit
@@ -269,6 +308,7 @@ Validate both Compose profiles without starting containers:
 ```sh
 docker compose --profile prod config --quiet
 docker compose --profile dev config --quiet
+docker compose --profile prod --profile demo config --quiet
 ```
 
 To inspect the fully interpolated model, use `docker compose config` carefully:
@@ -293,9 +333,16 @@ Both proxies can be run together when needed:
 docker compose --profile prod --profile dev up -d
 ```
 
+Synthetic production dashboard data is opt-in. To seed it explicitly, activate
+the `demo` profile together with production:
+
+```sh
+docker compose --profile prod --profile demo up -d
+```
+
 The production and development proxies use separate databases and config files,
-while PostgreSQL, Traefik, Grafana, Prometheus, SearXNG, Presidio, and exporters
-are shared.
+while PostgreSQL, Traefik, Langfuse, Grafana, Prometheus, SearXNG, Presidio,
+and exporters are shared.
 
 ## 8. Verify the stack
 
@@ -312,6 +359,8 @@ HTTPS routes (substitute your configured hosts):
 ```sh
 curl --fail --show-error --silent https://llm.example.test/health/liveliness
 curl --fail --show-error --silent https://grafana.example.test/api/health
+curl --fail --show-error --silent \
+  'https://langfuse.example.test/api/public/health?failIfDatabaseUnavailable=true'
 curl --fail --show-error --silent --output /dev/null https://search.example.test/
 ```
 
@@ -328,7 +377,47 @@ Do not use `curl -k` as a permanent workaround; it disables certificate
 verification. Open `https://grafana.example.test` to verify provisioning and
 sign in with the Grafana admin password from `.env`.
 
-## 9. View container logs in Grafana
+## 9. Use the hybrid logging pipeline
+
+LiteLLM requests are traced to Langfuse through LiteLLM's OpenTelemetry v2
+`langfuse_otel` integration. Open `https://langfuse.example.test`, sign in with
+the initial administrator account, and select the pre-provisioned **LiteLLM**
+project. Traces include model, provider, token, cost, timing, and error metadata.
+Prompt and response content is deliberately excluded by both
+`turn_off_message_logging: true` and
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=no_content`.
+
+Langfuse is an LLM tracing platform, not a general Docker log collector. Alloy
+therefore remains in the stack and sends stdout/stderr from LiteLLM and every
+other Compose service to Loki. This hybrid split preserves the existing
+infrastructure and application log coverage while adding structured LiteLLM
+traces. Do not enable the legacy `langfuse` callback alongside
+`langfuse_otel`, because doing so duplicates traces.
+
+The callback is global in both LiteLLM profiles, so requests made by every
+authenticated LiteLLM user or virtual key are traced to the administrator
+project. The trusted pre-call hook replaces any caller-supplied `trace_user_id`
+with a stable HMAC pseudonym derived from the authenticated LiteLLM user ID (or
+the authenticated key identity when no user owns the key). It also strips
+caller-supplied `langfuse_*` headers and pseudonymizes a supplied `user` field.
+The OTel v2 baggage allowlists are empty, so raw user IDs, key identities, and
+client IP metadata are not copied to child spans, and FastAPI server spans are
+excluded to prevent request URLs, query strings, user agents, or peer IPs from
+reaching Langfuse. Team ID and alias remain on administrator-only generation
+traces for team analytics. Rotate
+`LANGFUSE_USER_ID_SALT` only when intentionally breaking historical user
+correlation.
+
+Per-LiteLLM-user Langfuse UI access is **not available in this OSS deployment**.
+Langfuse does not treat `trace_user_id` as an authorization boundary, so a
+project viewer can remove a user filter and see every trace in that project.
+LiteLLM and Langfuse accounts are not synchronized, and project-level membership
+is not available on the installed plan. Supported automated provisioning through
+Langfuse organization/SCIM APIs requires Enterprise. Keep the shared Langfuse
+project restricted to administrators and operators; do not present a saved user
+filter as access isolation.
+
+### View container logs in Grafana
 
 Grafana Alloy sends container standard output and standard error to Loki, so raw
 container logs are now available in Grafana. To view them:
@@ -353,9 +442,41 @@ Append a line filter when useful, for example
 currently running profile and services; use the label browser rather than
 assuming that every example value is present.
 
-Use each Grafana data source for its intended telemetry:
+Grafana provisions four dashboards in the **LiteLLM** folder:
+
+- **LiteLLM Stack (dev/prod)** for request, latency, failure, spend, deployment,
+  and guardrail metrics.
+- **LiteLLM Cost Attribution** for model, key, token, and request-level cost.
+- **LiteLLM Admin Overview** for users, usable keys, teams, budgets, spend by
+  user/team, provider errors, and audit changes. Its database selector switches
+  between production and development.
+- **LiteLLM Team Costing** for per-team spend, requests, tokens, models, member
+  attribution, and expensive requests. Select any current team; new teams appear
+  automatically.
+
+The development profile automatically seeds two persistent demonstration teams
+and four users after its database schema is ready. Production seeds the same
+data only when the explicit `demo` profile is enabled:
+
+- **Demo Team Atlas**: Demo Alice and Demo Bob
+- **Demo Team Orion**: Demo Carol and Demo Dave
+
+The seed also adds blocked, non-authenticating placeholder key records and
+twelve content-free spend rows so the admin and team dashboards render useful
+test data without exposing a usable credential. The seed is idempotent.
+Development refreshes it when that profile starts; production refreshes it only
+when the `demo` profile is explicitly started. Existing seeded rows remain in
+the persistent database until they are intentionally removed or expire.
+
+Grafana sign-up and anonymous access remain disabled. The initial Grafana
+administrator can grant narrowly scoped viewer access later, but the admin
+dashboard should remain restricted because it exposes operational identities,
+budgets, key aliases, and audit activity.
+
+Use each observability store for its intended telemetry:
 
 - **Loki** contains raw container log lines collected by Grafana Alloy.
+- **Langfuse** contains content-redacted LiteLLM request traces.
 - **Prometheus** contains time-series service and infrastructure metrics.
 - **LiteLLM PG (prod)** and **LiteLLM PG (dev)** query structured LiteLLM
   database telemetry, such as spend records; they are not log stores.
@@ -661,6 +782,9 @@ development hostname after policy changes.
 
 - LiteLLM message logging is disabled while non-content spend metadata remains
   available for accountability and operations.
+- Langfuse receives LiteLLM OTel traces with prompt and response content
+  disabled. Custom request metadata can still contain sensitive values and must
+  be allowlisted or scrubbed by clients.
 - Prompt and response bodies are explicitly excluded from spend logs.
 - LiteLLM spend metadata is retained for 180 days, then deleted by a daily
   cleanup job. This duration supports the six-month high-risk deployer logging
@@ -673,6 +797,10 @@ development hostname after policy changes.
 - Traefik omits `ClientHost` from access logs to avoid persisting client IP
   addresses in Loki.
 - LiteLLM audit logging is enabled for supported administrative changes.
+- Langfuse trace metadata is stored in its dedicated PostgreSQL, ClickHouse,
+  Redis, and MinIO volumes. Define and operate an explicit Langfuse retention
+  and backup policy before production use; the database-only backup scripts in
+  this repository do not constitute a complete Langfuse backup.
 
 These periods must be recorded in the deployment's retention schedule and
 reviewed against its documented purposes. Restrict proxy-admin access because
@@ -688,12 +816,13 @@ full, signed Git commit. Renovate or manually review upstream release notes,
 update the matching digest or source commit, and re-run the complete validation
 before deploying an update.
 
-External routes use TLS through Traefik. The LiteLLM containers trust forwarded
-headers because they are not published directly and only Traefik is expected to
-reach them on the edge network. Internal Compose traffic, including PostgreSQL,
-Loki, Presidio, and SearXNG traffic, is not encrypted. Treat the isolated Docker
-networks as a compensating control for local use; enable authenticated internal
-TLS before using an untrusted or multi-host network.
+External routes use TLS through Traefik. The LiteLLM and Langfuse containers
+trust forwarded headers because they are not published directly and only
+Traefik is expected to reach them on the edge network. Internal Compose traffic,
+including PostgreSQL, ClickHouse, Redis, MinIO, Loki, Presidio, and SearXNG
+traffic, is not encrypted. Treat the isolated Docker networks as a compensating
+control for local use; enable authenticated internal TLS before using an
+untrusted or multi-host network.
 
 ### Required deployment decisions outside this repository
 

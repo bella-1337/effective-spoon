@@ -17,6 +17,7 @@ MODULES_DIR="$LITELLM_DIR/modules"
 SEARCH_MODULE="$MODULES_DIR/search.yaml"
 GUARDRAILS_MODULE="$MODULES_DIR/guardrails/presidio.yaml"
 POLICIES_MODULE="$MODULES_DIR/policies/eu-data-protection.yaml"
+LANGFUSE_USER_MODULE="$MODULES_DIR/langfuse_user_attribution.py"
 PROD_CONFIG="$LITELLM_DIR/config.prod.yaml"
 DEV_CONFIG="$LITELLM_DIR/config.dev.yaml"
 
@@ -60,8 +61,8 @@ Checks performed (grouped):
       included by both profiles
     - Vector-store registry is development-only and uses env-sourced
       credentials, never literal secrets
-    - Privacy and retention settings match the documented values in both
-      profiles
+    - Privacy, retention, content-redacted Langfuse OTel settings, and trusted
+      pseudonymous attribution match the documented values in both profiles
     - Development and production services, databases, hostnames, and model
       lists remain isolated in docker-compose.yml
 
@@ -275,6 +276,218 @@ check_image_identifiers() {
   printf '%s' "$output"
 }
 
+check_langfuse_attribution() {
+  local container_name="litellm-upgrade-check-$$-$RANDOM"
+  local status
+
+  RUNNING_CONTAINERS+=("$container_name")
+  docker run --rm -i \
+    --name "$container_name" \
+    --network none \
+    --read-only \
+    --cap-drop ALL \
+    --security-opt no-new-privileges:true \
+    --pids-limit 256 \
+    --memory 512m \
+    --tmpfs /tmp:mode=1777 \
+    --env LANGFUSE_USER_ID_SALT=upgrade-check-placeholder \
+    --env LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS= \
+    --env LITELLM_OTEL_BAGGAGE_METADATA_KEYS= \
+    --env LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS= \
+    --env 'OTEL_PYTHON_FASTAPI_EXCLUDED_URLS=.*' \
+    --volume "$LANGFUSE_USER_MODULE:/upgrade-check/langfuse_user_attribution.py:ro" \
+    --entrypoint python \
+    "$CANDIDATE_IMAGE" - >/dev/null 2>&1 <<'PY'
+import asyncio
+import importlib.util
+from datetime import datetime
+from types import SimpleNamespace
+
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.util.http import get_excluded_urls
+
+from litellm.integrations.otel.logger import build_otel_v2_logger
+from litellm.integrations.otel.model.config import OpenTelemetryV2Config
+from litellm.litellm_core_utils.litellm_logging import create_dummy_standard_logging_payload
+from litellm.integrations.prometheus import PrometheusLogger
+
+spec = importlib.util.spec_from_file_location(
+    "langfuse_user_attribution",
+    "/upgrade-check/langfuse_user_attribution.py",
+)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+prometheus_logger = PrometheusLogger()
+exporter = InMemorySpanExporter()
+provider = TracerProvider()
+provider.add_span_processor(SimpleSpanProcessor(exporter))
+otel_logger = build_otel_v2_logger(
+    OpenTelemetryV2Config(
+        exporters=[],
+        mapper_names=["genai", "langfuse"],
+        baggage_promoted_keys=[],
+        baggage_metadata_keys=[],
+        baggage_team_metadata_keys=[],
+        capture_message_content="no_content",
+    ),
+    callback_name="langfuse_otel",
+    tracer_provider=provider,
+)
+auth = SimpleNamespace(
+    user_id="raw-user@example.test",
+    api_key="raw-key-hash",
+    key_alias="raw-key-alias",
+    org_id="raw-org",
+    end_user_id="raw-end-user",
+    team_id="raw-team",
+    team_alias="Raw Team",
+    team_metadata={"owner": "raw-user@example.test"},
+)
+
+async def apply_hook(data, call_type):
+    return await module.proxy_handler_instance.async_pre_call_hook(
+        auth,
+        None,
+        data,
+        call_type,
+    )
+
+
+def export_v2_span(call_id, result, call_type):
+    request = dict(result)
+    request["litellm_call_id"] = call_id
+    request["model"] = "upgrade-check"
+    otel_logger.seed_request_identity(
+        auth,
+        model="upgrade-check",
+        request_metadata=result.get("litellm_metadata") or result.get("metadata"),
+    )
+    asyncio.run(otel_logger.async_pre_call_hook(auth, None, request, call_type))
+
+    payload = create_dummy_standard_logging_payload()
+    payload["litellm_call_id"] = call_id
+    payload["model"] = "upgrade-check"
+    payload["metadata"].update(
+        {
+            "user_api_key_user_id": "raw-user@example.test",
+            "user_api_key_user_email": "raw-user@example.test",
+            "user_api_key_alias": "raw-key-alias",
+            "user_api_key_hash": "raw-key-hash",
+            "user_api_key_team_id": "raw-team",
+            "user_api_key_team_alias": "Raw Team",
+            "requester_ip_address": "192.0.2.1",
+        }
+    )
+    params = {
+        "metadata": result["metadata"],
+        "proxy_server_request": result["proxy_server_request"],
+    }
+    if "litellm_metadata" in result:
+        params["litellm_metadata"] = result["litellm_metadata"]
+    kwargs = {
+        "litellm_call_id": call_id,
+        "call_type": call_type,
+        "model": "upgrade-check",
+        "api_call_start_time": datetime.now(),
+        "standard_logging_object": payload,
+        "litellm_params": params,
+        "messages": [],
+    }
+    now = datetime.now()
+    asyncio.run(otel_logger.async_log_success_event(kwargs, {}, now, now))
+    asyncio.run(prometheus_logger.async_log_success_event(kwargs, {}, now, now))
+    assert payload["metadata"]["user_api_key_team_id"] == "raw-team"
+
+
+headers = {
+    "langfuse_trace_user_id": "spoofed-user",
+    "Langfuse_existing_trace_id": "spoofed-trace",
+    "x-request-id": "preserved",
+}
+result = asyncio.run(
+    apply_hook(
+        {
+            "metadata": {"trace_user_id": "caller-metadata"},
+            "user": "caller-user",
+            "proxy_server_request": {"headers": headers},
+        },
+        "completion",
+    )
+)
+assert result["metadata"]["trace_user_id"].startswith("litellm-user-")
+assert result["metadata"]["trace_user_id"] not in {"caller-metadata", "spoofed-user"}
+assert result["proxy_server_request"]["headers"] == {"x-request-id": "preserved"}
+assert result["user"].startswith("litellm-user-")
+export_v2_span("upgrade-check-completion", result, "completion")
+
+result = asyncio.run(
+    apply_hook(
+        {
+            "metadata": {
+                "trace_user_id": "provider-metadata-spoof",
+                "provider-field": "preserved",
+            },
+            "litellm_metadata": {
+                "trace_user_id": "litellm-metadata-spoof",
+                "logging-field": "preserved",
+            },
+            "user": "caller-user",
+            "proxy_server_request": {"headers": headers},
+        },
+        "responses",
+    )
+)
+assert result["litellm_metadata"]["trace_user_id"].startswith("litellm-user-")
+assert result["litellm_metadata"]["trace_user_id"] != "litellm-metadata-spoof"
+assert result["litellm_metadata"]["logging-field"] == "preserved"
+assert "trace_user_id" not in result["metadata"]
+assert result["metadata"]["provider-field"] == "preserved"
+assert result["proxy_server_request"]["headers"] == {"x-request-id": "preserved"}
+assert result["user"].startswith("litellm-user-")
+export_v2_span("upgrade-check-responses", result, "responses")
+
+provider.force_flush()
+spans = [
+    dict(span.attributes)
+    for span in exporter.get_finished_spans()
+    if span.attributes.get("langfuse.observation.type") == "generation"
+]
+assert len(spans) == 2
+for attributes in spans:
+    assert attributes["user.id"].startswith("litellm-user-")
+    assert attributes["user.id"] not in {
+        "raw-user@example.test",
+        "raw-end-user",
+        "caller-user",
+        "spoofed-user",
+    }
+    for forbidden_key in (
+        "litellm.api_key.hash",
+        "litellm.metadata.requester_ip_address",
+        "litellm.metadata.user_api_key_alias",
+        "litellm.metadata.user_api_key_end_user_id",
+        "litellm.metadata.user_api_key_org_id",
+        "litellm.metadata.user_api_key_user_id",
+        "litellm.team.alias",
+        "litellm.team.id",
+    ):
+        assert forbidden_key not in attributes
+    serialized = repr(attributes)
+    assert "raw-user@example.test" not in serialized
+    assert "raw-key-hash" not in serialized
+    assert "raw-key-alias" not in serialized
+    assert "192.0.2.1" not in serialized
+
+excluded_urls = get_excluded_urls("FASTAPI")
+assert excluded_urls.url_disabled("https://llm.example.test/key/info?key=raw-secret")
+PY
+  status=$?
+  RUNNING_CONTAINERS=("${RUNNING_CONTAINERS[@]/$container_name/}")
+  return "$status"
+}
+
 # Matches $2 as a whole identifier inside $1, not merely as a substring, so
 # e.g. "presidio-pii" never matches an unrelated "presidio-pii-renamed". The
 # identifiers this script compares only ever contain [A-Za-z0-9_.-], so they
@@ -338,7 +551,7 @@ command -v grep >/dev/null 2>&1 || abort "grep is required"
 command -v sed >/dev/null 2>&1 || abort "sed is required"
 
 for required_file in "$COMPOSE_FILE" "$PROD_CONFIG" "$DEV_CONFIG" \
-  "$SEARCH_MODULE" "$GUARDRAILS_MODULE" "$POLICIES_MODULE"; do
+  "$SEARCH_MODULE" "$GUARDRAILS_MODULE" "$POLICIES_MODULE" "$LANGFUSE_USER_MODULE"; do
   [[ -f "$required_file" ]] ||
     abort "required repository file is missing: $required_file"
 done
@@ -350,10 +563,10 @@ trap 'exit 129' HUP
 
 cd "$ROOT" || abort "could not change into repository root: $ROOT"
 
-# Static syntax check only: never starts, stops, or prints the live stack's
-# resolved configuration, so no secret from .env is exposed.
-docker compose config --quiet ||
-  abort "docker-compose.yml (with .env) does not pass static validation"
+# Static syntax check only. Use the committed placeholder contract so validation
+# neither depends on nor reads a developer's real .env credentials.
+docker compose --env-file "$ROOT/.env.example" config --quiet ||
+  abort "docker-compose.yml does not pass static validation with .env.example"
 
 info "== Candidate image =="
 info "$CANDIDATE_IMAGE"
@@ -458,12 +671,28 @@ for cfg in "$PROD_CONFIG" "$DEV_CONFIG"; do
   grep -Eq '^\s*maximum_health_check_retention_period:\s*7d\s*$' "$cfg" || retention_ok=0
   grep -Eq '^\s*turn_off_message_logging:\s*true\s*$' "$cfg" || retention_ok=0
   grep -Eq '^\s*store_audit_logs:\s*true\s*$' "$cfg" || retention_ok=0
+  grep -Eq '^\s*callbacks:\s*$' "$cfg" || retention_ok=0
+  grep -Eq '^\s*-\s*modules\.langfuse_user_attribution\.proxy_handler_instance\s*$' "$cfg" || retention_ok=0
+  grep -Eq '^\s*-\s*langfuse_otel\s*$' "$cfg" || retention_ok=0
 done
+for service in litellm-prod litellm-dev; do
+  service_block="$(compose_service_block "$service")"
+  grep -Fq 'LITELLM_OTEL_V2: "true"' <<<"$service_block" || retention_ok=0
+  grep -Fq 'LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""' <<<"$service_block" || retention_ok=0
+  grep -Fq 'LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""' <<<"$service_block" || retention_ok=0
+  grep -Fq 'LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""' <<<"$service_block" || retention_ok=0
+  grep -Fq 'OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: ".*"' <<<"$service_block" || retention_ok=0
+done
+grep -Fq 'metadata.pop("trace_user_id", None)' "$LANGFUSE_USER_MODULE" || retention_ok=0
+grep -Fq 'litellm_metadata["trace_user_id"]' "$LANGFUSE_USER_MODULE" || retention_ok=0
+grep -q 'user_api_key_dict.user_id' "$LANGFUSE_USER_MODULE" || retention_ok=0
+grep -q 'LANGFUSE_USER_ID_SALT' "$LANGFUSE_USER_MODULE" || retention_ok=0
+grep -Fq 'key.lower().startswith("langfuse_")' "$LANGFUSE_USER_MODULE" || retention_ok=0
 if ((retention_ok)); then
-  pass "Privacy and retention settings (spend-log redaction, 180d/7d retention, audit logging) match the documented values in both profiles"
+  pass "Privacy, retention, and authenticated pseudonymous Langfuse attribution settings match both profiles"
 else
-  fail "Privacy and retention settings (spend-log redaction, 180d/7d retention, audit logging) match the documented values in both profiles" \
-    "one or more of disable_spend_logs=false, store_prompts_in_spend_logs=false, maximum_spend_logs_retention_period=180d, maximum_health_check_retention_period=7d, turn_off_message_logging=true, store_audit_logs=true is missing from config.prod.yaml or config.dev.yaml"
+  fail "Privacy, retention, and authenticated pseudonymous Langfuse attribution settings match both profiles" \
+    "required retention settings, content controls, langfuse_otel, or the trusted user-attribution hook are missing"
 fi
 
 # Dev/prod isolation at the Compose and config level
@@ -471,11 +700,13 @@ isolation_ok=1
 prod_block="$(compose_service_block litellm-prod)"
 dev_block="$(compose_service_block litellm-dev)"
 pgvector_block="$(compose_service_block litellm-pgvector)"
+demo_prod_block="$(compose_service_block litellm-demo-data-prod)"
 
-[[ -n "$prod_block" && -n "$dev_block" && -n "$pgvector_block" ]] || isolation_ok=0
+[[ -n "$prod_block" && -n "$dev_block" && -n "$pgvector_block" && -n "$demo_prod_block" ]] || isolation_ok=0
 grep -Eq '^\s*profiles:\s*\[prod\]\s*$' <<<"$prod_block" || isolation_ok=0
 grep -Eq '^\s*profiles:\s*\[dev\]\s*$' <<<"$dev_block" || isolation_ok=0
 grep -Eq '^\s*profiles:\s*\[dev\]\s*$' <<<"$pgvector_block" || isolation_ok=0
+grep -Eq '^\s*profiles:\s*\[demo\]\s*$' <<<"$demo_prod_block" || isolation_ok=0
 grep -q 'litellm_prod' <<<"$prod_block" || isolation_ok=0
 grep -q 'litellm_dev' <<<"$dev_block" || isolation_ok=0
 grep -q 'LITELLM_PROD_HOST' <<<"$prod_block" || isolation_ok=0
@@ -583,10 +814,13 @@ if ((image_available)); then
   identifiers_ok=1
   identifiers_output="$(
     check_image_identifiers \
-      pg_vector presidio searxng \
+      pg_vector presidio searxng langfuse_otel \
       maximum_spend_logs_retention_period maximum_health_check_retention_period \
       store_prompts_in_spend_logs disable_spend_logs \
-      turn_off_message_logging store_audit_logs
+      turn_off_message_logging store_audit_logs LITELLM_OTEL_V2 \
+      LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS LITELLM_OTEL_BAGGAGE_METADATA_KEYS \
+      LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS \
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
   )"
   while IFS=':' read -r identifier count; do
     [[ -n "$identifier" ]] || continue
@@ -597,10 +831,17 @@ if ((image_available)); then
     fi
   done <<<"$identifiers_output"
   if ((identifiers_ok)); then
-    pass "Candidate image's installed package still recognizes the provider and setting identifiers this repository depends on (pg_vector, presidio, searxng, retention/privacy keys)"
+    pass "Candidate image's installed package recognizes the provider, Langfuse OTel, and privacy/retention identifiers this repository depends on"
   else
-    fail "Candidate image's installed package still recognizes the provider and setting identifiers this repository depends on (pg_vector, presidio, searxng, retention/privacy keys)" \
+    fail "Candidate image's installed package recognizes the provider, Langfuse OTel, and privacy/retention identifiers this repository depends on" \
       "one or more identifiers used by litellm/config.*.yaml and litellm/modules/* were not found anywhere in the candidate image's litellm package; it may silently ignore that setting or provider"
+  fi
+
+  if check_langfuse_attribution; then
+    pass "Candidate image preserves trusted pseudonymous Langfuse attribution without exporting raw principal metadata"
+  else
+    fail "Candidate image preserves trusted pseudonymous Langfuse attribution without exporting raw principal metadata" \
+      "the attribution hook did not replace caller identity fields, strip langfuse_* headers and raw principal metadata, or remain compatible with the candidate image's Langfuse OTel exporter"
   fi
 
   # Isolation evidence: each profile's models stayed within its own container
@@ -618,7 +859,8 @@ else
   fail "Candidate image loads litellm/config.prod.yaml without error" "skipped: candidate image is unavailable"
   fail "Candidate image loads litellm/config.dev.yaml without error" "skipped: candidate image is unavailable"
   fail "Candidate image's own output confirms it recognizes the modular search tool and the guardrail/policy modules in both profiles" "skipped: candidate image is unavailable"
-  fail "Candidate image's installed package still recognizes the provider and setting identifiers this repository depends on (pg_vector, presidio, searxng, retention/privacy keys)" "skipped: candidate image is unavailable"
+  fail "Candidate image's installed package recognizes the provider, Langfuse OTel, and privacy/retention identifiers this repository depends on" "skipped: candidate image is unavailable"
+  fail "Candidate image preserves trusted pseudonymous Langfuse attribution without exporting raw principal metadata" "skipped: candidate image is unavailable"
   fail "Production and development candidate-image validations ran in fully isolated containers without leaking one profile's models into the other" "skipped: candidate image is unavailable"
 fi
 

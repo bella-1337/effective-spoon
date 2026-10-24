@@ -7,7 +7,8 @@
 # stack to confirm an upgrade has not regressed Compose/service health,
 # prod/dev auth boundaries and isolation, the development Ollama integration,
 # pgvector storage, Presidio PII masking behavior, SearXNG and Xberg MCP auth
-# boundaries, and the Prometheus/Alloy/Loki/Grafana observability pipeline.
+# boundaries, Langfuse tracing, and the Prometheus/Alloy/Loki/Grafana
+# observability pipeline.
 #
 # Every check either prints PASS/FAIL/SKIP lines and returns 0 (pass), 1
 # (fail), or 2 (skip). A check is only skipped when its documented
@@ -34,14 +35,17 @@ cd "$ROOT"
 : "${GRAFANA_HOST:=grafana.example.test}"
 : "${SEARXNG_HOST:=$(grep -m1 '^SEARXNG_HOST=' .env 2>/dev/null | cut -d= -f2- || true)}"
 : "${SEARXNG_HOST:=search.example.test}"
+: "${LANGFUSE_WEB_HOST:=$(grep -m1 '^LANGFUSE_WEB_HOST=' .env 2>/dev/null | cut -d= -f2- || true)}"
+: "${LANGFUSE_WEB_HOST:=langfuse.example.test}"
 : "${OLLAMA_BASE_URL:=http://localhost:11434}"
 
 PROD_URL="https://$LITELLM_PROD_HOST"
 DEV_URL="https://$LITELLM_DEV_HOST"
 GRAFANA_URL="https://$GRAFANA_HOST"
 SEARXNG_URL="https://$SEARXNG_HOST"
+LANGFUSE_URL="https://$LANGFUSE_WEB_HOST"
 
-ALL_CHECKS="compose-config compose-health network-exposure prod-auth dev-auth isolation dev-ollama-chat dev-ollama-embedding pgvector presidio searxng xberg-mcp observability logs"
+ALL_CHECKS="compose-config compose-health network-exposure prod-auth dev-auth isolation dev-ollama-chat dev-ollama-embedding pgvector presidio searxng xberg-mcp langfuse observability logs"
 SELECTED_CHECKS=""
 SKIPPED_CHECKS=""
 PASS_COUNT=0
@@ -74,6 +78,7 @@ Checks (run in this order unless filtered):
   presidio              Presidio masks PERSON and intentionally leaves ORGANIZATION unmasked
   searxng               SearXNG public page reachable; LiteLLM search tool enforces auth
   xberg-mcp             Xberg tools enforce auth and extract the official Docker guide
+  langfuse              Langfuse web/worker health and LiteLLM OTel wiring
   observability         Grafana, Prometheus, and Loki datasources and scrape targets are healthy
   logs                  Loki has labels for running containers and does not leak a chat probe
 
@@ -287,7 +292,7 @@ check_compose_health() {
   fi
 
   # Shared services expected whenever any profile is running.
-  local shared_services="traefik postgres presidio-analyzer presidio-anonymizer searxng xberg prometheus loki alloy grafana"
+  local shared_services="traefik postgres presidio-analyzer presidio-anonymizer searxng xberg prometheus loki alloy langfuse-postgres langfuse-clickhouse langfuse-minio langfuse-redis langfuse-worker langfuse-web grafana"
   local svc
   for svc in $shared_services; do
     if ! printf '%s' "$ps_json" | jq -e --arg s "$svc" 'select(.Service == $s)' >/dev/null 2>&1; then
@@ -977,6 +982,55 @@ check_xberg_mcp() {
 }
 
 # =========================================================================
+# langfuse: application health and LiteLLM OTel integration
+# =========================================================================
+check_langfuse() {
+  service_running langfuse-web || { log_skip "langfuse: web service is not running"; return 2; }
+  service_running langfuse-worker || { log_fail "langfuse: worker service is not running"; return 1; }
+
+  local ok=0 status
+  status="$(curl_status "$LANGFUSE_URL/api/public/health?failIfDatabaseUnavailable=true")"
+  if [[ "$status" == "200" ]]; then
+    log_pass "langfuse: public health endpoint and PostgreSQL check returned HTTP 200"
+  else
+    log_fail "langfuse: public health endpoint returned HTTP $status (expected 200)"
+    ok=1
+  fi
+
+  if docker compose exec -T langfuse-worker \
+    wget --quiet --spider http://127.0.0.1:3030/api/health >/dev/null 2>&1; then
+    log_pass "langfuse: worker health endpoint is reachable"
+  else
+    log_fail "langfuse: worker health endpoint is not reachable"
+    ok=1
+  fi
+
+  local svc otel_flag capture_mode callback_host
+  for svc in litellm-prod litellm-dev; do
+    service_running "$svc" || continue
+    otel_flag="$(docker compose exec -T "$svc" printenv LITELLM_OTEL_V2 2>/dev/null | tr -d '\r\n')"
+    capture_mode="$(docker compose exec -T "$svc" printenv OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT 2>/dev/null | tr -d '\r\n')"
+    callback_host="$(docker compose exec -T "$svc" printenv LANGFUSE_HOST 2>/dev/null | tr -d '\r\n')"
+    if [[ "$otel_flag" == "true" &&
+          "$capture_mode" == "no_content" &&
+          "$callback_host" == "http://langfuse-web:3000" ]] &&
+      docker compose exec -T "$svc" sh -c '
+        [ -z "$LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS" ] &&
+        [ -z "$LITELLM_OTEL_BAGGAGE_METADATA_KEYS" ] &&
+        [ -z "$LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS" ] &&
+        [ "$OTEL_PYTHON_FASTAPI_EXCLUDED_URLS" = ".*" ]
+      ' >/dev/null 2>&1; then
+      log_pass "langfuse: $svc uses privacy-hardened OTel v2 with message content and server spans disabled"
+    else
+      log_fail "langfuse: $svc OTel environment is not privacy-hardened"
+      ok=1
+    fi
+  done
+
+  return "$ok"
+}
+
+# =========================================================================
 # observability: Grafana, Prometheus, and Loki
 # =========================================================================
 grafana_admin_password() {
@@ -1008,6 +1062,74 @@ check_observability() {
       log_pass "observability: Grafana datasource '$ds' reports healthy"
     else
       log_fail "observability: Grafana datasource '$ds' did not report healthy"
+      ok=1
+    fi
+  done
+
+  local dashboard_uid
+  for dashboard_uid in litellm-stack litellm-cost litellm-admin litellm-team-cost; do
+    if curl_req -u "admin:$admin_password" "$GRAFANA_URL/api/dashboards/uid/$dashboard_uid" |
+      jq -e --arg uid "$dashboard_uid" '.dashboard.uid == $uid' >/dev/null 2>&1; then
+      log_pass "observability: Grafana dashboard '$dashboard_uid' is provisioned"
+    else
+      log_fail "observability: Grafana dashboard '$dashboard_uid' is not provisioned"
+      ok=1
+    fi
+  done
+
+  local service database demo_counts demo_query
+  demo_query="WITH demo_spend AS (
+      SELECT team_id, \"user\" AS user_id, api_key, SUM(spend) AS spend
+      FROM \"LiteLLM_SpendLogs\"
+      WHERE request_id LIKE 'demo-%'
+      GROUP BY team_id, \"user\", api_key
+    )
+    SELECT
+      (SELECT COUNT(*) FROM \"LiteLLM_TeamTable\" WHERE team_id LIKE 'demo-%'),
+      (SELECT COUNT(*) FROM \"LiteLLM_UserTable\" WHERE user_id LIKE 'demo-%'),
+      (SELECT COUNT(*) FROM \"LiteLLM_SpendLogs\" WHERE request_id LIKE 'demo-%'),
+      (SELECT COUNT(*)
+       FROM \"LiteLLM_TeamTable\" team
+       JOIN (SELECT team_id, SUM(spend) AS spend FROM demo_spend GROUP BY team_id) logs
+         USING (team_id)
+       WHERE team.team_id LIKE 'demo-%'
+         AND ROUND(team.spend::numeric, 6) = ROUND(logs.spend::numeric, 6)),
+      (SELECT COUNT(*)
+       FROM \"LiteLLM_UserTable\" demo_user
+       JOIN (SELECT user_id, SUM(spend) AS spend FROM demo_spend GROUP BY user_id) logs
+         USING (user_id)
+       WHERE demo_user.user_id LIKE 'demo-%'
+         AND ROUND(demo_user.spend::numeric, 6) = ROUND(logs.spend::numeric, 6)),
+      (SELECT COUNT(*)
+       FROM \"LiteLLM_VerificationToken\" demo_key
+       JOIN (SELECT api_key, SUM(spend) AS spend FROM demo_spend GROUP BY api_key) logs
+         ON logs.api_key = demo_key.token
+       WHERE demo_key.token LIKE 'demo-token-%'
+         AND ROUND(demo_key.spend::numeric, 6) = ROUND(logs.spend::numeric, 6)
+         AND ROUND(demo_key.total_spend::numeric, 6) = ROUND(logs.spend::numeric, 6));"
+  for service in litellm-prod litellm-dev; do
+    service_running "$service" || continue
+    if [[ "$service" == "litellm-prod" ]]; then
+      database="litellm_prod"
+    else
+      database="litellm_dev"
+    fi
+    demo_counts="$(
+      docker compose exec -T postgres sh -c \
+        'psql --username "$POSTGRES_USER" --dbname "$1" --tuples-only --no-align --command "$2"' \
+        sh "$database" "$demo_query" 2>/dev/null |
+        tr -d '[:space:]'
+    )"
+    if [[ "$demo_counts" == "2|4|12|2|4|4" ]]; then
+      log_pass "observability: $database demo counts and team, user, and key spend counters match"
+    elif [[ "$database" == "litellm_prod" && "$demo_counts" == "0|0|0|0|0|0" ]]; then
+      log_pass "observability: $database has no synthetic demo data (production demo profile is opt-in)"
+    else
+      if [[ "$database" == "litellm_prod" ]]; then
+        log_fail "observability: $database demo data result was '$demo_counts' (expected either complete opt-in data 2|4|12|2|4|4 or no demo data 0|0|0|0|0|0)"
+      else
+        log_fail "observability: $database demo data result was '$demo_counts' (expected 2|4|12|2|4|4)"
+      fi
       ok=1
     fi
   done
@@ -1155,6 +1277,7 @@ for check in $SELECTED_CHECKS; do
     presidio) run_check "$check" check_presidio ;;
     searxng) run_check "$check" check_searxng ;;
     xberg-mcp) run_check "$check" check_xberg_mcp ;;
+    langfuse) run_check "$check" check_langfuse ;;
     observability) run_check "$check" check_observability ;;
     logs) run_check "$check" check_logs ;;
   esac

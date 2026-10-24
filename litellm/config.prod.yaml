@@ -29,6 +29,9 @@ litellm_settings:
   request_timeout: 120
   turn_off_message_logging: true
   store_audit_logs: true
+  callbacks:
+    - modules.langfuse_user_attribution.proxy_handler_instance
+    - langfuse_otel
   success_callback: ["prometheus"]
   failure_callback: ["prometheus"]
 

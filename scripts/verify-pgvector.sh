@@ -3,6 +3,10 @@
 set -eu
 
 store_id="sme-knowledge"
+litellm_prod_host="${LITELLM_PROD_HOST:-$(grep -m1 '^LITELLM_PROD_HOST=' .env 2>/dev/null | cut -d= -f2- || true)}"
+litellm_prod_host="${litellm_prod_host:-llm.example.test}"
+litellm_dev_host="${LITELLM_DEV_HOST:-$(grep -m1 '^LITELLM_DEV_HOST=' .env 2>/dev/null | cut -d= -f2- || true)}"
+litellm_dev_host="${litellm_dev_host:-llm-dev.example.test}"
 
 scalar() {
   docker compose exec -T vector-postgres \
@@ -32,7 +36,7 @@ printf 'PASS: pgvector %s is installed and the knowledge store contains %s vecto
 
 unauthenticated_status="$(
   curl --silent --output /dev/null --write-out '%{http_code}' \
-    --request POST https://llm.example.test/v1/vector_stores \
+    --request POST "https://$litellm_prod_host/v1/vector_stores" \
     --header 'Content-Type: application/json' \
     --data '{"name":"must-not-exist"}'
 )"
@@ -59,7 +63,7 @@ esac
 master_key="$(docker compose exec -T litellm-dev printenv LITELLM_MASTER_KEY | tr -d '\r')"
 registry_response="$(
   curl --silent --show-error --fail \
-    https://llm-dev.example.test/vector_store/list \
+    "https://$litellm_dev_host/vector_store/list" \
     --header "Authorization: Bearer $master_key"
 )"
 printf '%s' "$registry_response" |
@@ -71,7 +75,7 @@ printf 'PASS: LiteLLM lists the managed sme-knowledge pgvector store\n'
 search_response="$(
   curl --silent --show-error --fail \
     --request POST \
-    https://llm-dev.example.test/v1/vector_stores/sme-knowledge/search \
+    "https://$litellm_dev_host/v1/vector_stores/sme-knowledge/search" \
     --header "Authorization: Bearer $master_key" \
     --header 'Content-Type: application/json' \
     --data '{"query":"empty store verification","max_num_results":1}'
@@ -83,7 +87,7 @@ printf 'PASS: LiteLLM searched the managed store through the official connector\
 
 malformed_status="$(
   curl --silent --output /dev/null --write-out '%{http_code}' \
-    --request POST https://llm-dev.example.test/v1/vector_stores \
+    --request POST "https://$litellm_dev_host/v1/vector_stores" \
     --header "Authorization: Bearer $master_key" \
     --header 'Content-Type: application/json' \
     --data '{'

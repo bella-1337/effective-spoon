@@ -1,0 +1,133 @@
+{
+  "uid": "litellm-team-cost",
+  "title": "LiteLLM Team Costing",
+  "tags": [
+    "litellm",
+    "admin",
+    "team",
+    "cost",
+    "postgres"
+  ],
+  "timezone": "utc",
+  "refresh": "1m",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PG",
+        "label": "LiteLLM database",
+        "type": "datasource",
+        "query": "postgres",
+        "regex": "/LiteLLM PG/",
+        "current": {
+          "text": "LiteLLM PG (prod)",
+          "value": "litellm-pg"
+        }
+      },
+      {
+        "name": "team",
+        "label": "Team",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "${DS_PG}"
+        },
+        "query": "SELECT COALESCE(team_alias, team_id) AS __text, team_id AS __value FROM \"LiteLLM_TeamTable\" WHERE blocked = false ORDER BY 1",
+        "rawSql": "SELECT COALESCE(team_alias, team_id) AS __text, team_id AS __value FROM \"LiteLLM_TeamTable\" WHERE blocked = false ORDER BY 1",
+        "refresh": 1,
+        "sort": 1,
+        "current": {
+          "text": "Demo Team Atlas",
+          "value": "demo-team-atlas"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Team spend",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(SUM(spend), 0)::float AS \"Spend\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND team_id = ${team:sqlstring}", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD"}, "overrides": []}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Team requests",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COUNT(*)::float AS \"Requests\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND team_id = ${team:sqlstring}", "format": "table"}]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Average cost / request",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(AVG(spend), 0)::float AS \"Average cost\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND team_id = ${team:sqlstring}", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD"}, "overrides": []}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Total tokens",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(SUM(total_tokens), 0)::float AS \"Tokens\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND team_id = ${team:sqlstring}", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Daily spend by model",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 4},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT $__timeGroupAlias(\"startTime\", '1d'), COALESCE(model_group, model, 'unknown') AS metric, SUM(spend)::float AS value FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND team_id = ${team:sqlstring} GROUP BY 1, 2 ORDER BY 1", "format": "time_series"}],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD", "custom": {"stacking": {"mode": "normal"}}}, "overrides": []}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Daily prompt and completion tokens",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 4},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT $__timeGroupAlias(\"startTime\", '1d'), 'prompt' AS metric, SUM(prompt_tokens)::float AS value FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND team_id = ${team:sqlstring} GROUP BY 1 UNION ALL SELECT $__timeGroupAlias(\"startTime\", '1d'), 'completion' AS metric, SUM(completion_tokens)::float AS value FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND team_id = ${team:sqlstring} GROUP BY 1 ORDER BY 1", "format": "time_series"}],
+      "fieldConfig": {"defaults": {"custom": {"stacking": {"mode": "normal"}}}, "overrides": []}
+    },
+    {
+      "id": 7,
+      "type": "barchart",
+      "title": "Spend by team member",
+      "gridPos": {"h": 9, "w": 8, "x": 0, "y": 13},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(users.user_alias, logs.\"user\", 'unassigned') AS metric, SUM(logs.spend)::float AS value FROM \"LiteLLM_SpendLogs\" logs LEFT JOIN \"LiteLLM_UserTable\" users ON users.user_id = logs.\"user\" WHERE $__timeFilter(logs.\"startTime\") AND logs.team_id = ${team:sqlstring} GROUP BY 1 ORDER BY 2 DESC", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD"}, "overrides": []}
+    },
+    {
+      "id": 8,
+      "type": "piechart",
+      "title": "Spend share by model",
+      "gridPos": {"h": 9, "w": 8, "x": 8, "y": 13},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(model_group, model, 'unknown') AS metric, SUM(spend)::float AS value FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND team_id = ${team:sqlstring} GROUP BY 1 ORDER BY 2 DESC", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD"}, "overrides": []}
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Most expensive team requests",
+      "gridPos": {"h": 9, "w": 8, "x": 16, "y": 13},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT \"startTime\" AS \"Time\", request_id AS \"Request\", COALESCE(model_group, model) AS \"Model\", COALESCE(\"user\", 'unassigned') AS \"User\", spend AS \"Spend\", total_tokens AS \"Tokens\", status AS \"Status\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND team_id = ${team:sqlstring} ORDER BY spend DESC LIMIT 50", "format": "table"}],
+      "fieldConfig": {"defaults": {}, "overrides": [{"matcher": {"id": "byName", "options": "Spend"}, "properties": [{"id": "unit", "value": "currencyUSD"}]}]}
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}
