@@ -140,6 +140,19 @@ def static_checks(report: Reporter) -> None:
         )
     )
     (report.pass_ if vector_ok else report.fail_)("Vector-store registry is declared for development only and uses environment-sourced credentials")
+    semantic_cache_ok = all(
+        re.search(pattern, dev_text, re.M) is not None
+        for pattern in (
+            r"^\s*type:\s*qdrant-semantic\s*$",
+            r"^\s*mode:\s*default_off\s*$",
+            r"^\s*semantic_cache_scope:\s*end_user\s*$",
+            r"^\s*qdrant_api_base:\s*os\.environ/QDRANT_API_BASE\s*$",
+            r"^\s*qdrant_api_key:\s*os\.environ/QDRANT_API_KEY\s*$",
+        )
+    ) and re.search(r"^\s*type:\s*qdrant-semantic\s*$", prod_text, re.M) is None
+    (report.pass_ if semantic_cache_ok else report.fail_)(
+        "Qdrant semantic caching is development-only, opt-in, end-user scoped, and uses environment-sourced credentials"
+    )
     required_settings = (
         r"^\s*disable_spend_logs:\s*false\s*$", r"^\s*store_prompts_in_spend_logs:\s*false\s*$",
         r"^\s*maximum_spend_logs_retention_period:\s*180d\s*$",
@@ -250,6 +263,42 @@ def start_validation_mcp_server(network: str) -> str:
         time.sleep(1)
     run(["docker", "rm", "-f", name], capture=True, check=False)
     fail("isolated Xberg MCP validator did not become ready", 2)
+
+
+def start_validation_qdrant(network: str) -> str:
+    """Start the digest-pinned Qdrant dependency on the isolated network."""
+    qdrant_image = next(
+        (
+            line.split(maxsplit=1)[1]
+            for line in service_block("qdrant").splitlines()
+            if line.strip().startswith("image:")
+        ),
+        "",
+    )
+    if not re.search(r"@sha256:[0-9a-f]{64}$", qdrant_image):
+        fail("qdrant must use a digest-pinned image before candidate validation", 2)
+    name = f"litellm-upgrade-check-qdrant-{os.getpid()}-{time.time_ns()}"
+    command = [
+        "docker", "run", "-d", "--name", name, "--network", network,
+        "--network-alias", "qdrant", "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges:true", "--pids-limit", "256",
+        "--memory", "512m", "--tmpfs", "/qdrant/storage:rw,noexec,nosuid,size=256m",
+        "-e", "QDRANT__SERVICE__API_KEY=upgrade-check-placeholder",
+        "-e", "QDRANT__TELEMETRY_DISABLED=true", qdrant_image,
+    ]
+    if run(command, check=False).returncode:
+        fail("could not start the isolated Qdrant cache validator", 2)
+    for _ in range(20):
+        result = run(
+            ["docker", "exec", name, "bash", "-ec", ": >/dev/tcp/127.0.0.1/6333"],
+            capture=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return name
+        time.sleep(1)
+    run(["docker", "rm", "-f", name], capture=True, check=False)
+    fail("isolated Qdrant cache validator did not become ready", 2)
 
 
 def identifier_counts(image: str, identifiers: list[str]) -> dict[str, int]:
@@ -581,6 +630,7 @@ def main() -> None:
         if run(["docker", "network", "create", "--internal", network], check=False).returncode:
             fail("could not create the isolated candidate-validation network", 2)
         xberg_container = ""
+        qdrant_container = ""
         previous_handlers = {
             signal.SIGINT: signal.getsignal(signal.SIGINT),
             signal.SIGTERM: signal.getsignal(signal.SIGTERM),
@@ -594,13 +644,18 @@ def main() -> None:
             signal.signal(sig, terminate)
         try:
             xberg_container = start_validation_mcp_server(network)
+            qdrant_container = start_validation_qdrant(network)
             prod_code, prod_output = docker_run_validation(candidate, PROD, network, [])
             dev_code, dev_output = docker_run_validation(candidate, DEV, network,
                                                           ["-e", "PG_VECTOR_API_BASE=http://upgrade-check-placeholder:8000",
-                                                           "-e", "PG_VECTOR_API_KEY=upgrade-check-placeholder"])
+                                                           "-e", "PG_VECTOR_API_KEY=upgrade-check-placeholder",
+                                                           "-e", "QDRANT_API_BASE=http://qdrant:6333",
+                                                           "-e", "QDRANT_API_KEY=upgrade-check-placeholder"])
         finally:
             if xberg_container:
                 run(["docker", "rm", "-f", xberg_container], check=False, capture=True)
+            if qdrant_container:
+                run(["docker", "rm", "-f", qdrant_container], check=False, capture=True)
             run(["docker", "network", "rm", network], check=False, capture=True)
             for sig, handler in previous_handlers.items():
                 signal.signal(sig, handler)
@@ -642,7 +697,8 @@ def main() -> None:
                 f"expected 'Search Tools:' with '{search_name}' and 'Policy Engine' with policy "
                 f"'{policy_name}' and guardrail '{guard_name}' in the validator output for both configs",
             )
-        identifiers = ["pg_vector", "presidio", "searxng", "langfuse_otel", "maximum_spend_logs_retention_period",
+        identifiers = ["pg_vector", "presidio", "searxng", "qdrant-semantic", "semantic_cache_scope",
+                       "langfuse_otel", "maximum_spend_logs_retention_period",
                        "maximum_health_check_retention_period", "store_prompts_in_spend_logs", "disable_spend_logs",
                        "turn_off_message_logging", "store_audit_logs", "LITELLM_OTEL_V2",
                        "LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS", "LITELLM_OTEL_BAGGAGE_METADATA_KEYS",

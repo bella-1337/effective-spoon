@@ -52,6 +52,18 @@ litellm_settings:
   callbacks:
     - modules.langfuse_user_attribution.proxy_handler_instance
     - langfuse_otel
+  cache: true
+  cache_params:
+    type: qdrant-semantic
+    mode: default_off
+    supported_call_types: ["acompletion"]
+    qdrant_api_base: os.environ/QDRANT_API_BASE
+    qdrant_api_key: os.environ/QDRANT_API_KEY
+    qdrant_collection_name: litellm_dev_semantic_cache
+    qdrant_semantic_cache_embedding_model: bge-m3
+    qdrant_semantic_cache_vector_size: 1024
+    similarity_threshold: 0.92
+    semantic_cache_scope: end_user
   success_callback:
     - prometheus
     - modules.xberg_auto_index.proxy_handler_instance

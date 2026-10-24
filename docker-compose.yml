@@ -133,6 +133,31 @@ services:
       timeout: 5s
       retries: 5
 
+  qdrant:
+    profiles: [dev]
+    image: qdrant/qdrant:v1.19.2@sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
+      QDRANT__TELEMETRY_DISABLED: "true"
+    tmpfs:
+      - /qdrant/storage:rw,noexec,nosuid,size=1g
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 2g
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-ec", ": >/dev/tcp/127.0.0.1/6333"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   pgvector-migrate:
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
@@ -546,6 +571,8 @@ services:
       PG_VECTOR_API_BASE: http://litellm-pgvector:8000
       PG_VECTOR_API_KEY: ${PG_VECTOR_API_KEY}
       VECTOR_DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD}@vector-postgres:5432/vector_store
+      QDRANT_API_BASE: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
       XBERG_INDEX_EMBEDDING_MODEL: ollama/bge-m3
       XBERG_INDEX_EMBEDDING_API_BASE: http://host.docker.internal:11434
       PROXY_BASE_URL: https://${LITELLM_DEV_HOST}
@@ -560,6 +587,8 @@ services:
       xberg:
         condition: service_healthy
       langfuse-web:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
     networks: [edge, internal]
     restart: unless-stopped

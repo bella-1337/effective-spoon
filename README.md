@@ -36,6 +36,7 @@ PG_USER=litellm
 PG_PASSWORD=<strong-random-password>
 PG_VECTOR_PASSWORD=<strong-random-password>
 PG_VECTOR_API_KEY=sk-<strong-random-value>
+QDRANT_API_KEY=<strong-random-value>
 LITELLM_MASTER_KEY=sk-<strong-random-value>
 OPENAI_API_KEY=<provider-api-key>
 GRAFANA_ADMIN_PASSWORD=<strong-random-password>
@@ -69,6 +70,7 @@ All values are required:
 | `PG_PASSWORD` | PostgreSQL password |
 | `PG_VECTOR_PASSWORD` | Password for the isolated pgvector database |
 | `PG_VECTOR_API_KEY` | Authentication key for the internal LiteLLM pgvector connector |
+| `QDRANT_API_KEY` | Authentication key for the development semantic-cache store |
 | `LITELLM_MASTER_KEY` | Administrative/authentication key for LiteLLM |
 | `OPENAI_API_KEY` | Provider credential used by the configured models |
 | `GRAFANA_ADMIN_PASSWORD` | Initial Grafana administrator password |
@@ -582,6 +584,56 @@ curl --fail --silent https://llm-dev.example.test/v1/chat/completions \
     "temperature": 0
   }'
 ```
+
+### Development semantic response cache
+
+The development profile uses an authenticated, internal Qdrant service for an
+opt-in semantic response cache. LiteLLM embeds request messages with the local
+`bge-m3` Ollama model and reuses a previous complete response only when cosine
+similarity is at least `0.92`. A cache hit does not call the configured
+generation model.
+
+The cache is intentionally:
+
+- development-only and disabled by default for each request;
+- limited to asynchronous Chat Completions calls;
+- scoped by the authenticated end-user identity in addition to the LiteLLM
+  virtual key, team, and organization;
+- stored on a bounded 1 GB `tmpfs`, so stopping or recreating Qdrant deletes all
+  cached prompts and responses.
+
+Set `QDRANT_API_KEY` to a separate random secret. Opt in only for single-turn,
+non-sensitive requests and send a stable authenticated end-user identifier:
+
+```sh
+curl --fail --silent https://llm-dev.example.test/v1/chat/completions \
+  -H "Authorization: ******" \
+  -H "x-litellm-customer-id: example-user-123" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3.5:4b",
+    "messages": [{"role": "user", "content": "What is LiteLLM?"}],
+    "cache": {"use-cache": true}
+  }'
+```
+
+Do not opt in multi-turn conversations, tool-calling or agent loops,
+permission-sensitive RAG, personalized responses, or time-sensitive queries.
+Semantically similar text can have materially different answers, and a false
+match replays the earlier answer without calling the model.
+
+After starting the development profile with both `qwen3.5:4b` and `bge-m3`
+available in host Ollama, run the end-to-end verification:
+
+```sh
+./scripts/verify-semantic-cache.py
+```
+
+The check authenticates to Qdrant, sends two different but semantically similar
+single-turn prompts, and requires the second request to replay the first
+response without creating another cached point. Semantic-cache hits also carry
+the `x-litellm-semantic-similarity` response header for clients that inspect
+response headers.
 
 This host integration is development-only. On Linux Docker Engine, define the
 `host.docker.internal` host-gateway mapping if the name is not already supplied
