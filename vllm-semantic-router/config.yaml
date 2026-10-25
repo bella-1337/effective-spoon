@@ -1,0 +1,91 @@
+version: v0.3
+
+listeners:
+  - name: grpc-50051
+    address: 0.0.0.0
+    port: 50051
+    timeout: 120s
+  - name: http-8080
+    address: 0.0.0.0
+    port: 8080
+    timeout: 120s
+
+providers:
+  defaults:
+    model: semantic-fast
+  models:
+    - name: semantic-fast
+      provider_model_id: semantic-fast
+      api_format: openai
+      backend_refs:
+        - name: litellm-dev
+          provider: vllm
+          endpoint: litellm-dev:4000
+          protocol: http
+          weight: 100
+    - name: semantic-reasoning
+      provider_model_id: semantic-reasoning
+      api_format: openai
+      backend_refs:
+        - name: litellm-dev
+          provider: vllm
+          endpoint: litellm-dev:4000
+          protocol: http
+          weight: 100
+
+routing:
+  strategy: priority
+  modelCards:
+    - name: semantic-fast
+      description: Low-latency development completion route.
+      capabilities: [chat, tools]
+    - name: semantic-reasoning
+      description: Development route for coding and multi-constraint requests.
+      capabilities: [chat, reasoning, tools]
+  signals:
+    keywords:
+      - name: reasoning-keywords
+        operator: OR
+        method: bm25
+        keywords:
+          - analyze
+          - architecture
+          - compare
+          - debug
+          - design
+          - implement
+          - optimize
+          - reason
+          - refactor
+          - tradeoff
+        case_sensitive: false
+        bm25_threshold: 0.1
+    structure:
+      - name: many-questions
+        description: Requests containing at least three explicit questions.
+        feature:
+          type: count
+          source:
+            type: regex
+            pattern: '[?]'
+        predicate:
+          gte: 3
+  decisions:
+    - name: reasoning-route
+      description: Route coding and multi-constraint requests to the reasoning alias.
+      priority: 200
+      rules:
+        operator: OR
+        conditions:
+          - type: keyword
+            name: reasoning-keywords
+          - type: structure
+            name: many-questions
+      modelRefs:
+        - model: semantic-reasoning
+          use_reasoning: true
+
+global:
+  router:
+    strategy: priority
+    clear_route_cache: true

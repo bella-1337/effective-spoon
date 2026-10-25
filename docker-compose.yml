@@ -47,6 +47,7 @@ volumes:
   langfuse-clickhouse-logs: {}
   langfuse-minio-data: {}
   langfuse-redis-data: {}
+  bge-m3-vllm-cache: {}
 
 services:
   traefik:
@@ -157,6 +158,120 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+
+  bge-m3-vllm:
+    profiles: [dev]
+    image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+    command:
+      - --model
+      - BAAI/bge-m3
+      - --served-model-name
+      - bge-m3
+      - --runner
+      - pooling
+      - --dtype
+      - half
+      - --max-model-len
+      - "8192"
+      - --gpu-memory-utilization
+      - ${BGE_M3_VLLM_GPU_MEMORY_UTILIZATION:-0.35}
+    environment:
+      HF_HOME: /root/.cache/huggingface
+      VLLM_CACHE_ROOT: /tmp/vllm
+    volumes:
+      - bge-m3-vllm-cache:/root/.cache/huggingface
+    shm_size: 2gb
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    deploy:
+      resources:
+        limits:
+          memory: 6g
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 15m
+
+  vllm-semantic-router:
+    profiles: [dev]
+    image: ghcr.io/vllm-project/semantic-router/vllm-sr:latest@sha256:f613ce23a4f8e19357090ef83e614468dd7baa939b4634ad33144584e1c2cb09
+    user: "65532:65532"
+    command: ["/app/config.yaml"]
+    volumes:
+      - ./vllm-semantic-router/config.yaml:/app/config.yaml:ro
+    init: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+      - /app/.vllm-sr:uid=65532,gid=65532,mode=0750
+      - /app/models:uid=65532,gid=65532,mode=0750
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 7g
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 5m
+
+  vllm-semantic-router-envoy:
+    profiles: [dev]
+    image: envoyproxy/envoy:v1.36.2@sha256:4972515dd9a069b44beb43cebba7851596e72a8c61cd7a7c33d8f48efc5280ba
+    user: "101:101"
+    command: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "warning"]
+    volumes:
+      - ./vllm-semantic-router/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+    depends_on:
+      vllm-semantic-router:
+        condition: service_healthy
+      litellm-dev:
+        condition: service_healthy
+    networks: [edge, internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-ec", ": >/dev/tcp/127.0.0.1/19000"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.vllm-semantic-router.rule=Host(`${VLLM_SR_HOST}`)
+      - traefik.http.routers.vllm-semantic-router.entrypoints=websecure
+      - traefik.http.routers.vllm-semantic-router.tls=true
+      - traefik.http.services.vllm-semantic-router.loadbalancer.server.port=8899
 
   pgvector-migrate:
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
@@ -573,8 +688,8 @@ services:
       VECTOR_DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD}@vector-postgres:5432/vector_store
       QDRANT_API_BASE: http://qdrant:6333
       QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
-      XBERG_INDEX_EMBEDDING_MODEL: ollama/bge-m3
-      XBERG_INDEX_EMBEDDING_API_BASE: http://host.docker.internal:11434
+      XBERG_INDEX_EMBEDDING_MODEL: hosted_vllm/bge-m3
+      XBERG_INDEX_EMBEDDING_API_BASE: http://bge-m3-vllm:8000
       PROXY_BASE_URL: https://${LITELLM_DEV_HOST}
       FORWARDED_ALLOW_IPS: "*"
     depends_on:
@@ -589,6 +704,8 @@ services:
       langfuse-web:
         condition: service_healthy
       qdrant:
+        condition: service_healthy
+      bge-m3-vllm:
         condition: service_healthy
     networks: [edge, internal]
     restart: unless-stopped
@@ -738,7 +855,7 @@ services:
       IMAGE_SECURITY_SCHEDULE_HOUR: "${IMAGE_SECURITY_SCHEDULE_HOUR:-2}"
       IMAGE_SECURITY_SCHEDULE_MINUTE: "${IMAGE_SECURITY_SCHEDULE_MINUTE:-45}"
       IMAGE_SECURITY_RUN_ON_START: "${IMAGE_SECURITY_RUN_ON_START:-true}"
-    command: ["--services", "${IMAGE_SECURITY_SERVICES:-litellm-prod,litellm-dev}"]
+    command: ["--all"]
     volumes:
       - ./security-state:/data/state
       - ./security-reports:/data/reports

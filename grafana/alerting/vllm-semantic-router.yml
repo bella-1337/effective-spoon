@@ -1,0 +1,137 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: vllm-semantic-router-health
+    folder: LiteLLM
+    interval: 1m
+    rules:
+      - uid: vllm-semantic-router-down
+        title: vLLM Semantic Router is unavailable
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: ((up{job="vllm-semantic-router"} == 0) or absent(up{job="vllm-semantic-router"})) and on() (up{job="litellm-dev"} == 1)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "vLLM Semantic Router is unavailable"
+          description: "The development LiteLLM proxy is running, but Prometheus cannot scrape the semantic router."
+        labels:
+          severity: critical
+          source: vllm-semantic-router
+
+      - uid: vllm-semantic-router-envoy-down
+        title: vLLM Semantic Router Envoy is unavailable
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: ((up{job="vllm-semantic-router-envoy"} == 0) or absent(up{job="vllm-semantic-router-envoy"})) and on() (up{job="litellm-dev"} == 1)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "Semantic Router Envoy is unavailable"
+          description: "The development LiteLLM proxy is running, but Prometheus cannot scrape the routed inference listener."
+        labels:
+          severity: critical
+          source: vllm-semantic-router
+
+      - uid: vllm-semantic-router-error-rate
+        title: vLLM Semantic Router inference error rate is high
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: (sum(rate(llm_request_outcomes_total{job="vllm-semantic-router",traffic_kind="inference",outcome!="success"}[5m])) / clamp_min(sum(rate(llm_request_outcomes_total{job="vllm-semantic-router",traffic_kind="inference"}[5m])), 0.001)) > bool 0.05
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: OK
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: "Semantic Router inference errors exceed 5%"
+          description: "More than 5% of routed inference requests have failed or been canceled for 10 minutes."
+        labels:
+          severity: warning
+          source: vllm-semantic-router
+
+      - uid: vllm-semantic-router-routing-latency
+        title: vLLM Semantic Router routing latency is high
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: histogram_quantile(0.95, sum by (le) (rate(llm_model_routing_latency_seconds_bucket{job="vllm-semantic-router"}[5m]))) > bool 0.5
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: OK
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: "Semantic Router p95 routing latency exceeds 500 ms"
+          description: "Model-selection latency has remained above 500 ms for 10 minutes."
+        labels:
+          severity: warning
+          source: vllm-semantic-router
+
+      - uid: vllm-semantic-router-rate-limited
+        title: vLLM Semantic Router ingress rate limit is active
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: increase(envoy_http_local_rate_limit_rate_limited{job="vllm-semantic-router-envoy",envoy_local_http_ratelimit_prefix="semantic_router_ingress"}[5m]) > bool 0
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "Semantic Router ingress is rejecting excess requests"
+          description: "The per-instance 1,000 request-per-second token bucket has remained exhausted for five minutes. Investigate abusive clients or scale the routed ingress horizontally."
+        labels:
+          severity: warning
+          source: vllm-semantic-router

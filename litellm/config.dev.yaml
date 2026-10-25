@@ -12,14 +12,18 @@ model_list:
     litellm_params:
       model: openai/test-model
       api_key: os.environ/OPENAI_API_KEY
-  - model_name: qwen3.5:4b
+  - model_name: semantic-fast
     litellm_params:
-      model: ollama_chat/qwen3.5:4b
-      api_base: http://host.docker.internal:11434
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: semantic-reasoning
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
   - model_name: bge-m3
     litellm_params:
-      model: ollama/bge-m3
-      api_base: http://host.docker.internal:11434
+      model: hosted_vllm/bge-m3
+      api_base: http://bge-m3-vllm:8000
 
 vector_store_registry:
   - vector_store_name: SME shared knowledge

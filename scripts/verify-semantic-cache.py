@@ -102,7 +102,7 @@ def main() -> None:
     for prompt in prompts:
         payload = json.dumps(
             {
-                "model": "qwen3.5:4b",
+                "model": "gpt-4o-mini",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0,
                 "cache": {"use-cache": True},

@@ -41,7 +41,7 @@ from maintenance_common import (
 
 ALL_CHECKS = (
     "compose-config", "compose-health", "network-exposure", "prod-auth", "dev-auth", "isolation",
-    "dev-ollama-chat", "dev-ollama-embedding", "pgvector", "presidio", "searxng", "xberg-mcp",
+    "dev-vllm-embedding", "semantic-routing", "pgvector", "presidio", "searxng", "xberg-mcp",
     "langfuse", "observability", "logs",
 )
 USAGE = """Usage: scripts/verify-litellm-upgrade.py [--only CHECK[,CHECK...]] [--skip CHECK[,CHECK...]] [--list]
@@ -54,7 +54,7 @@ already-running Compose stack. Start the desired profile(s) first:
 
 Checks (run in this order unless filtered):
   compose-config compose-health network-exposure prod-auth dev-auth isolation
-  dev-ollama-chat dev-ollama-embedding pgvector presidio searxng xberg-mcp
+  dev-vllm-embedding semantic-routing pgvector presidio searxng xberg-mcp
   langfuse observability logs
 
 Options:
@@ -73,11 +73,12 @@ class Suite:
     def __init__(self) -> None:
         self.prod_host = env_or_dotenv("LITELLM_PROD_HOST", "llm.example.test")
         self.dev_host = env_or_dotenv("LITELLM_DEV_HOST", "llm-dev.example.test")
+        self.vllm_sr_host = env_or_dotenv("VLLM_SR_HOST", "llm-router.example.test")
         self.grafana_host = env_or_dotenv("GRAFANA_HOST", "grafana.example.test")
         self.searxng_host = env_or_dotenv("SEARXNG_HOST", "search.example.test")
         self.langfuse_host = env_or_dotenv("LANGFUSE_WEB_HOST", "langfuse.example.test")
-        self.ollama = os.environ.get("OLLAMA_BASE_URL") or "http://localhost:11434"
         self.prod_url, self.dev_url = f"https://{self.prod_host}", f"https://{self.dev_host}"
+        self.vllm_sr_url = f"https://{self.vllm_sr_host}"
         self.grafana_url, self.searxng_url = f"https://{self.grafana_host}", f"https://{self.searxng_host}"
         self.langfuse_url = f"https://{self.langfuse_host}"
         self.prod_running, self.dev_running = service_is_running("litellm-prod"), service_is_running("litellm-dev")
@@ -414,47 +415,13 @@ WHERE vector_store_id = 'sme-knowledge'
             bad = True
         return int(bad)
 
-    def ollama_tags(self) -> object | None:
-        _, data = self.request(f"{self.ollama}/api/tags", timeout=3)
-        return data
-
-    def check_dev_ollama_chat(self) -> int:
-        if not self.dev_running: return self.skip("dev-ollama-chat: litellm-dev is not running")
-        tags = self.ollama_tags()
-        if not isinstance(tags, dict):
-            return self.skip(f"dev-ollama-chat: Ollama is not reachable at {self.ollama}")
-        names = {item.get("name") for item in tags.get("models", []) if isinstance(item, dict)}
-        if not names:
-            return self.skip(f"dev-ollama-chat: Ollama at {self.ollama} returned no models")
-        if "qwen3.5:4b" not in names:
-            return self.skip("dev-ollama-chat: Ollama model qwen3.5:4b is not installed")
-        headers = self.auth_headers()
-        if not headers: self.fail_("dev-ollama-chat: could not read LITELLM_MASTER_KEY"); return 1
-        self.nonce = "probe-" + "".join(secrets.choice(string.ascii_lowercase) for _ in range(16))
-        response = None
-        for attempt in range(2):
-            _, response = self.request(f"{self.dev_url}/v1/chat/completions", "POST",
-                                       {"Authorization": headers["Authorization"], "Content-Type": "application/json"},
-                                       {"model": "qwen3.5:4b", "messages": [{"role": "user", "content": f"Reply with exactly, and nothing else: {self.nonce}"}], "temperature": 0}, 90)
-            content = response.get("choices", [{}])[0].get("message", {}).get("content", "") if isinstance(response, dict) else ""
-            if "".join(content.split()) == self.nonce: break
-            if attempt == 0: time.sleep(15)
-        if "".join(content.split()) != self.nonce:
-            self.fail_("dev-ollama-chat: qwen3.5:4b did not echo the expected probe text")
+    def check_dev_vllm_embedding(self) -> int:
+        if not self.dev_running: return self.skip("dev-vllm-embedding: litellm-dev is not running")
+        if not service_is_running("bge-m3-vllm"):
+            self.fail_("dev-vllm-embedding: required bge-m3-vllm service is not running")
             return 1
-        self.nonce_service = "litellm-dev"
-        self.pass_("dev-ollama-chat: qwen3.5:4b answered the deterministic chat probe")
-        return 0
-
-    def check_dev_ollama_embedding(self) -> int:
-        if not self.dev_running: return self.skip("dev-ollama-embedding: litellm-dev is not running")
-        tags = self.ollama_tags()
-        if not isinstance(tags, dict):
-            return self.skip(f"dev-ollama-embedding: Ollama is not reachable at {self.ollama}")
-        names = {item.get("name", "") for item in tags.get("models", []) if isinstance(item, dict)}
-        if not any(name == "bge-m3" or name.startswith("bge-m3:") for name in names): return self.skip("dev-ollama-embedding: Ollama model bge-m3 is not installed")
         headers = self.auth_headers()
-        if not headers: self.fail_("dev-ollama-embedding: could not read LITELLM_MASTER_KEY"); return 1
+        if not headers: self.fail_("dev-vllm-embedding: could not read LITELLM_MASTER_KEY"); return 1
         dimensions = 0
         for attempt in range(2):
             _, data = self.request(f"{self.dev_url}/v1/embeddings", "POST", {"Authorization": headers["Authorization"], "Content-Type": "application/json"}, {"model": "bge-m3", "input": "litellm upgrade verification probe"}, 90)
@@ -462,9 +429,57 @@ WHERE vector_store_id = 'sme-knowledge'
             if dimensions == 1024: break
             if attempt == 0: time.sleep(15)
         if dimensions == 1024:
-            self.pass_("dev-ollama-embedding: bge-m3 returned a 1024-dimension embedding")
+            self.pass_("dev-vllm-embedding: bge-m3 returned a 1024-dimension embedding")
             return 0
-        self.fail_(f"dev-ollama-embedding: bge-m3 returned an unexpected embedding (dimensions: {dimensions or 'none'})")
+        self.fail_(f"dev-vllm-embedding: bge-m3 returned an unexpected embedding (dimensions: {dimensions or 'none'})")
+        return 1
+
+    def check_semantic_routing(self) -> int:
+        if not self.dev_running: return self.skip("semantic-routing: litellm-dev is not running")
+        required_services = ("vllm-semantic-router", "vllm-semantic-router-envoy")
+        if not all(service_is_running(service) for service in required_services):
+            self.fail_("semantic-routing: required router and Envoy services are not running")
+            return 1
+        headers = self.auth_headers()
+        if not headers: self.fail_("semantic-routing: could not read LITELLM_MASTER_KEY"); return 1
+        self.nonce = "probe-" + "".join(secrets.choice(string.ascii_lowercase) for _ in range(16))
+        status, response_headers, response = self.request_with_headers(
+            f"{self.vllm_sr_url}/v1/chat/completions",
+            "POST",
+            {"Authorization": headers["Authorization"], "Content-Type": "application/json"},
+            {
+                "model": "vllm-sr/auto",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Analyze this software architecture and compare its tradeoffs. "
+                            f"Request reference: {self.nonce}"
+                        ),
+                    }
+                ],
+                "temperature": 0,
+                "max_tokens": 32,
+            },
+            120,
+        )
+        routed_model = response.get("model", "") if isinstance(response, dict) else ""
+        choices = response.get("choices", []) if isinstance(response, dict) else []
+        selected_alias = response_headers.get("x-vsr-selected-model", "")
+        if (
+            status == 200
+            and isinstance(routed_model, str)
+            and bool(routed_model)
+            and choices
+            and selected_alias == "semantic-reasoning"
+        ):
+            self.nonce_service = "litellm-dev"
+            self.pass_("semantic-routing: vLLM Semantic Router selected a LiteLLM completion alias")
+            return 0
+        self.fail_(
+            "semantic-routing: routed inference did not return the expected LiteLLM completion "
+            f"(HTTP {status}, model {routed_model or 'none'}, selected alias {selected_alias or 'none'})"
+        )
         return 1
 
     def check_pgvector(self) -> int:
@@ -667,7 +682,7 @@ WHERE vector_store_id = 'sme-knowledge'
                     "POST",
                     {"x-litellm-api-key": headers["x-litellm-api-key"], "Content-Type": "application/json"},
                     {
-                        "model": "qwen3.5:4b",
+                        "model": "gpt-4o-mini",
                         "messages": [{"role": "user", "content": "Use the appropriate tool to report the installed Xberg version."}],
                         "tools": [{"type": "mcp", "server_url": "litellm_proxy"}],
                         "tool_choice": "required",
@@ -752,7 +767,10 @@ WHERE vector_store_id = 'sme-knowledge'
             else:
                 self.fail_(f"observability: Grafana datasource '{datasource}' did not report healthy")
                 bad = True
-        for uid in ("litellm-stack", "litellm-cost", "litellm-admin", "litellm-team-cost"):
+        dashboard_uids = ["litellm-stack", "litellm-cost", "litellm-admin", "litellm-team-cost"]
+        if self.dev_running:
+            dashboard_uids.append("vllm-semantic-router")
+        for uid in dashboard_uids:
             _, data = self.request(f"{self.grafana_url}/api/dashboards/uid/{uid}", headers=headers)
             if isinstance(data, dict) and isinstance(data.get("dashboard"), dict) and data["dashboard"].get("uid") == uid:
                 self.pass_(f"observability: Grafana dashboard '{uid}' is provisioned")
@@ -839,6 +857,19 @@ SELECT
             elif any(target.get("health") != "up" for target in matching):
                 self.fail_(f"observability: Prometheus job '{job}' is unhealthy")
                 bad = True
+        if self.dev_running:
+            for job in ("vllm-semantic-router", "vllm-semantic-router-envoy"):
+                matching = [
+                    target
+                    for target in active
+                    if isinstance(target, dict) and target.get("labels", {}).get("job") == job
+                ]
+                if not matching:
+                    self.fail_(f"observability: Prometheus job '{job}' has no active target")
+                    bad = True
+                elif any(target.get("health") != "up" for target in matching):
+                    self.fail_(f"observability: Prometheus job '{job}' is unhealthy")
+                    bad = True
         if not bad:
             self.pass_("observability: expected Prometheus scrape targets are healthy")
         return int(bad)
@@ -876,7 +907,7 @@ SELECT
                 self.fail_(f"logs: the chat probe text appeared in {self.nonce_service} logs; prompt content may be leaking into logs")
                 bad = True
         else:
-            self.info("logs: skipping the log-leak probe because dev-ollama-chat did not run or was skipped")
+            self.info("logs: skipping the log-leak probe because no deterministic chat probe ran")
         return int(bad)
 
 

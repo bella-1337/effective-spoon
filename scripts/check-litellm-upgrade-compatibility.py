@@ -33,6 +33,13 @@ SEARCH = MODULES / "search.yaml"
 GUARDRAILS = MODULES / "guardrails" / "presidio.yaml"
 POLICIES = MODULES / "policies" / "eu-data-protection.yaml"
 ATTRIBUTION = MODULES / "langfuse_user_attribution.py"
+VLLM_SR_CONFIG = ROOT / "vllm-semantic-router" / "config.yaml"
+VLLM_SR_ENVOY = ROOT / "vllm-semantic-router" / "envoy.yaml"
+PROMETHEUS = LITELLM_DIR / "prometheus.yml"
+VLLM_SR_ALERTS = ROOT / "grafana" / "alerting" / "vllm-semantic-router.yml"
+VLLM_SR_DASHBOARD = (
+    ROOT / "grafana" / "dashboards" / "vllm-semantic-router" / "vllm-semantic-router.json"
+)
 IMAGE_PATTERN = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]+)?(/[A-Za-z0-9._-]+)+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$")
 
 USAGE = """Usage:
@@ -153,6 +160,43 @@ def static_checks(report: Reporter) -> None:
     (report.pass_ if semantic_cache_ok else report.fail_)(
         "Qdrant semantic caching is development-only, opt-in, end-user scoped, and uses environment-sourced credentials"
     )
+    semantic_router_config = VLLM_SR_CONFIG.read_text(encoding="utf-8")
+    semantic_router_envoy = VLLM_SR_ENVOY.read_text(encoding="utf-8")
+    prometheus = PROMETHEUS.read_text(encoding="utf-8")
+    compose_text = COMPOSE_FILE.read_text(encoding="utf-8")
+    router_alerts = VLLM_SR_ALERTS.read_text(encoding="utf-8")
+    router_dashboard = VLLM_SR_DASHBOARD.read_text(encoding="utf-8")
+    semantic_router_ok = all((
+        "model_name: semantic-fast" in dev_text,
+        "model_name: semantic-reasoning" in dev_text,
+        "model_name: semantic-fast" not in prod_text,
+        "model_name: semantic-reasoning" not in prod_text,
+        "model: semantic-fast" in semantic_router_config,
+        "model: semantic-reasoning" in semantic_router_config,
+        "endpoint: litellm-dev:4000" in semantic_router_config,
+        "failure_mode_allow: false" in semantic_router_envoy,
+        "envoy.filters.http.local_ratelimit" in semantic_router_envoy,
+        "envoy.filters.http.lua" in semantic_router_envoy,
+        '[":path"] = "/v1/models"' in semantic_router_envoy,
+        "- x-vsr-selected-model" in semantic_router_envoy,
+        'request_headers:remove("x-vsr-selected-model")' in semantic_router_envoy,
+        'request_headers:remove("x-vsr-looper-secret")' in semantic_router_envoy,
+        'request_headers:remove("x-authz-user-id")' in semantic_router_envoy,
+        "max_tokens: 2000" in semantic_router_envoy,
+        "tokens_per_fill: 1000" in semantic_router_envoy,
+        "address: litellm-dev" in semantic_router_envoy,
+        "port_value: 9901" in semantic_router_envoy,
+        'targets: ["vllm-semantic-router:9190"]' in prometheus,
+        'targets: ["vllm-semantic-router-envoy:9901"]' in prometheus,
+        'command: ["--all"]' in compose_text,
+        "vllm-semantic-router-down" in router_alerts,
+        "vllm-semantic-router-envoy-down" in router_alerts,
+        "vllm-semantic-router-rate-limited" in router_alerts,
+        '"uid": "vllm-semantic-router"' in router_dashboard,
+    ))
+    (report.pass_ if semantic_router_ok else report.fail_)(
+        "Development vLLM Semantic Router selects aliases served by the internal LiteLLM proxy"
+    )
     required_settings = (
         r"^\s*disable_spend_logs:\s*false\s*$", r"^\s*store_prompts_in_spend_logs:\s*false\s*$",
         r"^\s*maximum_spend_logs_retention_period:\s*180d\s*$",
@@ -161,7 +205,6 @@ def static_checks(report: Reporter) -> None:
         r"^\s*callbacks:\s*$", r"^\s*-\s*modules\.langfuse_user_attribution\.proxy_handler_instance\s*$",
         r"^\s*-\s*langfuse_otel\s*$",
     )
-    compose_text = COMPOSE_FILE.read_text(encoding="utf-8")
     attribution = ATTRIBUTION.read_text(encoding="utf-8")
     retention_ok = all(
         re.search(pattern, config, re.M) is not None
@@ -184,17 +227,35 @@ def static_checks(report: Reporter) -> None:
         )
     )
     (report.pass_ if retention_ok else report.fail_)("Privacy, retention, and authenticated pseudonymous Langfuse attribution settings match both profiles")
-    prod_block, dev_block, vector_block, demo_block = (service_block(service) for service in
-                                                        ("litellm-prod", "litellm-dev", "litellm-pgvector", "litellm-demo-data-prod"))
-    isolation_ok = all(block for block in (prod_block, dev_block, vector_block, demo_block)) and all((
+    prod_block, dev_block, vector_block, demo_block, bge_block, router_block, envoy_block = (
+        service_block(service)
+        for service in (
+            "litellm-prod", "litellm-dev", "litellm-pgvector", "litellm-demo-data-prod",
+            "bge-m3-vllm", "vllm-semantic-router", "vllm-semantic-router-envoy",
+        )
+    )
+    isolation_ok = all(
+        block for block in (
+            prod_block, dev_block, vector_block, demo_block, bge_block, router_block, envoy_block
+        )
+    ) and all((
         re.search(r"^\s*profiles:\s*\[prod\]\s*$", prod_block, re.M) is not None,
         re.search(r"^\s*profiles:\s*\[dev\]\s*$", dev_block, re.M) is not None,
         re.search(r"^\s*profiles:\s*\[dev\]\s*$", vector_block, re.M) is not None,
         re.search(r"^\s*profiles:\s*\[demo\]\s*$", demo_block, re.M) is not None,
+        re.search(r"^\s*profiles:\s*\[dev\]\s*$", bge_block, re.M) is not None,
+        re.search(r"^\s*profiles:\s*\[dev\]\s*$", router_block, re.M) is not None,
+        re.search(r"^\s*profiles:\s*\[dev\]\s*$", envoy_block, re.M) is not None,
         "litellm_prod" in prod_block, "litellm_dev" in dev_block,
         "LITELLM_PROD_HOST" in prod_block, "LITELLM_DEV_HOST" in dev_block,
         "litellm_dev" not in prod_block, "litellm_prod" not in dev_block,
-        re.search(r"ollama_chat/|ollama/|test-model", prod_text) is None,
+        "hosted_vllm/bge-m3" not in prod_text,
+        "semantic-fast" not in prod_text,
+        "semantic-reasoning" not in prod_text,
+        "test-model" not in prod_text,
+        "ports:" not in bge_block,
+        "ports:" not in router_block,
+        "ports:" not in envoy_block,
     ))
     (report.pass_ if isolation_ok else report.fail_)("Development and production services, databases, hostnames, and model lists remain isolated in docker-compose.yml")
 
@@ -204,7 +265,8 @@ def docker_run_validation(image: str, config: Path, network: str, extra_environm
     args = [
         "docker", "run", "-d", "--name", name, "--network", network, "--read-only", "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges:true", "--pids-limit", "256", "--memory", "512m",
-        "--tmpfs", "/tmp:mode=1777", "-v", f"{config}:/app/config.yaml:ro", "-v", f"{MODULES}:/app/modules:ro",
+        "--tmpfs", "/tmp:mode=1777", "-v", f"{config}:/app/config.yaml:ro",
+        "-v", f"{MODULES}:/app/modules:ro",
         "-e", "DATABASE_URL=postgresql://upgrade-check-placeholder@127.0.0.1:5432/upgrade-check",
         "-e", "LITELLM_MASTER_KEY=sk-upgrade-check-placeholder",
         "-e", "OPENAI_API_KEY=sk-upgrade-check-placeholder",
@@ -726,7 +788,10 @@ def main() -> None:
                 "the attribution hook did not replace caller identity fields, strip langfuse_* headers and raw "
                 "principal metadata, or remain compatible with the candidate image's Langfuse OTel exporter",
             )
-        isolated = not any(item in prod_output for item in ("qwen3.5:4b", "test-model", "vector_store"))
+        isolated = not any(
+            item in prod_output
+            for item in ("semantic-fast", "semantic-reasoning", "test-model", "vector_store")
+        )
         if isolated:
             report.pass_("Production and development candidate-image validations ran in fully isolated containers without leaking one profile's models into the other")
         else:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import os
 import subprocess
@@ -23,6 +24,20 @@ SPEC.loader.exec_module(monitor)
 
 
 class MonitorImageVulnerabilitiesTests(unittest.TestCase):
+    def test_default_scope_scans_all_running_services(self) -> None:
+        arguments = argparse.Namespace(all=False, services=None)
+        self.assertIsNone(monitor.selected_services(arguments))
+
+    def test_explicit_scope_retains_requested_services(self) -> None:
+        arguments = argparse.Namespace(
+            all=False,
+            services="litellm-dev,vllm-semantic-router",
+        )
+        self.assertEqual(
+            monitor.selected_services(arguments),
+            ("litellm-dev", "vllm-semantic-router"),
+        )
+
     def test_exception_removes_finding_from_policy_but_not_report(self) -> None:
         payload = {
             "Results": [

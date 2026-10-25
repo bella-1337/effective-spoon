@@ -2,8 +2,8 @@
 
 A Docker Compose stack for running separate LiteLLM production and development
 proxies behind Traefik, with PostgreSQL, Presidio, SearXNG, Xberg MCP,
-Langfuse, Prometheus, Grafana, Loki, Grafana Alloy, and host/container
-exporters.
+Langfuse, development vLLM model servers, Prometheus, Grafana, Loki, Grafana
+Alloy, and host/container exporters.
 
 The `prod` and `dev` names below describe LiteLLM runtime profiles. The bundled
 `mkcert` TLS setup is intended only for a private workstation or trusted local
@@ -12,6 +12,9 @@ network; it is not public-production certificate management.
 ## Prerequisites
 
 - Docker Engine or Docker Desktop with Docker Compose v2
+- An NVIDIA GPU and NVIDIA Container Toolkit for the development profile's
+  BGE-M3 vLLM service
+- Up to 7 GB of available RAM for the CPU-hosted vLLM Semantic Router
 - [`uv`](https://docs.astral.sh/uv/getting-started/installation/) for the
   maintenance scripts
 - `mkcert`
@@ -27,6 +30,7 @@ Create `.env` locally. It is intentionally ignored by Git.
 ```dotenv
 LITELLM_PROD_HOST=llm.example.test
 LITELLM_DEV_HOST=llm-dev.example.test
+VLLM_SR_HOST=llm-router.example.test
 GRAFANA_HOST=grafana.example.test
 SEARXNG_HOST=search.example.test
 LANGFUSE_WEB_HOST=langfuse.example.test
@@ -39,6 +43,7 @@ PG_VECTOR_API_KEY=sk-<strong-random-value>
 QDRANT_API_KEY=<strong-random-value>
 LITELLM_MASTER_KEY=sk-<strong-random-value>
 OPENAI_API_KEY=<provider-api-key>
+BGE_M3_VLLM_GPU_MEMORY_UTILIZATION=0.35
 GRAFANA_ADMIN_PASSWORD=<strong-random-password>
 SEARXNG_SECRET=<strong-random-secret>
 LANGFUSE_POSTGRES_PASSWORD=<strong-url-safe-random-password>
@@ -62,6 +67,7 @@ All values are required:
 | --- | --- |
 | `LITELLM_PROD_HOST` | Traefik hostname for the production-profile proxy |
 | `LITELLM_DEV_HOST` | Traefik hostname for the development-profile proxy |
+| `VLLM_SR_HOST` | Traefik hostname for chat completions routed through vLLM Semantic Router |
 | `GRAFANA_HOST` | Traefik hostname for Grafana |
 | `SEARXNG_HOST` | Public base hostname advertised by SearXNG |
 | `LANGFUSE_WEB_HOST` | Traefik hostname for the Langfuse UI and API |
@@ -73,6 +79,7 @@ All values are required:
 | `QDRANT_API_KEY` | Authentication key for the development semantic-cache store |
 | `LITELLM_MASTER_KEY` | Administrative/authentication key for LiteLLM |
 | `OPENAI_API_KEY` | Provider credential used by the configured models |
+| `BGE_M3_VLLM_GPU_MEMORY_UTILIZATION` | Fraction of GPU memory reserved by the BGE-M3 vLLM process |
 | `GRAFANA_ADMIN_PASSWORD` | Initial Grafana administrator password |
 | `SEARXNG_SECRET` | Secret used to sign SearXNG data |
 | `LANGFUSE_POSTGRES_PASSWORD` | Password for Langfuse's isolated PostgreSQL database |
@@ -234,7 +241,7 @@ mkdir -p traefik/certs
 mkcert \
   -cert-file traefik/certs/litellm-stack.pem \
   -key-file traefik/certs/litellm-stack-key.pem \
-  llm.example.test llm-dev.example.test grafana.example.test search.example.test \
+  llm.example.test llm-dev.example.test llm-router.example.test grafana.example.test search.example.test \
   langfuse.example.test langfuse-s3.example.test
 ```
 
@@ -263,7 +270,7 @@ key-management procedures.
 For a stack running on this machine, add one line to `/etc/hosts`:
 
 ```text
-127.0.0.1 llm.example.test llm-dev.example.test grafana.example.test search.example.test langfuse.example.test langfuse-s3.example.test
+127.0.0.1 llm.example.test llm-dev.example.test llm-router.example.test grafana.example.test search.example.test langfuse.example.test langfuse-s3.example.test
 ```
 
 On Windows, edit
@@ -369,6 +376,16 @@ curl --fail --show-error --silent \
 curl --fail --show-error --silent --output /dev/null https://search.example.test/
 ```
 
+For the development profile, also verify the internal router readiness and
+metrics endpoints without publishing them to the host:
+
+```sh
+docker compose exec -T vllm-semantic-router \
+  curl --fail --silent http://127.0.0.1:8080/ready
+docker compose exec -T vllm-semantic-router \
+  curl --fail --silent http://127.0.0.1:9190/metrics >/dev/null
+```
+
 If command-line `curl` does not use the operating system trust store, point it
 at the `mkcert` root certificate:
 
@@ -447,7 +464,7 @@ Append a line filter when useful, for example
 currently running profile and services; use the label browser rather than
 assuming that every example value is present.
 
-Grafana provisions four dashboards in the **LiteLLM** folder:
+Grafana provisions five dashboards in the **LiteLLM** folder:
 
 - **LiteLLM Stack (dev/prod)** for request, latency, failure, spend, deployment,
   and guardrail metrics.
@@ -458,6 +475,21 @@ Grafana provisions four dashboards in the **LiteLLM** folder:
 - **LiteLLM Team Costing** for per-team spend, requests, tokens, models, member
   attribution, and expensive requests. Select any current team; new teams appear
   automatically.
+- **vLLM Semantic Router** for router and Envoy target health, inference
+  outcomes, decision rate, model-routing latency, downstream request rate, and
+  inference error ratio.
+
+Prometheus scrapes the router directly on internal port `9190` and Envoy through
+the metrics-only listener on internal port `9901`. The Envoy listener proxies
+only `/stats/prometheus`; all other paths return `404`, and the full Envoy admin
+API remains loopback-only. Grafana provisions alerts when the development
+LiteLLM proxy is active and either router target is down, when routed inference
+errors exceed 5% for 10 minutes, or when p95 model-selection latency exceeds
+500 ms for 10 minutes. Envoy also limits each routed ingress instance to a
+sustained 1,000 requests per second with a 2,000-request burst before semantic
+classification, and Grafana alerts when that protection remains active for five
+minutes. Configure a Grafana contact point and notification policy for these
+alerts; repository configuration does not contain notification credentials.
 
 The development profile automatically seeds two persistent demonstration teams
 and four users after its database schema is ready. Production seeds the same
@@ -554,42 +586,67 @@ to trusted keys and teams. The Compose-internal placement prevents direct
 client access but does not by itself block Xberg from requesting private
 network destinations.
 
-The development gateway uses the local `bge-m3` Ollama model to semantically
-select up to three relevant MCP tools with a minimum similarity score of `0.3`.
+The development gateway uses `BAAI/bge-m3` in the internal `bge-m3-vllm`
+container to semantically select up to three relevant MCP tools with a minimum
+similarity score of `0.3`.
 This affects MCP tools offered automatically through Chat Completions and the
 Responses API; it does not change MCP permissions or direct
 `/mcp-rest/tools/call` requests. Production keeps semantic filtering disabled
-because `bge-m3` and host Ollama are intentionally development-only.
+because the local model containers are intentionally development-only.
 
-The development profile also exposes the host's existing Ollama
-`qwen3.5:4b` model through LiteLLM under the same model name. It connects to
-`http://host.docker.internal:11434` and does not deploy another Ollama container.
-Start Ollama on the Docker host and install the model before starting the
-development profile:
+The development profile also runs vLLM Semantic Router on CPU with Envoy as its
+inference listener. Requests sent to `VLLM_SR_HOST` pass through Envoy and the
+router before reaching the internal LiteLLM proxy. The router selects either
+the `semantic-fast` or `semantic-reasoning` LiteLLM alias; both currently map to
+the approved `gpt-4o-mini` deployment until additional completion models are
+reviewed. BGE-M3 remains a separate pooling service and embeddings do not pass
+through the chat router.
+
+Before Envoy buffers a request body or invokes the semantic router, it validates
+the bearer credential against LiteLLM's internal `/v1/models` endpoint. Missing
+or invalid credentials are rejected without semantic classification, and an
+unavailable authentication check fails closed with `503`. LiteLLM remains the
+authoritative authentication boundary and validates the credential again when
+it receives the routed request.
 
 ```sh
-ollama list
-ollama run qwen3.5:4b
+docker compose --profile dev up -d
 ```
 
-Test it through LiteLLM rather than calling Ollama directly:
+Call the routed hostname with the same LiteLLM bearer credential:
 
 ```sh
-curl --fail --silent https://llm-dev.example.test/v1/chat/completions \
+curl --fail --silent https://llm-router.example.test/v1/chat/completions \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen3.5:4b",
-    "messages": [{"role": "user", "content": "Reply with exactly: ollama-ready"}],
+    "model": "vllm-sr/auto",
+    "messages": [{
+      "role": "user",
+      "content": "Analyze this architecture and compare its tradeoffs."
+    }],
     "temperature": 0
   }'
 ```
+
+The router uses an explicit priority rule: coding, analysis, architecture,
+comparison, and multi-question prompts select `semantic-reasoning`; unmatched
+requests use `semantic-fast`. Envoy fails closed when its external processor is
+unavailable and strips client-supplied internal routing headers before
+forwarding. LiteLLM remains the authentication, policy, guardrail, provider,
+spend, and observability boundary.
+
+This integration is development-only. The pinned router image is a
+post-v0.4.0 build containing the buffered LiteLLM response compatibility fix;
+the current upstream integration is not yet a formal LiteLLM product
+commitment. Avoid list-valued request metadata until upstream semantic-router
+metadata compatibility is resolved.
 
 ### Development semantic response cache
 
 The development profile uses an authenticated, internal Qdrant service for an
 opt-in semantic response cache. LiteLLM embeds request messages with the local
-`bge-m3` Ollama model and reuses a previous complete response only when cosine
+`bge-m3` vLLM model and reuses a previous complete response only when cosine
 similarity is at least `0.92`. A cache hit does not call the configured
 generation model.
 
@@ -611,7 +668,7 @@ curl --fail --silent https://llm-dev.example.test/v1/chat/completions \
   -H "x-litellm-customer-id: example-user-123" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen3.5:4b",
+    "model": "gpt-4o-mini",
     "messages": [{"role": "user", "content": "What is LiteLLM?"}],
     "cache": {"use-cache": true}
   }'
@@ -622,8 +679,7 @@ permission-sensitive RAG, personalized responses, or time-sensitive queries.
 Semantically similar text can have materially different answers, and a false
 match replays the earlier answer without calling the model.
 
-After starting the development profile with both `qwen3.5:4b` and `bge-m3`
-available in host Ollama, run the end-to-end verification:
+After BGE-M3 vLLM and vLLM Semantic Router are healthy, run the end-to-end verification:
 
 ```sh
 ./scripts/verify-semantic-cache.py
@@ -634,10 +690,6 @@ single-turn prompts, and requires the second request to replay the first
 response without creating another cached point. Semantic-cache hits also carry
 the `x-litellm-semantic-similarity` response header for clients that inspect
 response headers.
-
-This host integration is development-only. On Linux Docker Engine, define the
-`host.docker.internal` host-gateway mapping if the name is not already supplied
-by the runtime.
 
 ## 11. Presidio PII masking
 
@@ -782,7 +834,7 @@ curl --fail --silent https://llm-dev.example.test/v1/chat/completions \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model":"qwen3.5:4b",
+    "model":"gpt-4o-mini",
     "messages":[{"role":"user","content":"Reply exactly: Example Client Limited"}],
     "temperature":0
   }'
@@ -940,7 +992,7 @@ embeddings.
 Docker named volumes grow with stored data; Compose does not preallocate 50 GB.
 Monitor the volume and host filesystem and alert before either is exhausted.
 
-The schema uses 1,024-dimensional vectors for the host's multilingual `bge-m3`
+The schema uses 1,024-dimensional vectors for the local multilingual `bge-m3`
 embedding model, an HNSW cosine-distance index, JSON metadata filtering,
 cascading deletion by store, and content length constraints. The database is
 only reachable on the internal Compose network. A separate PostgreSQL exporter
@@ -949,22 +1001,20 @@ exposes database metrics to Prometheus.
 The development profile builds BerriAI's official `litellm-pgvector` connector
 from commit `5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24`. The connector is internal
 only, authenticates every vector-store request, and uses development LiteLLM to
-embed search queries with the host's `bge-m3` model. `sme-knowledge` is declared
+embed search queries with the vLLM-backed `bge-m3` model. `sme-knowledge` is declared
 in `litellm/config.dev.yaml`, so it appears in the development LiteLLM Vector
 Stores UI and survives proxy database resets because the registration is
 repository-owned configuration.
 
 Set `PG_VECTOR_API_KEY` to a separate, cryptographically random secret in
-`.env`. Start the host's existing Ollama service and ensure `bge-m3` is present,
-then build and start the development profile:
+`.env`, then build and start the development profile:
 
 ```sh
-ollama list
 docker compose --profile dev up -d --build
 ```
 
 The official connector is intentionally development-only. Production neither
-lists the store nor depends on a host Ollama process. Before enabling it in
+lists the store nor depends on the local vLLM model services. Before enabling it in
 production, select and validate a production embedding model, data residency,
 credentials, capacity, and availability independently.
 
@@ -991,11 +1041,11 @@ creating duplicates. URL query strings, fragments, and credentials are not
 stored in source metadata.
 
 Indexing is best effort and runs as a bounded background task after extraction:
-an Ollama, embedding, or vector-database failure is logged while the original
+an embedding-service or vector-database failure is logged while the original
 Xberg response is still returned to the caller. The task times out after three
 minutes and can be lost if the development proxy stops before it finishes; call
 `extract` again to retry. The callback is enabled only in development because
-the pgvector connector and host `bge-m3` model are development-only.
+the pgvector connector and local `bge-m3` service are development-only.
 
 Before production ingestion, select a reviewed component that provides:
 
@@ -1066,17 +1116,21 @@ The repository includes a fail-closed, scheduled image-security monitor. It
 uses Trivy `0.76.1` from an immutable container digest, downloads a fresh
 vulnerability database, retrieves and validates the CISA Known Exploited
 Vulnerabilities (KEV) catalog, and scans the platform-specific digest actually
-used by each running LiteLLM container:
+used by each configured gateway and local-model container:
 
 ```bash
 ./scripts/maintenance.py security-scan
 ```
 
-The default scope is `litellm-prod,litellm-dev`. Scan every running service in
-the Compose project after establishing and reviewing the LiteLLM baseline:
+The default scope is every running service in the Compose project. This includes
+`bge-m3-vllm`, `vllm-semantic-router`, and
+`vllm-semantic-router-envoy` whenever the development profile is active, without
+reporting intentionally inactive profile services as unknown. Restrict a manual
+scan only when a narrower reviewed scope is required:
 
 ```bash
-./scripts/maintenance.py security-scan --all
+./scripts/maintenance.py security-scan \
+  --services litellm-dev,bge-m3-vllm,vllm-semantic-router,vllm-semantic-router-envoy
 ```
 
 The monitor reads running-container metadata directly from Docker. It never
@@ -1153,6 +1207,16 @@ provision one using an environment-sourced secret. A firing rule without a
 routed contact point is visible in Grafana but cannot notify an operator.
 Grafana reads file-provisioned alerting resources at startup.
 
+The same maintenance workflow verifies the router after upgrades. With the
+development profile running, the semantic-routing and observability checks fail
+if BGE-M3, the router, Envoy, either Prometheus target, or the dedicated Grafana
+dashboard is missing or unhealthy:
+
+```bash
+./scripts/maintenance.py upgrade-verify \
+  --only dev-vllm-embedding,semantic-routing,observability
+```
+
 ### Run the scheduler inside the stack
 
 The optional `security` Compose profile runs the same scanner and policy inside
@@ -1179,15 +1243,9 @@ Change the daily time or disable the immediate startup scan with
 project label on the containers being scanned; `.env.example` pins it to
 `litellm-stack` so it does not vary with the checkout directory.
 
-The default scope assumes both LiteLLM profiles are running. For a production-
-only or development-only deployment, set `IMAGE_SECURITY_SERVICES` accordingly:
-
-```bash
-IMAGE_SECURITY_SERVICES=litellm-prod
-```
-
-To scan every running immutable remote image instead, override the service
-command with `["--all"]` in a Compose override file.
+The in-stack scheduler scans every running service. Profile-specific services
+that are intentionally stopped are not emitted as unknown coverage, while any
+running immutable image outside the former fixed list is included automatically.
 
 The monitor image contains the same pinned Trivy release and invokes it directly,
 so it does not create nested scanner containers. It obtains only read-only
@@ -1443,9 +1501,9 @@ List or select checks when diagnosing a failure:
 ```
 
 The suite checks Compose health and exposure, authentication, prod/dev
-isolation, development Ollama chat and embeddings, pgvector, Presidio behavior,
-SearXNG, Xberg MCP extraction, Prometheus targets, Grafana datasources, and
-Loki log delivery. A
+isolation, vLLM embeddings, vLLM Semantic Router routing,
+pgvector, Presidio behavior, SearXNG, Xberg MCP extraction, Prometheus targets,
+Grafana datasources, and Loki log delivery. A
 missing optional prerequisite is reported as `SKIP`; once a prerequisite is
 present, a failed assertion makes the command exit nonzero.
 

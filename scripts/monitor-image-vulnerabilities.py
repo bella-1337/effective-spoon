@@ -45,7 +45,6 @@ KEV_URL = (
     "https://www.cisa.gov/sites/default/files/feeds/"
     "known_exploited_vulnerabilities.json"
 )
-DEFAULT_SERVICES = ("litellm-prod", "litellm-dev")
 SEVERITIES = ("UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL")
 MAX_KEV_BYTES = 8 * 1024 * 1024
 MAX_STATE_BYTES = 8 * 1024 * 1024
@@ -89,7 +88,7 @@ def parse_args() -> argparse.Namespace:
     scope.add_argument(
         "--services",
         metavar="LIST",
-        help="scan a comma-separated service list (default: litellm-prod,litellm-dev)",
+        help="scan only a comma-separated service list (default: every running service)",
     )
     parser.add_argument(
         "--enforce",
@@ -216,13 +215,9 @@ def save_state(path: Path, state: dict[str, object]) -> None:
 
 
 def selected_services(arguments: argparse.Namespace) -> tuple[str, ...] | None:
-    if arguments.all:
+    if arguments.all or arguments.services is None:
         return None
-    values = (
-        arguments.services.split(",")
-        if arguments.services is not None
-        else list(DEFAULT_SERVICES)
-    )
+    values = arguments.services.split(",")
     services: list[str] = []
     for raw in values:
         service = raw.strip()
