@@ -12,8 +12,10 @@ network; it is not public-production certificate management.
 ## Prerequisites
 
 - Docker Engine or Docker Desktop with Docker Compose v2
+- [`uv`](https://docs.astral.sh/uv/getting-started/installation/) for the
+  maintenance scripts
 - `mkcert`
-- `curl` (also used by the dashboard download script)
+- `curl` for the documented manual API and health checks
 - Administrator access to install the local CA and update host resolution
 
 Run all commands from this repository's root.
@@ -281,11 +283,12 @@ provisioning tree. Run it before the first start and whenever you intentionally
 want to refresh those upstream assets:
 
 ```sh
-bash scripts/fetch-dashboards.sh
+./scripts/fetch-dashboards.py
 ```
 
-The script uses `curl` and overwrites its named downloaded files. Review changes
-before committing them; dashboard JSON is upstream content, not a secret.
+The script uses Python's HTTPS client with certificate verification and overwrites
+its named downloaded files. Review changes before committing them; dashboard JSON
+is upstream content, not a secret.
 
 ## 5. Configure Prometheus metrics authentication
 
@@ -916,7 +919,7 @@ credentials, capacity, and availability independently.
 Validate the store and rejection controls with:
 
 ```sh
-sh scripts/verify-pgvector.sh
+./scripts/verify-pgvector.py
 ```
 
 The check verifies unauthenticated rejection at LiteLLM and the connector,
@@ -951,13 +954,283 @@ Before production ingestion, select a reviewed component that provides:
 - bounded request sizes, rate limits, and generic errors; and
 - retention, backup, restore, and data-subject deletion procedures.
 
-## 15. Back up the databases
+## 15. Install the maintenance runtime
+
+Repository maintenance commands are executable
+[uv scripts](https://docs.astral.sh/uv/guides/scripts/). Install `uv` using one
+of its [documented installation methods](https://docs.astral.sh/uv/getting-started/installation/)
+and make sure `uv` is on `PATH`:
+
+```sh
+uv --version
+```
+
+Each entry point has a `uv run --script` shebang and PEP 723 inline metadata, so
+the documented `./scripts/<name>.py` commands need neither an activated virtual
+environment nor a separately managed system Python. The scripts currently use
+Python's standard library for maintenance logic. The two HTTPS verification
+scripts additionally pin `truststore==0.10.5` so certificate validation uses the
+operating system's native trust store, including mkcert roots installed there.
+The full upgrade suite also locates the standard or `CAROOT`-configured mkcert
+root with Python for roots installed only in an NSS/user store. Their adjacent uv
+lock files record the exact resolution. `uv` enforces the declared Python version
+and can acquire a matching interpreter when one is not installed.
+
+### Why use Python and uv for these scripts?
+
+For this repository, the practical advantages are:
+
+- **Less shell parsing and platform branching.** HTTP, JSON, hashing, paths,
+  permissions, temporary directories, timestamps, and retention traversal use
+  typed Python APIs instead of pipelines of `curl`, `jq`, `grep`, `find`,
+  `sha256sum`, and platform-specific alternatives.
+- **Safer process boundaries.** The remaining external boundary is primarily
+  Docker Compose. Commands are passed as argument arrays without a shell, which
+  avoids quoting ambiguity and prevents command interpolation.
+- **One declared runtime.** PEP 723 metadata records the supported Python version
+  next to each entry point. According to the uv script documentation, `uv`
+  creates managed environments on demand, respects `requires-python`, and keeps
+  script dependencies separate from project dependencies.
+- **Reproducible growth.** If a future script needs a third-party package, it can
+  declare and pin it inline and use `uv lock --script` to create an adjacent lock
+  file instead of relying on whatever happens to be installed globally. The
+  HTTPS verification scripts already follow this pattern for `truststore`.
+- **Testable orchestration.** Parsing, validation, checksums, retention rules,
+  HTTP handling, and workflow selection are regular Python functions rather than
+  shell blocks that require process-level fixtures to exercise.
+
+These are maintainability and correctness benefits, not proof that Python is
+universally better than shell. A tiny command wrapper may start faster as shell,
+and this approach adds `uv` as a host prerequisite. uv publishes substantial
+package-management speedups, but these scripts install only one small pinned
+dependency for two verification entry points, and only when it is not cached.
+Their wall-clock time is dominated by Docker, PostgreSQL, and network operations.
+The migration therefore claims no meaningful workflow speedup. Its success
+criterion is behavioral parity with a smaller dependence on host shell utilities.
+
+## 16. Monitor deployed image vulnerabilities
+
+The repository includes a fail-closed, scheduled image-security monitor. It
+uses Trivy `0.76.1` from an immutable container digest, downloads a fresh
+vulnerability database, retrieves and validates the CISA Known Exploited
+Vulnerabilities (KEV) catalog, and scans the platform-specific digest actually
+used by each running LiteLLM container:
+
+```bash
+./scripts/maintenance.py security-scan
+```
+
+The default scope is `litellm-prod,litellm-dev`. Scan every running service in
+the Compose project after establishing and reviewing the LiteLLM baseline:
+
+```bash
+./scripts/maintenance.py security-scan --all
+```
+
+The monitor reads running-container metadata directly from Docker. It never
+persists or logs rendered Compose configuration, which may contain interpolated
+secrets. Digest-pinned registry images are scanned remotely so the Trivy
+container does not need the Docker socket. A running local or mutable image is
+reported as `not-applicable`/unknown instead of being presented as clean.
+
+The normal scheduled mode reports findings and returns nonzero only for
+operational failures. Use `--enforce` in a reviewed release gate to also fail on
+an unexcepted CISA KEV match or fixable Critical finding:
+
+```bash
+./scripts/maintenance.py security-scan --enforce
+```
+
+### Reports, state, and metrics
+
+Runtime output is ignored by Git and separated by sensitivity:
+
+| Directory | Mode | Contents |
+|---|---:|---|
+| `security-state/` | `0700` | Private state, Trivy and uv caches, and scheduler lock |
+| `security-reports/` | `0700` | Timestamped private Trivy JSON and KEV evidence; files are `0600` |
+| `security-metrics/` | `0755` | One aggregate `0644` Prometheus textfile with no CVE IDs or secrets |
+
+Override these roots with `IMAGE_SECURITY_STATE_DIR`,
+`IMAGE_SECURITY_REPORT_DIR`, and `IMAGE_SECURITY_METRICS_DIR`. Set
+`IMAGE_SECURITY_RETENTION_DAYS` to change the default 30-day report retention,
+and `IMAGE_SECURITY_COMMAND_TIMEOUT_SECONDS` to change the default 900-second
+per-command limit.
+
+Private JSON state is the source of truth. Every attempt regenerates the entire
+Prometheus file, including explicit failed/never-successful sentinels. A failed
+database update, registry request, KEV retrieval, or image scan therefore
+cannot leave a stale `success=1` result. The metrics are written to a non-`.prom`
+temporary file, flushed, synchronized, and atomically renamed without
+client-side sample timestamps.
+
+### Time-limited exceptions
+
+Security exceptions live in `security/exceptions.toml`. Each exception must
+identify the service, vulnerability, package, installed version, reviewer,
+technical reason, and expiry date. Raw reports remain complete; exceptions
+only affect the unexcepted policy metrics and `--enforce` result.
+
+Do not add permanent wildcard exceptions. An expired exception is no longer
+applied, and Grafana warns seven days before the earliest active exception
+expires.
+
+### Prometheus and Grafana alerts
+
+The Compose configuration enables node-exporter's official textfile collector
+and mounts `security-metrics/` read-only. Grafana provisions the rules under
+`grafana/alerting/`. Recreate these two services after deploying this change:
+
+```bash
+docker compose up -d --force-recreate node-exporter grafana
+```
+
+Provisioned rules alert on:
+
+- unexcepted fixable Critical and CISA KEV findings;
+- per-service scan failure or a result older than 36 hours;
+- failed, missing, or stale scheduler runs;
+- missing/unparseable node-exporter textfile metrics;
+- Trivy database and KEV feed staleness;
+- running images outside scan coverage; and
+- exceptions expiring within seven days.
+
+The repository deliberately does not commit notification credentials. Configure
+an existing Grafana contact point and notification policy in the Grafana UI, or
+provision one using an environment-sourced secret. A firing rule without a
+routed contact point is visible in Grafana but cannot notify an operator.
+Grafana reads file-provisioned alerting resources at startup.
+
+### Run the scheduler inside the stack
+
+The optional `security` Compose profile runs the same scanner and policy inside
+the stack. It executes once when started and then daily at 02:45 in the host's
+timezone. Set the deployment account's Linux UID and GID in `.env` so the
+non-root monitor can write the three bind-mounted runtime directories:
+
+```bash
+IMAGE_SECURITY_UID=1000
+IMAGE_SECURITY_GID=1000
+```
+
+Use `id -u` and `id -g` on the Linux deployment host rather than assuming those
+example values. Start only the security services:
+
+```bash
+docker compose --profile security up -d --build image-security-monitor
+docker compose logs -f image-security-monitor
+```
+
+Change the daily time or disable the immediate startup scan with
+`IMAGE_SECURITY_SCHEDULE_HOUR`, `IMAGE_SECURITY_SCHEDULE_MINUTE`, and
+`IMAGE_SECURITY_RUN_ON_START` in `.env`. `COMPOSE_PROJECT_NAME` must match the
+project label on the containers being scanned; `.env.example` pins it to
+`litellm-stack` so it does not vary with the checkout directory.
+
+The default scope assumes both LiteLLM profiles are running. For a production-
+only or development-only deployment, set `IMAGE_SECURITY_SERVICES` accordingly:
+
+```bash
+IMAGE_SECURITY_SERVICES=litellm-prod
+```
+
+To scan every running immutable remote image instead, override the service
+command with `["--all"]` in a Compose override file.
+
+The monitor image contains the same pinned Trivy release and invokes it directly,
+so it does not create nested scanner containers. It obtains only read-only
+container and image metadata through the separately pinned
+`image-security-docker-proxy`; the monitor itself never receives the host Docker
+socket. The proxy is isolated on a dedicated, unpublished network, permits only
+Docker `GET` requests for the container and image API sections, and denies all
+write requests. The proxy necessarily mounts the Docker socket, so keep it
+isolated and pinned as configured.
+
+Stop and remove the in-stack scheduler with:
+
+```bash
+docker compose --profile security rm -sf image-security-monitor image-security-docker-proxy
+```
+
+### Install the nightly Linux host schedule
+
+The alternative host-scheduled mode uses a system-level systemd timer. Install
+it at 02:45 local time while explicitly selecting a non-root account that already
+has access to the Docker daemon:
+
+```bash
+sudo /usr/local/bin/uv run --script scripts/maintenance.py \
+  security-schedule install \
+  --service-user litellm \
+  --uv-path /usr/local/bin/uv \
+  --project litellm-stack
+```
+
+Choose another time when needed:
+
+```bash
+sudo /usr/local/bin/uv run --script scripts/maintenance.py \
+  security-schedule install \
+  --service-user litellm \
+  --uv-path /usr/local/bin/uv \
+  --project litellm-stack \
+  --hour 3 \
+  --minute 30
+```
+
+Replace `litellm` and `/usr/local/bin/uv` with the deployment account and the
+absolute `uv` path on the host. Do not use `root` as the service account. The
+installer writes `litellm-stack-image-security.service` and
+`litellm-stack-image-security.timer` under `/etc/systemd/system`, enables the
+persistent timer, and grants write access only to the state, report, and metrics
+directories. The service applies systemd filesystem, device, privilege, kernel,
+and process hardening while retaining the network and Docker access required by
+the scanner. Output is available in the system journal:
+
+When the deployment uses non-default runtime locations, pass them explicitly
+rather than relying on environment preservation through `sudo`:
+
+```bash
+--state-dir /var/lib/litellm-security/state \
+--report-dir /var/lib/litellm-security/reports \
+--metrics-dir /srv/litellm-stack/security-metrics \
+--exceptions-file /srv/litellm-stack/security/exceptions.toml
+```
+
+```bash
+systemctl status litellm-stack-image-security.timer
+journalctl -u litellm-stack-image-security.service
+```
+
+Inspect or remove the schedule through the maintenance entry point:
+
+```bash
+./scripts/maintenance.py security-schedule status
+sudo /usr/local/bin/uv run --script scripts/maintenance.py \
+  security-schedule uninstall
+```
+
+The scanner service fails if the selected account cannot access Docker. Verify
+that access before installation with `sudo -u litellm docker info`. Keep the
+working tree and `security-metrics/` path accessible to both that account and
+Docker.
+
+Use either the Compose scheduler or the systemd timer for a deployment, not both.
+The scanner lock prevents concurrent corruption, but duplicate schedules add no
+coverage and can create avoidable failed-run alerts.
+
+Before enabling vulnerability pages, verify scanner-health alerts by testing a
+missing metrics file, unavailable registry, failed Trivy database update, stale
+KEV feed, and a partial service-scan failure. Enable KEV/Critical notification
+routing only after these failure signals are proven.
+
+## 17. Back up the databases
 
 Run the repository-owned backup script while `postgres` and `vector-postgres`
 are healthy:
 
 ```bash
-./scripts/backup-databases.sh
+./scripts/backup-databases.py
 ```
 
 It creates PostgreSQL custom-format dumps for `litellm_prod`, `litellm_dev`, and
@@ -981,7 +1254,7 @@ retention when needed:
 ```bash
 BACKUP_DIR=/secure/litellm-backups \
 BACKUP_RETENTION_DAYS=30 \
-./scripts/backup-databases.sh
+./scripts/backup-databases.py
 ```
 
 Only directories created by the script with the expected name, metadata,
@@ -989,11 +1262,12 @@ checksum manifest, and at least one known database dump are eligible for
 retention cleanup. A directory containing an unexpected file, subdirectory, or
 symbolic link is retained and produces a warning.
 
-For a daily cron job at 02:15 UTC, use an absolute repository path:
+For a daily cron job at 02:15 UTC, use absolute repository and `uv` paths.
+Find the latter with `command -v uv` in the account that owns the cron job:
 
 ```cron
 CRON_TZ=UTC
-15 2 * * * cd /absolute/path/to/litellm-stack && BACKUP_DIR=/secure/litellm-backups BACKUP_RETENTION_DAYS=30 ./scripts/backup-databases.sh >>/var/log/litellm-backup.log 2>&1
+15 2 * * * cd /absolute/path/to/litellm-stack && BACKUP_DIR=/secure/litellm-backups BACKUP_RETENTION_DAYS=30 /absolute/path/to/uv run --script ./scripts/backup-databases.py >>/var/log/litellm-backup.log 2>&1
 ```
 
 The script intentionally does not copy `.env`, TLS private keys, or live
@@ -1008,7 +1282,7 @@ to the target host, configure its `.env`, and start only the database services:
 
 ```bash
 docker compose up -d --wait postgres vector-postgres
-./scripts/restore-databases.sh \
+./scripts/restore-databases.py \
   --confirm-restore \
   /secure/litellm-backups/<backup>
 ```
@@ -1038,27 +1312,27 @@ required.
 Test the procedure in a non-production instance regularly. After a successful
 restore, start the application services and rerun the stack verification checks.
 
-## 16. Validate and roll back a LiteLLM image upgrade
+## 18. Validate and roll back a LiteLLM image upgrade
 
 The single maintenance entry point exposes the routine operational workflows:
 
 ```bash
-./scripts/maintenance.sh help
-./scripts/maintenance.sh doctor
-./scripts/maintenance.sh status
-./scripts/maintenance.sh backup
-./scripts/maintenance.sh post-upgrade
+./scripts/maintenance.py help
+./scripts/maintenance.py doctor
+./scripts/maintenance.py status
+./scripts/maintenance.py backup
+./scripts/maintenance.py post-upgrade
 ```
 
 It delegates to the focused scripts below without weakening their validation,
 confirmation flags, or exit codes. Restore and rollback remain explicit:
 
 ```bash
-./scripts/maintenance.sh restore \
+./scripts/maintenance.py restore \
   --confirm-restore \
   /secure/litellm-backups/<backup>
 
-./scripts/maintenance.sh rollback \
+./scripts/maintenance.py rollback \
   --confirm-rollback \
   --mode image-only
 ```
@@ -1070,7 +1344,7 @@ only when the candidate is not already present locally:
 ```bash
 CANDIDATE_IMAGE='ghcr.io/berriai/litellm-database:<version>@sha256:<digest>'
 
-./scripts/check-litellm-upgrade-compatibility.sh \
+./scripts/check-litellm-upgrade-compatibility.py \
   --candidate-image "$CANDIDATE_IMAGE" \
   --pull
 ```
@@ -1079,7 +1353,7 @@ The compatibility check and rollback-point preparation can also run as one
 fail-fast command:
 
 ```bash
-./scripts/maintenance.sh pre-upgrade \
+./scripts/maintenance.py pre-upgrade \
   --candidate-image "$CANDIDATE_IMAGE" \
   --pull
 ```
@@ -1093,7 +1367,7 @@ Immediately before changing the image digest, capture the deployed images,
 configuration checksums, and a fresh database backup:
 
 ```bash
-./scripts/prepare-litellm-upgrade.sh
+./scripts/prepare-litellm-upgrade.py
 ```
 
 The resulting private state is stored under ignored `upgrade-state/`. Do not
@@ -1106,14 +1380,14 @@ After updating both LiteLLM image references to the tested digest and recreating
 the proxies, run the complete regression suite:
 
 ```bash
-./scripts/verify-litellm-upgrade.sh
+./scripts/verify-litellm-upgrade.py
 ```
 
 List or select checks when diagnosing a failure:
 
 ```bash
-./scripts/verify-litellm-upgrade.sh --list
-./scripts/verify-litellm-upgrade.sh --only compose-health,prod-auth,logs
+./scripts/verify-litellm-upgrade.py --list
+./scripts/verify-litellm-upgrade.py --only compose-health,prod-auth,logs
 ```
 
 The suite checks Compose health and exposure, authentication, prod/dev
@@ -1126,7 +1400,7 @@ present, a failed assertion makes the command exit nonzero.
 If the prior image can read the current schema, roll back images only:
 
 ```bash
-./scripts/rollback-litellm-upgrade.sh \
+./scripts/rollback-litellm-upgrade.py \
   --confirm-rollback \
   --mode image-only
 ```
@@ -1135,7 +1409,7 @@ If the upgrade migrated the database incompatibly, restore the pre-upgrade
 backup and images together:
 
 ```bash
-./scripts/rollback-litellm-upgrade.sh \
+./scripts/rollback-litellm-upgrade.py \
   --confirm-rollback \
   --mode restore-db
 ```

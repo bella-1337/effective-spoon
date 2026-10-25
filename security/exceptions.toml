@@ -1,0 +1,12 @@
+version = 1
+
+# Add narrowly scoped, time-limited exceptions only after reviewing a finding.
+#
+# [[exceptions]]
+# service = "litellm-prod"
+# vulnerability = "CVE-YYYY-NNNN"
+# package = "package-name"
+# installed_version = "1.2.3"
+# expires = "2026-12-31"
+# reason = "Vulnerable code path is unreachable; upstream fix is pending."
+# reviewed_by = "operator-name"

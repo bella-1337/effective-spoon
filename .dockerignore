@@ -1,3 +1,9 @@
 **
 !pgvector/
 !pgvector/Dockerfile
+!scripts/
+!scripts/maintenance_common.py
+!scripts/monitor-image-vulnerabilities.py
+!scripts/run-image-security-scheduler.py
+!security/
+!security/exceptions.toml

@@ -17,6 +17,16 @@ litellm/secrets/
 logs/
 backups/
 upgrade-state/
+security-metrics/*
+!security-metrics/.gitkeep
+security-reports/*
+!security-reports/.gitkeep
+security-state/*
+!security-state/.gitkeep
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
 
 # OS and editor state
 .DS_Store

@@ -1,0 +1,324 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: image-security-findings
+    folder: Security
+    interval: 1m
+    rules:
+      - uid: image-security-fixable-critical
+        title: Image has an unexcepted fixable Critical vulnerability
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: sum by (service) (image_security_unexcepted_fixable_critical{job="node"}) > bool 0
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "Fixable Critical image vulnerability detected"
+          description: "The {{ $labels.service }} image has at least one unexcepted fixable Critical finding. Review the private Trivy report."
+        labels:
+          severity: critical
+          source: image-security
+
+      - uid: image-security-kev
+        title: Image has an unexcepted known-exploited vulnerability
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: sum by (service) (image_security_unexcepted_kev{job="node"}) > bool 0
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "Known-exploited image vulnerability detected"
+          description: "The {{ $labels.service }} image matches the CISA KEV catalog without an active exception."
+        labels:
+          severity: critical
+          source: image-security
+
+  - orgId: 1
+    name: image-security-health
+    folder: Security
+    interval: 1m
+    rules:
+      - uid: image-security-service-scan-failed
+        title: Image vulnerability scan failed
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: min by (service) (image_security_scan_success{job="node"}) < bool 1
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: "Image vulnerability scan failed"
+          description: "The latest scan attempt for {{ $labels.service }} failed."
+        labels:
+          severity: warning
+          source: image-security
+
+      - uid: image-security-service-scan-stale
+        title: Image vulnerability result is stale
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: (time() - max by (service) (image_security_scan_last_success_timestamp_seconds{job="node"})) > bool 129600
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: "Image vulnerability result is stale"
+          description: "The last successful scan for {{ $labels.service }} is more than 36 hours old."
+        labels:
+          severity: warning
+          source: image-security
+
+      - uid: image-security-run-failed
+        title: Scheduled image-security run failed
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: image_security_scan_run_success{job="node"} < bool 1
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: "Scheduled image-security run failed"
+          description: "The latest complete image-security monitoring run failed."
+        labels:
+          severity: warning
+          source: image-security
+
+      - uid: image-security-run-stale
+        title: Scheduled image-security run is stale
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: (time() - image_security_scan_run_timestamp_seconds{job="node"}) > bool 129600
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: "Scheduled image-security run is stale"
+          description: "No image-security run has completed in the last 36 hours."
+        labels:
+          severity: warning
+          source: image-security
+
+      - uid: image-security-metrics-missing
+        title: Image-security metrics file is missing
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 900, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: absent_over_time(node_textfile_mtime_seconds{job="node",file="/textfile/image-security.prom"}[15m]) or vector(0)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: "Image-security metrics file is missing"
+          description: "Node-exporter has not observed the image-security textfile for 15 minutes."
+        labels:
+          severity: warning
+          source: image-security
+
+      - uid: image-security-textfile-error
+        title: Node-exporter cannot parse image-security metrics
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: (max(node_textfile_scrape_error{job="node"}) or vector(0)) > bool 0
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: "Node-exporter textfile collection failed"
+          description: "Node-exporter reported an error parsing the dedicated image-security metrics directory."
+        labels:
+          severity: warning
+          source: image-security
+
+      - uid: image-security-trivy-db-stale
+        title: Trivy vulnerability database is stale
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: (time() - image_security_trivy_db_timestamp_seconds{job="node"}) > bool 172800
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 1h
+        annotations:
+          summary: "Trivy vulnerability database is stale"
+          description: "The vulnerability database is more than 48 hours old."
+        labels:
+          severity: warning
+          source: image-security
+
+      - uid: image-security-kev-feed-stale
+        title: CISA KEV feed is stale
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: (time() - image_security_kev_feed_timestamp_seconds{job="node"}) > bool 604800
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 1h
+        annotations:
+          summary: "CISA KEV feed is stale"
+          description: "The last successful KEV feed retrieval is more than seven days old."
+        labels:
+          severity: warning
+          source: image-security
+
+      - uid: image-security-image-unknown
+        title: Running image is outside vulnerability scan coverage
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: sum by (service, reason) (image_security_images_unknown{job="node"}) > bool 0
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: OK
+        execErrState: Alerting
+        for: 1h
+        annotations:
+          summary: "Running image is outside vulnerability scan coverage"
+          description: "{{ $labels.service }} is not scanned: {{ $labels.reason }}."
+        labels:
+          severity: info
+          source: image-security
+
+      - uid: image-security-exception-expiring
+        title: Image-security exception expires soon
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: (image_security_exception_earliest_expiry_timestamp_seconds{job="node"} > 0) and ((image_security_exception_earliest_expiry_timestamp_seconds{job="node"} - time()) < 604800)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: OK
+        execErrState: Alerting
+        for: 1h
+        annotations:
+          summary: "Image-security exception expires within seven days"
+          description: "Review or remove the expiring image-security exception."
+        labels:
+          severity: info
+          source: image-security

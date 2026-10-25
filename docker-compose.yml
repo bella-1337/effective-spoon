@@ -34,6 +34,7 @@ x-langfuse-environment: &langfuse-environment
 networks:
   edge: {}
   internal: {}
+  security-monitor: {}
 
 volumes:
   pg-data: {}
@@ -433,6 +434,7 @@ services:
       - grafana-data:/var/lib/grafana
       - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/alerting:/etc/grafana/provisioning/alerting:ro
     networks: [edge, internal]
     restart: unless-stopped
     labels:
@@ -444,7 +446,7 @@ services:
 
   litellm-prod:
     profiles: [prod]
-    image: ghcr.io/berriai/litellm:v1.105.1@sha256:b7b9e2c306343721802253d0dd9436b9634a2eb4e14da7c7cf06c5c7b7530802
+    image: ghcr.io/berriai/litellm:v1.106.3@sha256:74d0696a9f0afcc993c7659d246f0c542f003368298633e852228250779f1032
     command:
       - --config=/app/config.yaml
       - --port=4000
@@ -659,10 +661,78 @@ services:
     pid: host
     command:
       - --path.rootfs=/host
+      - --collector.textfile.directory=/textfile
     volumes:
       - /:/host:ro
+      - ./security-metrics:/textfile:ro
     networks: [internal]
     restart: unless-stopped
+
+  image-security-docker-proxy:
+    profiles: [security]
+    image: ghcr.io/tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    environment:
+      CONTAINERS: "1"
+      IMAGES: "1"
+      POST: "0"
+      LOG_LEVEL: warning
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [security-monitor]
+    tmpfs:
+      - /run:mode=0755
+      - /tmp:mode=1777
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:2375/_ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  image-security-monitor:
+    profiles: [security]
+    image: litellm-image-security-monitor:0.1.0
+    build:
+      context: .
+      dockerfile: security/image-monitor.Dockerfile
+    user: "${IMAGE_SECURITY_UID:-1000}:${IMAGE_SECURITY_GID:-1000}"
+    environment:
+      COMPOSE_PROJECT_NAME: "${COMPOSE_PROJECT_NAME:-litellm-stack}"
+      DOCKER_HOST: tcp://image-security-docker-proxy:2375
+      IMAGE_SECURITY_STATE_DIR: /data/state
+      IMAGE_SECURITY_REPORT_DIR: /data/reports
+      IMAGE_SECURITY_METRICS_DIR: /data/metrics
+      IMAGE_SECURITY_EXCEPTIONS_FILE: /app/security/exceptions.toml
+      IMAGE_SECURITY_TRIVY_EXECUTABLE: /usr/local/bin/trivy
+      IMAGE_SECURITY_SCHEDULE_HOUR: "${IMAGE_SECURITY_SCHEDULE_HOUR:-2}"
+      IMAGE_SECURITY_SCHEDULE_MINUTE: "${IMAGE_SECURITY_SCHEDULE_MINUTE:-45}"
+      IMAGE_SECURITY_RUN_ON_START: "${IMAGE_SECURITY_RUN_ON_START:-true}"
+    command: ["--services", "${IMAGE_SECURITY_SERVICES:-litellm-prod,litellm-dev}"]
+    volumes:
+      - ./security-state:/data/state
+      - ./security-reports:/data/reports
+      - ./security-metrics:/data/metrics
+      - ./security/exceptions.toml:/app/security/exceptions.toml:ro
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      image-security-docker-proxy:
+        condition: service_healthy
+    networks: [security-monitor]
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=1g
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2500m
+          pids: 256
+    restart: on-failure:5
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
