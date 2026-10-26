@@ -1424,6 +1424,14 @@ restore, start the application services and rerun the stack verification checks.
 
 ## 18. Validate and roll back a LiteLLM image upgrade
 
+Before evaluating which development-only capabilities can move to production,
+review the versioned
+[`development-to-production capability promotion register`](docs/dev-to-prod-promotion-register.md).
+For each new stable LiteLLM candidate, use the repository-owned
+[`release-delta prompt`](docs/prompts/create-dev-to-prod-delta.md) to create a
+separate evidence-based delta. Image upgrades and capability activation are
+separate rollout steps.
+
 The single maintenance entry point exposes the routine operational workflows:
 
 ```bash
