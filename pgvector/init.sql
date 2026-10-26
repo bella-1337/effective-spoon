@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS vector_stores (
     name text NOT NULL,
     file_counts jsonb NOT NULL DEFAULT '{"in_progress":0,"completed":0,"failed":0,"cancelled":0,"total":0}'::jsonb,
     status text NOT NULL DEFAULT 'completed',
-    usage_bytes integer NOT NULL DEFAULT 0 CHECK (usage_bytes >= 0),
+    usage_bytes bigint NOT NULL DEFAULT 0 CHECK (usage_bytes >= 0),
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT NOW(),
     expires_after jsonb,

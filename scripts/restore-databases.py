@@ -33,9 +33,11 @@ USAGE = """Usage:
 
 Restores databases present in a backup created by backup-databases.py.
 
-This operation drops and recreates each target database found in the backup.
-Start only postgres and vector-postgres in the target Compose project. LiteLLM
-and the pgvector connector must remain stopped until restoration is complete.
+This operation restores each archive into staging and renames the current target
+aside before promotion.
+Start only postgres and vector-postgres in the target Compose project. LiteLLM,
+Grafana, the pgvector connector, and the pgvector exporter must remain stopped
+until restoration is complete.
 """
 DATABASES = (("postgres", "litellm_prod"), ("postgres", "litellm_dev"), ("vector-postgres", "vector_store"))
 ALLOWED_FILES = {"litellm_prod.dump", "litellm_dev.dump", "vector_store.dump", "metadata.txt", "SHA256SUMS"}
@@ -81,15 +83,99 @@ def read_metadata(backup: Path) -> tuple[list[str], dict[str, str]]:
 
 
 def require_application_services_stopped() -> None:
-    for service in ("litellm-prod", "litellm-dev", "litellm-pgvector"):
+    for service in (
+        "litellm-prod",
+        "litellm-dev",
+        "litellm-pgvector",
+        "grafana",
+        "pgvector-exporter",
+    ):
         if service_is_running(service):
-            fail(f"application service '{service}' must be stopped before restoration")
+            fail(f"database client '{service}' must be stopped before restoration")
 
 
 def postgres_command(service: str, command: str, *arguments: str) -> bool:
     username = container_environment(service, "POSTGRES_USER")
     result = compose(
         ["exec", "-T", service, command, "--username", username, *arguments],
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def database_exists(service: str, database: str) -> bool:
+    if not re.fullmatch(r"[a-z0-9_]+", database):
+        fail("refusing to query an unsafe database identifier")
+    username = container_environment(service, "POSTGRES_USER")
+    result = compose_capture(
+        [
+            "exec",
+            "-T",
+            service,
+            "psql",
+            "--username",
+            username,
+            "--dbname",
+            "postgres",
+            "--no-psqlrc",
+            "--quiet",
+            "--tuples-only",
+            "--no-align",
+            "--set",
+            "ON_ERROR_STOP=1",
+            "--command",
+            f"SELECT 1 FROM pg_database WHERE datname = '{database}'",
+        ],
+        check=False,
+    )
+    return result.strip() == "1"
+
+
+def rename_database(service: str, source: str, destination: str) -> bool:
+    if not re.fullmatch(r"[a-z0-9_]+", source) or not re.fullmatch(
+        r"[a-z0-9_]+", destination
+    ):
+        fail("refusing to rename a database with an unsafe identifier")
+    username = container_environment(service, "POSTGRES_USER")
+    terminate_result = compose(
+        [
+            "exec",
+            "-T",
+            service,
+            "psql",
+            "--username",
+            username,
+            "--dbname",
+            "postgres",
+            "--no-psqlrc",
+            "--set",
+            "ON_ERROR_STOP=1",
+            "--command",
+            (
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                f"WHERE datname = '{source}' AND pid <> pg_backend_pid()"
+            ),
+        ],
+        check=False,
+    )
+    if terminate_result.returncode:
+        return False
+    result = compose(
+        [
+            "exec",
+            "-T",
+            service,
+            "psql",
+            "--username",
+            username,
+            "--dbname",
+            "postgres",
+            "--no-psqlrc",
+            "--set",
+            "ON_ERROR_STOP=1",
+            "--command",
+            f'ALTER DATABASE "{source}" RENAME TO "{destination}"',
+        ],
         check=False,
     )
     return result.returncode == 0
@@ -102,6 +188,7 @@ def remove_staging_database(service: str, staging: str) -> None:
 
 def restore_database(service: str, database: str, archive: Path) -> bool:
     staging = f"{database}_restore_{os.getpid()}"
+    previous = f"{database}_pre_restore_{os.getpid()}"
     if not service_is_running(service):
         print(f"ERROR: cannot restore {database} because service {service} is unavailable", file=sys.stderr)
         return False
@@ -147,23 +234,33 @@ def restore_database(service: str, database: str, archive: Path) -> bool:
         remove_staging_database(service, staging)
         return False
     print(f"Replacing target database {database}...")
-    if not postgres_command(service, "dropdb", "--if-exists", "--force", database):
-        print(f"ERROR: could not replace target database {database}; recovered data remains in {staging}", file=sys.stderr)
-        return False
-    if database not in {item[1] for item in DATABASES} or not re.fullmatch(r"[a-z0-9_]+", staging):
-        fail("refusing to promote a database with an unsafe identifier")
-    promote_sql = f'ALTER DATABASE "{staging}" RENAME TO "{database}"'
-    promote = compose(
-        [
-            "exec", "-T", service, "psql",
-            "--username", container_environment(service, "POSTGRES_USER"),
-            "--dbname", "postgres", "--no-psqlrc", "--set", "ON_ERROR_STOP=1",
-            "--command", promote_sql,
-        ],
-        check=False,
-    )
-    if promote.returncode:
-        print(f"ERROR: could not promote staged restore for {database}; recovered data remains in {staging}", file=sys.stderr)
+    target_existed = database_exists(service, database)
+    if target_existed:
+        if database_exists(service, previous):
+            print(
+                f"ERROR: safety database already exists for {database}: {previous}",
+                file=sys.stderr,
+            )
+            return False
+        if not rename_database(service, database, previous):
+            print(
+                f"ERROR: could not preserve current target database {database}",
+                file=sys.stderr,
+            )
+            return False
+    if not rename_database(service, staging, database):
+        if target_existed and not rename_database(service, previous, database):
+            print(
+                f"ERROR: promotion and automatic recovery failed for {database}; "
+                f"recover the prior data from {previous}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"ERROR: could not promote staged restore for {database}; "
+                f"recovered data remains in {staging}",
+                file=sys.stderr,
+            )
         return False
     if not postgres_command(
         service,
@@ -171,8 +268,28 @@ def restore_database(service: str, database: str, archive: Path) -> bool:
         "--dbname", database, "--no-psqlrc", "--set", "ON_ERROR_STOP=1",
         "--command", "SELECT 1",
     ):
-        print(f"ERROR: post-promotion connection check failed for {database}", file=sys.stderr)
+        if target_existed:
+            restored_preserved = rename_database(service, database, staging)
+            prior_restored = restored_preserved and rename_database(
+                service, previous, database
+            )
+            if not prior_restored:
+                print(
+                    f"ERROR: post-promotion check and automatic recovery failed for "
+                    f"{database}; inspect {database}, {staging}, and {previous}",
+                    file=sys.stderr,
+                )
+                return False
+        print(
+            f"ERROR: post-promotion connection check failed for {database}",
+            file=sys.stderr,
+        )
         return False
+    if target_existed:
+        print(
+            f"Preserved the pre-restore database as {previous}; remove it only "
+            "after application verification succeeds"
+        )
     return True
 
 

@@ -1,0 +1,47 @@
+name: Validate stack
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Prepare ignored validation inputs
+        run: |
+          cp .env.example .env
+          mkdir -p litellm/secrets
+          printf '%s\n' 'sk-ci-validation-placeholder' > litellm/secrets/litellm-master-key
+          chmod 600 litellm/secrets/litellm-master-key
+
+      - name: Validate Python
+        run: |
+          python3 -m compileall -q scripts litellm/modules
+          python3 -m unittest discover -s scripts/tests -v
+
+      - name: Validate Compose profiles
+        run: |
+          docker compose --profile prod --profile dev \
+            --profile demo --profile security config --quiet
+
+      - name: Validate provisioned JSON
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          for path in Path("grafana").rglob("*.json"):
+              with path.open(encoding="utf-8") as source:
+                  value = json.load(source)
+              if not isinstance(value, dict):
+                  raise SystemExit(f"{path}: expected a JSON object")
+          PY

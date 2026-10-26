@@ -408,12 +408,24 @@ services:
           memory: 2g
     networks: [internal]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   presidio-anonymizer:
     logging: *default-logging
     image: mcr.microsoft.com/presidio-anonymizer:latest@sha256:a10a12a2a613d13cf29d3ad3641e3258444dd8c90403dd644a0a114c472c2483
     networks: [internal]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   searxng:
     logging: *default-logging
@@ -809,9 +821,9 @@ services:
       postgres-init:
         condition: service_completed_successfully
       presidio-analyzer:
-        condition: service_started
+        condition: service_healthy
       presidio-anonymizer:
-        condition: service_started
+        condition: service_healthy
     networks: [edge, internal, xberg-sandbox]
     restart: unless-stopped
     healthcheck:
@@ -883,6 +895,9 @@ services:
       QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
       XBERG_INDEX_EMBEDDING_MODEL: hosted_vllm/bge-m3
       XBERG_INDEX_EMBEDDING_API_BASE: http://bge-m3-vllm:8000
+      XBERG_AUTO_INDEX_ENABLED: ${XBERG_AUTO_INDEX_ENABLED:-false}
+      PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
+      PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000
       PROXY_BASE_URL: https://${LITELLM_DEV_HOST}
       FORWARDED_ALLOW_IPS: "*"
     depends_on:

@@ -48,6 +48,7 @@ QDRANT_API_KEY=<strong-random-value>
 LITELLM_MASTER_KEY=sk-<strong-random-value>
 OPENAI_API_KEY=<provider-api-key>
 BGE_M3_VLLM_GPU_MEMORY_UTILIZATION=0.35
+XBERG_AUTO_INDEX_ENABLED=false
 GRAFANA_ADMIN_PASSWORD=<strong-random-password>
 GRAFANA_SECURITY_SECRET_KEY=<strong-random-secret>
 SEARXNG_SECRET=<strong-random-secret>
@@ -89,6 +90,7 @@ All values are required:
 | `LITELLM_MASTER_KEY` | Administrative/authentication key for LiteLLM |
 | `OPENAI_API_KEY` | Provider credential used by the configured models |
 | `BGE_M3_VLLM_GPU_MEMORY_UTILIZATION` | Fraction of GPU memory reserved by the BGE-M3 vLLM process |
+| `XBERG_AUTO_INDEX_ENABLED` | Explicit operator opt-in for development Xberg extraction indexing; defaults to `false` |
 | `GRAFANA_ADMIN_PASSWORD` | Initial Grafana administrator password |
 | `GRAFANA_SECURITY_SECRET_KEY` | Stable secret used to encrypt Grafana datasource and notification credentials |
 | `SEARXNG_SECRET` | Secret used to sign SearXNG data |
@@ -305,9 +307,10 @@ want to refresh those upstream assets:
 ./scripts/fetch-dashboards.py
 ```
 
-The script uses Python's HTTPS client with certificate verification and overwrites
-its named downloaded files. Review changes before committing them; dashboard JSON
-is upstream content, not a secret.
+The script uses Python's HTTPS client with certificate verification, immutable
+dashboard revisions or source commits, size limits, JSON validation, and pinned
+SHA-256 checksums. Updating a dashboard therefore requires reviewing the
+upstream change and updating both its immutable URL and expected checksum.
 
 ## 5. Configure Prometheus metrics authentication
 
@@ -1012,10 +1015,10 @@ statements are comments; review and apply them manually only when appropriate.
 ## 14. pgvector storage
 
 The stack deploys a separate PostgreSQL 16 database with pgvector 0.8.1. Its
-named `pgvector-data` volume starts with an empty `sme-knowledge` store. In the
-development profile, every successful Xberg `extract` call automatically
-chunks and indexes the extracted text in this store using local `bge-m3`
-embeddings.
+named `pgvector-data` volume starts with an empty `sme-knowledge` store. In the development profile, Xberg extraction indexing is disabled by default.
+When the operator explicitly sets `XBERG_AUTO_INDEX_ENABLED=true`, successful
+Xberg `extract` calls with trusted principal attribution are anonymized through
+Presidio, chunked, and indexed in this store using local `bge-m3` embeddings.
 Docker named volumes grow with stored data; Compose does not preallocate 50 GB.
 Monitor the volume and host filesystem and alert before either is exhausted.
 
@@ -1058,16 +1061,19 @@ writes with an unknown store, the wrong vector dimensions, and empty content.
 Every invalid attempt must fail and the final vector row count must remain
 unchanged.
 
-Automatic indexing is implemented by
+Opt-in automatic indexing is implemented by
 `litellm/modules/xberg_auto_index.py` through LiteLLM's
 `async_post_mcp_tool_call_hook`. It applies only to the `xberg` server's
-`extract` tool. Each source is limited to 1,000,000 extracted characters and
+`extract` tool and stores the trusted pseudonymous principal in chunk metadata.
+Each source is limited to 1,000,000 extracted characters and
 256 chunks; chunks are approximately 4,000 characters with overlap. Repeating
 an extraction atomically replaces that source's existing chunks instead of
 creating duplicates. URL query strings, fragments, and credentials are not
 stored in source metadata.
 
-Indexing is best effort and runs as a bounded background task after extraction:
+Extracted content must pass through Presidio before embedding; a Presidio
+failure fails closed for indexing while leaving the original tool response
+available. Indexing is best effort and runs as a bounded background task after extraction:
 an embedding-service or vector-database failure is logged while the original
 Xberg response is still returned to the caller. The task times out after three
 minutes and can be lost if the development proxy stops before it finishes; call
@@ -1440,11 +1446,12 @@ docker compose up -d --wait postgres vector-postgres
   /secure/litellm-backups/<backup>
 ```
 
-The confirmation flag is mandatory because each database found in the backup is
-dropped and recreated. The restore script refuses to run while `litellm-prod`,
-`litellm-dev`, or `litellm-pgvector` is running. It rejects symbolic links,
-unexpected files, unknown databases, malformed metadata, unsafe checksum
-entries, and checksum mismatches before changing a target database.
+The confirmation flag is mandatory because each database found in the backup
+replaces its current target. The restore script refuses to run while
+`litellm-prod`, `litellm-dev`, `litellm-pgvector`, Grafana, or the pgvector
+exporter is running. It rejects symbolic links, unexpected files, unknown
+databases, malformed metadata, unsafe checksum entries, and checksum mismatches
+before changing a target database.
 
 Full and fault-tolerant partial backups are supported. A database omitted from
 the backup metadata is skipped. If a required target database service is
@@ -1452,9 +1459,12 @@ unavailable, the script records that restore as failed, continues with the
 remaining databases, and exits nonzero after reporting all failures. Each
 archive is restored with a single transaction into a staging database and
 checked for restored tables before the existing target is replaced. An archive
-error therefore leaves the existing target untouched. If the final staging
-promotion fails after the old target is dropped, the script reports the
-staging-database name so the successfully restored data can be recovered.
+error therefore leaves the existing target untouched. Before promotion, an
+existing target is renamed to a process-specific `*_pre_restore_*` safety
+database rather than dropped. The script terminates stale database sessions and
+automatically restores that prior database if promotion or the post-promotion
+connection check fails. After a successful application-level verification,
+remove the preserved safety database explicitly to reclaim its storage.
 
 `SHA256SUMS` detects accidental corruption but is not a cryptographic signature:
 someone able to replace both a dump and its manifest can produce matching new

@@ -13,6 +13,9 @@ ALTER TABLE vector_stores
     ADD COLUMN IF NOT EXISTS expires_after jsonb,
     ADD COLUMN IF NOT EXISTS expires_at timestamptz;
 
+ALTER TABLE vector_stores
+    ALTER COLUMN usage_bytes TYPE bigint;
+
 DO $migration$
 DECLARE
     current_dimensions text;
