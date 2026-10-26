@@ -1,0 +1,111 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: litellm-stack-production
+    folder: LiteLLM
+    interval: 1m
+    rules:
+      - uid: litellm-prod-unavailable
+        title: Production LiteLLM is unavailable
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 86400, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: (up{job="litellm-prod"} == 0) and on() (max_over_time(up{job="litellm-prod"}[24h]) == 1)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "Production LiteLLM is unavailable"
+          description: "The production target was healthy within the last 24 hours and has been unreachable for five minutes."
+        labels:
+          severity: critical
+          source: litellm-stack
+
+      - uid: litellm-postgres-unavailable
+        title: LiteLLM PostgreSQL is unavailable
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: (up{job="postgres"} == 0) or absent(up{job="postgres"})
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "LiteLLM PostgreSQL is unavailable"
+          description: "Prometheus cannot scrape the PostgreSQL exporter."
+        labels:
+          severity: critical
+          source: litellm-stack
+
+      - uid: litellm-host-disk-low
+        title: LiteLLM host disk space is low
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: min(node_filesystem_avail_bytes{job="node",fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{job="node",fstype!~"tmpfs|overlay|squashfs"}) < bool 0.15
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: "Host filesystem has less than 15% free space"
+          description: "A persistent host filesystem used by the stack has remained below the free-space threshold for 15 minutes."
+        labels:
+          severity: critical
+          source: litellm-stack
+
+      - uid: litellm-backup-stale
+        title: Complete database backup is stale
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 172800, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: (time() - litellm_backup_last_success_timestamp_seconds > bool 93600) or absent(litellm_backup_last_success_timestamp_seconds)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 30m
+        annotations:
+          summary: "No complete database backup in the last 26 hours"
+          description: "The complete-backup timestamp is absent or older than 26 hours. Partial backups do not update this metric."
+        labels:
+          severity: critical
+          source: litellm-stack

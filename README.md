@@ -1217,6 +1217,9 @@ Provisioned rules alert on:
 - Trivy database and KEV feed staleness;
 - running images outside scan coverage; and
 - exceptions expiring within seven days.
+- production LiteLLM becoming unavailable after previously being healthy;
+- PostgreSQL exporter loss and host disk exhaustion; and
+- a missing or stale complete database backup.
 
 The repository deliberately does not commit notification credentials. Configure
 an existing Grafana contact point and notification policy in the Grafana UI, or
@@ -1376,6 +1379,12 @@ of partial backups from aging out the last complete recovery point. The script
 fails without publishing an empty backup when no configured database is
 available. Errors while dumping or validating an existing database remain fatal
 so a corrupt archive is never reported as successful.
+
+After a complete backup, the script atomically publishes
+`litellm_backup_last_success_timestamp_seconds` in
+`security-metrics/litellm_backup.prom`. Node exporter exposes that value to
+Prometheus. Partial and failed backups do not advance it, so the provisioned
+backup-age alert detects a stale recovery point.
 
 Choose a destination on encrypted storage and change the default 14-day
 retention when needed:
