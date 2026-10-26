@@ -369,7 +369,7 @@ services:
     networks: [internal]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "xberg", "--version"]
+      test: ["CMD", "curl", "--silent", "--show-error", "--output", "/dev/null", "http://127.0.0.1:8001/mcp"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -642,10 +642,6 @@ services:
         condition: service_started
       presidio-anonymizer:
         condition: service_started
-      xberg:
-        condition: service_healthy
-      langfuse-web:
-        condition: service_healthy
     networks: [edge, internal]
     restart: unless-stopped
     healthcheck:

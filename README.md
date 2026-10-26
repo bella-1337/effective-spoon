@@ -450,6 +450,12 @@ Langfuse organization/SCIM APIs requires Enterprise. Keep the shared Langfuse
 project restricted to administrators and operators; do not present a saved user
 filter as access isolation.
 
+The production LiteLLM proxy does not use Xberg or Langfuse health as a startup
+gate. Tracing and extraction are auxiliary capabilities: an outage in either
+must not prevent the core authenticated model gateway from starting or being
+recreated. Their failures remain visible through service health, request errors,
+and the observability checks.
+
 ### View container logs in Grafana
 
 Grafana Alloy sends container standard output and standard error to Loki, so raw
