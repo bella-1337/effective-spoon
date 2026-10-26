@@ -471,7 +471,7 @@ services:
       HTTP_PROXY: http://xberg-egress-proxy:3128
       HTTPS_PROXY: http://xberg-egress-proxy:3128
       ALL_PROXY: http://xberg-egress-proxy:3128
-      NO_PROXY: ""
+      NO_PROXY: 127.0.0.1,localhost
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -489,7 +489,23 @@ services:
     networks: [xberg-sandbox]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "--silent", "--show-error", "--output", "/dev/null", "http://127.0.0.1:8001/mcp"]
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - --output
+        - /dev/null
+        - --request
+        - POST
+        - --header
+        - "Content-Type: application/json"
+        - --header
+        - "Accept: application/json, text/event-stream"
+        - --data
+        - '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"healthcheck","version":"1"}}}'
+        - http://127.0.0.1:8001/mcp
       interval: 30s
       timeout: 5s
       retries: 3
@@ -595,6 +611,7 @@ services:
     environment:
       CONTAINERS: "1"
       EVENTS: "1"
+      NETWORKS: "1"
       POST: "0"
       LOG_LEVEL: warning
     volumes:

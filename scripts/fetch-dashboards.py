@@ -93,6 +93,7 @@ def main() -> None:
         try:
             with os.fdopen(file_descriptor, "wb") as target:
                 target.write(content)
+            os.chmod(temporary, 0o644)
             os.replace(temporary, destination)
         finally:
             if temporary.exists():

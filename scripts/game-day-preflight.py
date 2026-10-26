@@ -84,6 +84,34 @@ def validate_contracts(config: dict[str, Any]) -> list[str]:
                 + ", ".join(sorted(forbidden))
             )
 
+    alloy_proxy = services.get("alloy-docker-proxy")
+    alloy_environment = (
+        alloy_proxy.get("environment", {}) if isinstance(alloy_proxy, dict) else {}
+    )
+    if not isinstance(alloy_environment, dict) or str(
+        alloy_environment.get("NETWORKS")
+    ) != "1":
+        failures.append("Alloy Docker discovery lacks read-only network metadata access")
+
+    xberg = services.get("xberg")
+    if not isinstance(xberg, dict):
+        failures.append("Compose configuration has no xberg service")
+    else:
+        xberg_environment = xberg.get("environment", {})
+        no_proxy = (
+            str(xberg_environment.get("NO_PROXY", ""))
+            if isinstance(xberg_environment, dict)
+            else ""
+        )
+        healthcheck = xberg.get("healthcheck", {})
+        health_test = (
+            healthcheck.get("test", []) if isinstance(healthcheck, dict) else []
+        )
+        if "127.0.0.1" not in no_proxy:
+            failures.append("Xberg loopback health traffic is not excluded from its proxy")
+        if not isinstance(health_test, list) or "--fail" not in health_test:
+            failures.append("Xberg healthcheck does not fail on HTTP error responses")
+
     for label, script in REQUIRED_SCRIPTS.items():
         if not script.is_file() or script.is_symlink():
             failures.append(f"Required {label} script is missing or unsafe: {script}")

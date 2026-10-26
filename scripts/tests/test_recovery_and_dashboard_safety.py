@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
@@ -160,6 +162,36 @@ class DashboardSupplyChainTests(unittest.TestCase):
             self.assertNotIn("/latest/", url)
             self.assertNotIn("/main/", url)
             self.assertRegex(checksum, r"^[0-9a-f]{64}$")
+
+    def test_fetched_dashboard_is_readable_by_grafana(self) -> None:
+        module = load_script("fetch-dashboards.py")
+        content = b'{"title":"test"}'
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = content
+        response.__exit__.return_value = False
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(module, "ROOT", Path(directory)),
+            patch.object(
+                module,
+                "DASHBOARDS",
+                (
+                    (
+                        "https://example.invalid/dashboard.json",
+                        "test/dashboard.json",
+                        hashlib.sha256(content).hexdigest(),
+                    ),
+                ),
+            ),
+            patch.object(module.urllib.request, "urlopen", return_value=response),
+            patch.object(sys, "argv", ["fetch-dashboards.py"]),
+        ):
+            module.main()
+            destination = (
+                Path(directory) / "grafana" / "dashboards" / "test" / "dashboard.json"
+            )
+            self.assertEqual(os.stat(destination).st_mode & 0o777, 0o644)
 
 
 if __name__ == "__main__":
