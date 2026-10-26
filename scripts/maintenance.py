@@ -42,7 +42,8 @@ Commands:
       removal require root; the scanner itself runs as a non-root account.
 
   backup
-      Run the fault-tolerant logical database backup.
+      Run the logical database backup. Partial backups are published for
+      recovery but exit nonzero and never trigger retention pruning.
       Configure BACKUP_DIR and BACKUP_RETENTION_DAYS through the environment.
 
   restore --confirm-restore BACKUP_DIRECTORY

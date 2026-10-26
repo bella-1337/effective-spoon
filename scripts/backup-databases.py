@@ -168,10 +168,12 @@ def main() -> None:
         )
         write_checksum_manifest(staging, [*dumps, "metadata.txt"])
         staging.rename(final)
-    prune_old_backups(root, int(retention_raw))
     print(f"Backup completed: {final}")
     if skipped:
         print(f"Completed with skipped resources: {','.join(skipped)}")
+        print("Older backups were not pruned because this backup is partial", file=sys.stderr)
+        raise SystemExit(3)
+    prune_old_backups(root, int(retention_raw))
     if shutil.which("sha256sum"):
         print(f"Verify with: cd {final} && sha256sum --check SHA256SUMS")
     elif shutil.which("shasum"):

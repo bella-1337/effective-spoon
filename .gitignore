@@ -17,6 +17,7 @@ litellm/secrets/
 logs/
 backups/
 upgrade-state/
+docker-compose.override.yml
 security-metrics/*
 !security-metrics/.gitkeep
 security-reports/*

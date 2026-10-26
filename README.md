@@ -1364,8 +1364,10 @@ complete.
 If a configured database service is unavailable or a database does not exist,
 the script writes a warning, records the reason in `metadata.txt`, and continues
 with the next database. A backup containing the remaining resources is still
-published and its checksum manifest includes only files that were created. The
-script fails without publishing an empty backup when no configured database is
+published and its checksum manifest includes only files that were created, but
+the command exits nonzero and does not prune older backups. This prevents a run
+of partial backups from aging out the last complete recovery point. The script
+fails without publishing an empty backup when no configured database is
 available. Errors while dumping or validating an existing database remain fatal
 so a corrupt archive is never reported as successful.
 
@@ -1549,11 +1551,11 @@ services before database restoration, checks proxy liveliness afterward, and
 writes a private report. It leaves application services stopped when database
 restoration fails.
 
-The runtime rollback uses a generated Compose override saved as
-`upgrade-state/<state>/reports/active-rollback-override.yml`. Before any later
-plain `docker compose up`, either update `docker-compose.yml` to pin the
-rollback digest or include that saved override with `-f`; otherwise Compose
-will reapply the image currently declared in the main file.
+The runtime rollback writes the validated image override to the ignored
+`docker-compose.override.yml` file, which Docker Compose loads automatically.
+The override remains active across ordinary `docker compose up` and maintenance
+commands until the pinned image in `docker-compose.yml` is deliberately updated
+and the override is removed. A copy is also retained with the rollback report.
 
 ## Stop, restart, and remove
 
