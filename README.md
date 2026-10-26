@@ -38,7 +38,11 @@ LANGFUSE_S3_HOST=langfuse-s3.example.test
 
 PG_USER=litellm
 PG_PASSWORD=<strong-random-password>
+GRAFANA_DATABASE_USER=grafana_ro
+GRAFANA_DATABASE_PASSWORD=<strong-random-password>
+PG_EXPORTER_PASSWORD=<strong-random-password>
 PG_VECTOR_PASSWORD=<strong-random-password>
+PG_VECTOR_EXPORTER_PASSWORD=<strong-random-password>
 PG_VECTOR_API_KEY=sk-<strong-random-value>
 QDRANT_API_KEY=<strong-random-value>
 LITELLM_MASTER_KEY=sk-<strong-random-value>
@@ -75,7 +79,11 @@ All values are required:
 | `LANGFUSE_S3_HOST` | Traefik hostname for Langfuse's signed media uploads |
 | `PG_USER` | PostgreSQL/LiteLLM database user |
 | `PG_PASSWORD` | PostgreSQL password |
+| `GRAFANA_DATABASE_USER` | Read-only PostgreSQL role used by Grafana; keep the default `grafana_ro` |
+| `GRAFANA_DATABASE_PASSWORD` | Password for the read-only Grafana database role |
+| `PG_EXPORTER_PASSWORD` | Password for the `pg_monitor` role used by the LiteLLM PostgreSQL exporter |
 | `PG_VECTOR_PASSWORD` | Password for the isolated pgvector database |
+| `PG_VECTOR_EXPORTER_PASSWORD` | Password for the `pg_monitor` role used by the pgvector exporter |
 | `PG_VECTOR_API_KEY` | Authentication key for the internal LiteLLM pgvector connector |
 | `QDRANT_API_KEY` | Authentication key for the development semantic-cache store |
 | `LITELLM_MASTER_KEY` | Administrative/authentication key for LiteLLM |

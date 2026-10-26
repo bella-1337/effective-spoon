@@ -111,15 +111,35 @@ services:
       PGHOST: postgres
       PGUSER: ${PG_USER}
       PGPASSWORD: ${PG_PASSWORD}
+      GRAFANA_DATABASE_PASSWORD: ${GRAFANA_DATABASE_PASSWORD:?Set GRAFANA_DATABASE_PASSWORD in .env}
+      PG_EXPORTER_PASSWORD: ${PG_EXPORTER_PASSWORD:?Set PG_EXPORTER_PASSWORD in .env}
     command:
       - /bin/sh
       - -ec
       - |
+        psql --dbname postgres --set ON_ERROR_STOP=1 <<'SQL'
+        \getenv grafana_password GRAFANA_DATABASE_PASSWORD
+        \getenv exporter_password PG_EXPORTER_PASSWORD
+        SELECT format('CREATE ROLE grafana_ro LOGIN PASSWORD %L', :'grafana_password')
+        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'grafana_ro') \gexec
+        SELECT format('ALTER ROLE grafana_ro PASSWORD %L', :'grafana_password') \gexec
+        SELECT format('CREATE ROLE litellm_exporter LOGIN PASSWORD %L', :'exporter_password')
+        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'litellm_exporter') \gexec
+        SELECT format('ALTER ROLE litellm_exporter PASSWORD %L', :'exporter_password') \gexec
+        GRANT pg_monitor TO litellm_exporter;
+        GRANT CONNECT ON DATABASE postgres TO litellm_exporter;
+        SQL
         for db in litellm_prod litellm_dev; do
           exists="$$(psql --dbname postgres --tuples-only --no-align --command "SELECT 1 FROM pg_database WHERE datname='$${db}'")"
           if [ "$${exists}" != "1" ]; then
             psql --dbname postgres --command "CREATE DATABASE \"$${db}\""
           fi
+          psql --dbname "$${db}" --set ON_ERROR_STOP=1 --set database_name="$${db}" <<'SQL'
+        GRANT CONNECT ON DATABASE :"database_name" TO grafana_ro;
+        GRANT USAGE ON SCHEMA public TO grafana_ro;
+        GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafana_ro;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO grafana_ro;
+        SQL
         done
     depends_on:
       postgres:
@@ -308,6 +328,33 @@ services:
     depends_on:
       vector-postgres:
         condition: service_healthy
+    networks: [internal]
+    restart: "no"
+
+  pgvector-access-init:
+    logging: *default-logging
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      PGHOST: vector-postgres
+      PGDATABASE: vector_store
+      PGUSER: vector
+      PGPASSWORD: ${PG_VECTOR_PASSWORD}
+      PG_VECTOR_EXPORTER_PASSWORD: ${PG_VECTOR_EXPORTER_PASSWORD:?Set PG_VECTOR_EXPORTER_PASSWORD in .env}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        psql --set ON_ERROR_STOP=1 <<'SQL'
+        \getenv exporter_password PG_VECTOR_EXPORTER_PASSWORD
+        SELECT format('CREATE ROLE vector_exporter LOGIN PASSWORD %L', :'exporter_password')
+        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'vector_exporter') \gexec
+        SELECT format('ALTER ROLE vector_exporter PASSWORD %L', :'exporter_password') \gexec
+        GRANT pg_monitor TO vector_exporter;
+        GRANT CONNECT ON DATABASE vector_store TO vector_exporter;
+        SQL
+    depends_on:
+      pgvector-migrate:
+        condition: service_completed_successfully
     networks: [internal]
     restart: "no"
 
@@ -624,13 +671,16 @@ services:
       GF_SECURITY_SECRET_KEY: ${GRAFANA_SECURITY_SECRET_KEY:?Set GRAFANA_SECURITY_SECRET_KEY in .env}
       GF_SERVER_ROOT_URL: https://${GRAFANA_HOST}
       GF_USERS_ALLOW_SIGN_UP: "false"
-      PG_USER: ${PG_USER}
-      PG_PASSWORD: ${PG_PASSWORD}
+      GRAFANA_DATABASE_USER: ${GRAFANA_DATABASE_USER:-grafana_ro}
+      GRAFANA_DATABASE_PASSWORD: ${GRAFANA_DATABASE_PASSWORD:?Set GRAFANA_DATABASE_PASSWORD in .env}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./grafana/alerting:/etc/grafana/provisioning/alerting:ro
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
     networks: [edge, internal]
     restart: unless-stopped
     labels:
@@ -843,10 +893,10 @@ services:
     logging: *default-logging
     image: prometheuscommunity/postgres-exporter:latest@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
     environment:
-      DATA_SOURCE_NAME: postgresql://${PG_USER}:${PG_PASSWORD}@postgres:5432/postgres?sslmode=disable
+      DATA_SOURCE_NAME: postgresql://litellm_exporter:${PG_EXPORTER_PASSWORD:?Set PG_EXPORTER_PASSWORD in .env}@postgres:5432/postgres?sslmode=disable
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
     networks: [internal]
     restart: unless-stopped
 
@@ -854,10 +904,10 @@ services:
     logging: *default-logging
     image: prometheuscommunity/postgres-exporter:latest@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
     environment:
-      DATA_SOURCE_NAME: postgresql://vector:${PG_VECTOR_PASSWORD}@vector-postgres:5432/vector_store?sslmode=disable
+      DATA_SOURCE_NAME: postgresql://vector_exporter:${PG_VECTOR_EXPORTER_PASSWORD:?Set PG_VECTOR_EXPORTER_PASSWORD in .env}@vector-postgres:5432/vector_store?sslmode=disable
     depends_on:
-      vector-postgres:
-        condition: service_healthy
+      pgvector-access-init:
+        condition: service_completed_successfully
     networks: [internal]
     restart: unless-stopped
 
