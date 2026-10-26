@@ -45,6 +45,7 @@ LITELLM_MASTER_KEY=sk-<strong-random-value>
 OPENAI_API_KEY=<provider-api-key>
 BGE_M3_VLLM_GPU_MEMORY_UTILIZATION=0.35
 GRAFANA_ADMIN_PASSWORD=<strong-random-password>
+GRAFANA_SECURITY_SECRET_KEY=<strong-random-secret>
 SEARXNG_SECRET=<strong-random-secret>
 LANGFUSE_POSTGRES_PASSWORD=<strong-url-safe-random-password>
 LANGFUSE_CLICKHOUSE_PASSWORD=<strong-random-password>
@@ -81,6 +82,7 @@ All values are required:
 | `OPENAI_API_KEY` | Provider credential used by the configured models |
 | `BGE_M3_VLLM_GPU_MEMORY_UTILIZATION` | Fraction of GPU memory reserved by the BGE-M3 vLLM process |
 | `GRAFANA_ADMIN_PASSWORD` | Initial Grafana administrator password |
+| `GRAFANA_SECURITY_SECRET_KEY` | Stable secret used to encrypt Grafana datasource and notification credentials |
 | `SEARXNG_SECRET` | Secret used to sign SearXNG data |
 | `LANGFUSE_POSTGRES_PASSWORD` | Password for Langfuse's isolated PostgreSQL database |
 | `LANGFUSE_CLICKHOUSE_PASSWORD` | Password for Langfuse trace storage |
@@ -311,7 +313,16 @@ grep '^LITELLM_MASTER_KEY=' .env | cut -d= -f2- \
 chmod 600 litellm/secrets/litellm-master-key
 ```
 
-Recreate this file whenever `LITELLM_MASTER_KEY` changes.
+The one-shot `prometheus-secrets-init` service copies this host-private file into
+a named volume with ownership and mode readable by the non-root Prometheus
+process. Recreate this file and restart `prometheus-secrets-init` and Prometheus
+whenever `LITELLM_MASTER_KEY` changes:
+
+```sh
+docker compose rm -f prometheus-secrets-init
+docker compose up -d prometheus-secrets-init
+docker compose up -d --force-recreate prometheus
+```
 
 ## 6. Validate configuration
 

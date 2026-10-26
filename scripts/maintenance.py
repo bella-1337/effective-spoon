@@ -125,6 +125,12 @@ def doctor() -> None:
         except SyntaxError:
             fail(f"scripts/{script} has invalid Python syntax")
         print(f"PASS: scripts/{script} is executable and has valid Python syntax")
+    prometheus_key = SCRIPTS_DIR.parent / "litellm" / "secrets" / "litellm-master-key"
+    if not prometheus_key.is_file() or prometheus_key.is_symlink():
+        fail("litellm/secrets/litellm-master-key is missing or unsafe")
+    if prometheus_key.stat().st_mode & 0o077:
+        fail("litellm/secrets/litellm-master-key must not be accessible to group or other users")
+    print("PASS: Prometheus credential source exists with private permissions")
     compose(["--profile", "prod", "config", "--quiet"])
     compose(["--profile", "dev", "config", "--quiet"])
     compose(["--profile", "security", "config", "--quiet"])
