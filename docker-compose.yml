@@ -41,6 +41,13 @@ networks:
   edge: {}
   internal: {}
   security-monitor: {}
+  traefik-monitor:
+    internal: true
+  alloy-monitor:
+    internal: true
+  xberg-sandbox:
+    internal: true
+  egress: {}
 
 volumes:
   pg-data: {}
@@ -64,6 +71,7 @@ services:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
       - --providers.docker.network=litellm-stack_edge
+      - --providers.docker.endpoint=tcp://traefik-docker-proxy:2375
       - --providers.file.filename=/etc/traefik/dynamic.yml
       - --providers.file.watch=true
       - --entrypoints.web.address=:80
@@ -81,10 +89,37 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
       - ./traefik/certs:/certs:ro
-    networks: [edge, internal]
+    depends_on:
+      traefik-docker-proxy:
+        condition: service_healthy
+    networks: [edge, internal, traefik-monitor]
+    restart: unless-stopped
+
+  traefik-docker-proxy:
+    logging: *default-logging
+    image: ghcr.io/tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    environment:
+      CONTAINERS: "1"
+      EVENTS: "1"
+      NETWORKS: "1"
+      SERVICES: "1"
+      POST: "0"
+      LOG_LEVEL: warning
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [traefik-monitor]
+    tmpfs:
+      - /run:mode=0755
+      - /tmp:mode=1777
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:2375/_ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     restart: unless-stopped
 
   postgres:
@@ -421,6 +456,10 @@ services:
       HF_HOME: /tmp/huggingface
       XBERG_MAX_REQUEST_BODY_BYTES: "10485760"
       XBERG_MAX_MULTIPART_FIELD_BYTES: "10485760"
+      HTTP_PROXY: http://xberg-egress-proxy:3128
+      HTTPS_PROXY: http://xberg-egress-proxy:3128
+      ALL_PROXY: http://xberg-egress-proxy:3128
+      NO_PROXY: ""
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -432,7 +471,10 @@ services:
         limits:
           cpus: "1"
           memory: 1g
-    networks: [internal]
+    depends_on:
+      xberg-egress-proxy:
+        condition: service_healthy
+    networks: [xberg-sandbox]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "--silent", "--show-error", "--output", "/dev/null", "http://127.0.0.1:8001/mcp"]
@@ -440,6 +482,28 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  xberg-egress-proxy:
+    logging: *default-logging
+    image: ubuntu/squid:6.13-25.04_edge@sha256:3de2e64f0ca6efdac3e98557607dc0f23050037f3885016d5d5bfcf9950501b8
+    command: ["-f", "/etc/squid/xberg-egress-squid.conf", "-NYC"]
+    volumes:
+      - ./security/xberg-egress-squid.conf:/etc/squid/xberg-egress-squid.conf:ro
+      - ./security/xberg-egress-allowlist.txt:/etc/squid/xberg-egress-allowlist.txt:ro
+    networks: [xberg-sandbox, egress]
+    read_only: true
+    tmpfs:
+      - /run:mode=0755
+      - /var/log/squid:uid=13,gid=13,mode=0750
+      - /var/spool/squid:uid=13,gid=13,mode=0750
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/usr/bin/bash", "-ec", ": >/dev/tcp/127.0.0.1/3128"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
 
   prometheus:
     logging: *default-logging
@@ -501,15 +565,39 @@ services:
   alloy:
     logging: *default-logging
     image: grafana/alloy:v1.10.2@sha256:bcf27f18c4402869af112fb39e35e1db3804a404686f4caa20bdf77814219223
-    user: "0:0"
+    user: "473:473"
     command: run /etc/alloy/config.alloy
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       loki:
         condition: service_healthy
-    networks: [internal]
+      alloy-docker-proxy:
+        condition: service_healthy
+    networks: [internal, alloy-monitor]
+    restart: unless-stopped
+
+  alloy-docker-proxy:
+    logging: *default-logging
+    image: ghcr.io/tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    environment:
+      CONTAINERS: "1"
+      EVENTS: "1"
+      POST: "0"
+      LOG_LEVEL: warning
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [alloy-monitor]
+    tmpfs:
+      - /run:mode=0755
+      - /tmp:mode=1777
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:2375/_ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     restart: unless-stopped
 
   langfuse-postgres:
@@ -724,7 +812,7 @@ services:
         condition: service_started
       presidio-anonymizer:
         condition: service_started
-    networks: [edge, internal]
+    networks: [edge, internal, xberg-sandbox]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
@@ -812,7 +900,7 @@ services:
         condition: service_healthy
       bge-m3-vllm:
         condition: service_healthy
-    networks: [edge, internal]
+    networks: [edge, internal, xberg-sandbox]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]

@@ -607,9 +607,11 @@ curl --fail --show-error --silent \
 
 Use `https://llm-dev.example.test` for the development profile. Xberg accepts
 remote URLs and therefore acts as a server-side fetcher. Grant MCP access only
-to trusted keys and teams. The Compose-internal placement prevents direct
-client access but does not by itself block Xberg from requesting private
-network destinations.
+to trusted keys and teams. Xberg has no direct route to the Internet or the
+stack's `internal` network: outbound HTTP and HTTPS must pass through the Squid
+proxy, which denies private, loopback, link-local, and non-allowlisted
+destinations. Review additions to `security/xberg-egress-allowlist.txt`; the
+secure default permits only the documented Xberg documentation host.
 
 The development gateway uses `BAAI/bge-m3` in the internal `bge-m3-vllm`
 container to semantically select up to three relevant MCP tools with a minimum
@@ -1234,6 +1236,11 @@ an existing Grafana contact point and notification policy in the Grafana UI, or
 provision one using an environment-sourced secret. A firing rule without a
 routed contact point is visible in Grafana but cannot notify an operator.
 Grafana reads file-provisioned alerting resources at startup.
+
+Traefik and Alloy reach Docker metadata through dedicated read-only socket
+proxies with Docker API `POST` disabled. They do not mount the Docker socket
+directly. Keep those proxies on their isolated internal networks and do not
+enable additional API sections unless the consumer demonstrably requires them.
 
 The same maintenance workflow verifies the router after upgrades. With the
 development profile running, the semantic-routing and observability checks fail
