@@ -33,6 +33,9 @@ jobs:
           docker compose --profile prod --profile dev \
             --profile demo --profile security config --quiet
 
+      - name: Validate game-day safety contracts
+        run: python3 scripts/game-day-preflight.py --env-file .env
+
       - name: Validate provisioned JSON
         run: |
           python3 - <<'PY'

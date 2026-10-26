@@ -1475,6 +1475,15 @@ required.
 Test the procedure in a non-production instance regularly. After a successful
 restore, start the application services and rerun the stack verification checks.
 
+For the quarterly failure and recovery exercise, follow
+[`OPERATIONS-GAME-DAY.md`](OPERATIONS-GAME-DAY.md). Its non-disruptive preflight
+checks the topology, alert, backup, restore, and rollback contracts before any
+live drill begins:
+
+```bash
+./scripts/game-day-preflight.py --env-file .env
+```
+
 ## 18. Validate and roll back a LiteLLM image upgrade
 
 Before evaluating which development-only capabilities can move to production,
