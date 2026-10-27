@@ -169,12 +169,13 @@ it or collect every Docker project.
 Runtime secrets are intentionally ignored by Git:
 
 - `.env`;
-- `traefik/certs/litellm-stack.pem`;
-- `traefik/certs/litellm-stack-key.pem`;
+- the certificate and private-key paths configured by `TRAEFIK_TLS_CERT_FILE`
+  and `TRAEFIK_TLS_KEY_FILE`;
 - `litellm/secrets/litellm-master-key`.
 
-Generate the certificate locally with `mkcert` and keep the hostnames in the
-certificate, `.env`, and local name resolution consistent. The Prometheus
+The on-prem certificate delivery process owns the host-side TLS files. Keep the
+hostnames in the delivered certificate, `.env`, DNS, and local name resolution
+consistent. `mkcert` is only a local-development fallback. The Prometheus
 credential file must contain only `LITELLM_MASTER_KEY`.
 
 ## Operational Checks

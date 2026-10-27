@@ -51,6 +51,15 @@ class RunImageSecuritySchedulerTests(unittest.TestCase):
                     "IMAGE_SECURITY_SCHEDULE_HOUR", 2, 23
                 )
 
+    def test_local_timezone_uses_configured_iana_timezone(self) -> None:
+        with patch.dict(os.environ, {"TZ": "Europe/Berlin"}, clear=False):
+            self.assertEqual(scheduler.local_timezone().key, "Europe/Berlin")
+
+    def test_local_timezone_rejects_unknown_timezone(self) -> None:
+        with patch.dict(os.environ, {"TZ": "Europe/Unknown"}, clear=False):
+            with self.assertRaises(RuntimeError):
+                scheduler.local_timezone()
+
     def test_run_monitor_uses_current_python_without_shell(self) -> None:
         class CompletedProcess:
             returncode = 0

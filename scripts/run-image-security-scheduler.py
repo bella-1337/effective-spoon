@@ -14,7 +14,7 @@ import sys
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from maintenance_common import fail, run_main
 
@@ -46,9 +46,16 @@ def environment_boolean(name: str, default: bool) -> bool:
 
 
 def local_timezone() -> ZoneInfo:
+    configured = os.environ.get("TZ")
+    if configured:
+        try:
+            return ZoneInfo(configured)
+        except ZoneInfoNotFoundError:
+            fail(f"TZ must be a valid IANA timezone: {configured}")
+
     localtime = Path("/etc/localtime")
     if not localtime.is_file():
-        fail("/etc/localtime must be a regular file")
+        fail("TZ is unset and /etc/localtime must be a regular file")
     with localtime.open("rb") as source:
         return ZoneInfo.from_file(source)
 

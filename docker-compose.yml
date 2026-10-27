@@ -1,13 +1,14 @@
-name: litellm-stack
+name: ${COMPOSE_PROJECT_NAME:-litellm-stack}
 
 x-langfuse-environment: &langfuse-environment
   HOSTNAME: 0.0.0.0
-  NEXTAUTH_URL: https://${LANGFUSE_WEB_HOST}
+  TZ: UTC
+  NEXTAUTH_URL: https://${LANGFUSE_WEB_HOST:-langfuse.example.test}
   DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASSWORD:?Set LANGFUSE_POSTGRES_PASSWORD in .env}@langfuse-postgres:5432/langfuse
   SALT: ${LANGFUSE_SALT:?Set LANGFUSE_SALT in .env}
   ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?Set LANGFUSE_ENCRYPTION_KEY in .env}
-  TELEMETRY_ENABLED: "false"
-  LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+  TELEMETRY_ENABLED: "${LANGFUSE_TELEMETRY_ENABLED:-false}"
+  LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}"
   CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
   CLICKHOUSE_URL: http://langfuse-clickhouse:8123
   CLICKHOUSE_USER: langfuse
@@ -25,17 +26,17 @@ x-langfuse-environment: &langfuse-environment
   LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:?Set LANGFUSE_MINIO_PASSWORD in .env}
   LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://langfuse-minio:9000
   LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
-  LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+  LANGFUSE_S3_BATCH_EXPORT_ENABLED: "${LANGFUSE_S3_BATCH_EXPORT_ENABLED:-false}"
   REDIS_HOST: langfuse-redis
   REDIS_PORT: "6379"
   REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:?Set LANGFUSE_REDIS_AUTH in .env}
-  REDIS_TLS_ENABLED: "false"
+  REDIS_TLS_ENABLED: "${LANGFUSE_REDIS_TLS_ENABLED:-false}"
 
 x-default-logging: &default-logging
   driver: json-file
   options:
-    max-size: "10m"
-    max-file: "3"
+    max-size: "${LOG_MAX_SIZE:-10m}"
+    max-file: "${LOG_MAX_FILE:-3}"
 
 networks:
   edge: {}
@@ -70,7 +71,7 @@ services:
     command:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
-      - --providers.docker.network=litellm-stack_edge
+      - --providers.docker.network=${COMPOSE_PROJECT_NAME:-litellm-stack}_edge
       - --providers.docker.endpoint=tcp://traefik-docker-proxy:2375
       - --providers.file.filename=/etc/traefik/dynamic.yml
       - --providers.file.watch=true
@@ -90,7 +91,14 @@ services:
       - "443:443"
     volumes:
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
-      - ./traefik/certs:/certs:ro
+      - type: bind
+        source: ${TRAEFIK_TLS_CERT_FILE:-./traefik/certs/litellm-stack.pem}
+        target: /certs/tls.crt
+        read_only: true
+      - type: bind
+        source: ${TRAEFIK_TLS_KEY_FILE:-./traefik/certs/litellm-stack-key.pem}
+        target: /certs/tls.key
+        read_only: true
     depends_on:
       traefik-docker-proxy:
         condition: service_healthy
@@ -106,7 +114,7 @@ services:
       NETWORKS: "1"
       SERVICES: "1"
       POST: "0"
-      LOG_LEVEL: warning
+      LOG_LEVEL: ${DOCKER_SOCKET_PROXY_LOG_LEVEL:-warning}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [traefik-monitor]
@@ -127,8 +135,8 @@ services:
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       POSTGRES_DB: litellm_prod
-      POSTGRES_USER: ${PG_USER}
-      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      POSTGRES_USER: ${PG_USER:-litellm}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?Set PG_PASSWORD in .env}
     volumes:
       - pg-data:/var/lib/postgresql/data
     networks: [internal]
@@ -144,8 +152,8 @@ services:
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       PGHOST: postgres
-      PGUSER: ${PG_USER}
-      PGPASSWORD: ${PG_PASSWORD}
+      PGUSER: ${PG_USER:-litellm}
+      PGPASSWORD: ${PG_PASSWORD:?Set PG_PASSWORD in .env}
       GRAFANA_DATABASE_PASSWORD: ${GRAFANA_DATABASE_PASSWORD:?Set GRAFANA_DATABASE_PASSWORD in .env}
       PG_EXPORTER_PASSWORD: ${PG_EXPORTER_PASSWORD:?Set PG_EXPORTER_PASSWORD in .env}
     command:
@@ -188,7 +196,7 @@ services:
     environment:
       POSTGRES_DB: vector_store
       POSTGRES_USER: vector
-      POSTGRES_PASSWORD: ${PG_VECTOR_PASSWORD}
+      POSTGRES_PASSWORD: ${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}
     volumes:
       - pgvector-data:/var/lib/postgresql/data
       - ./pgvector/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
@@ -208,15 +216,15 @@ services:
       QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
       QDRANT__TELEMETRY_DISABLED: "true"
     tmpfs:
-      - /qdrant/storage:rw,noexec,nosuid,size=1g
+      - /qdrant/storage:rw,noexec,nosuid,size=${QDRANT_STORAGE_SIZE:-1g}
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 2g
+          cpus: "${QDRANT_CPU_LIMIT:-1}"
+          memory: ${QDRANT_MEMORY_LIMIT:-2g}
     networks: [internal]
     restart: unless-stopped
     healthcheck:
@@ -232,15 +240,15 @@ services:
     image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
     command:
       - --model
-      - BAAI/bge-m3
+      - ${BGE_M3_MODEL:-BAAI/bge-m3}
       - --served-model-name
-      - bge-m3
+      - ${BGE_M3_SERVED_MODEL_NAME:-bge-m3}
       - --runner
       - pooling
       - --dtype
-      - half
+      - ${BGE_M3_DTYPE:-half}
       - --max-model-len
-      - "8192"
+      - "${BGE_M3_MAX_MODEL_LEN:-8192}"
       - --gpu-memory-utilization
       - ${BGE_M3_VLLM_GPU_MEMORY_UTILIZATION:-0.35}
     environment:
@@ -248,7 +256,7 @@ services:
       VLLM_CACHE_ROOT: /tmp/vllm
     volumes:
       - bge-m3-vllm-cache:/root/.cache/huggingface
-    shm_size: 2gb
+    shm_size: ${BGE_M3_SHM_SIZE:-2gb}
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -258,7 +266,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 6g
+          memory: ${BGE_M3_MEMORY_LIMIT:-6g}
         reservations:
           devices:
             - driver: nvidia
@@ -271,7 +279,7 @@ services:
       interval: 20s
       timeout: 10s
       retries: 15
-      start_period: 15m
+      start_period: ${BGE_M3_HEALTH_START_PERIOD:-15m}
 
   vllm-semantic-router:
     logging: *default-logging
@@ -293,8 +301,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2"
-          memory: 7g
+          cpus: "${VLLM_SR_CPU_LIMIT:-2}"
+          memory: ${VLLM_SR_MEMORY_LIMIT:-7g}
     networks: [internal]
     restart: unless-stopped
     healthcheck:
@@ -302,14 +310,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 30
-      start_period: 5m
+      start_period: ${VLLM_SR_HEALTH_START_PERIOD:-5m}
 
   vllm-semantic-router-envoy:
     logging: *default-logging
     profiles: [dev]
     image: envoyproxy/envoy:v1.36.2@sha256:4972515dd9a069b44beb43cebba7851596e72a8c61cd7a7c33d8f48efc5280ba
     user: "101:101"
-    command: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "warning"]
+    command: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "${VLLM_SR_ENVOY_LOG_LEVEL:-warning}"]
     volumes:
       - ./vllm-semantic-router/envoy.yaml:/etc/envoy/envoy.yaml:ro
     cap_drop: [ALL]
@@ -321,8 +329,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 512m
+          cpus: "${VLLM_SR_ENVOY_CPU_LIMIT:-1}"
+          memory: ${VLLM_SR_ENVOY_MEMORY_LIMIT:-512m}
     depends_on:
       vllm-semantic-router:
         condition: service_healthy
@@ -338,7 +346,7 @@ services:
       start_period: 10s
     labels:
       - traefik.enable=true
-      - traefik.http.routers.vllm-semantic-router.rule=Host(`${VLLM_SR_HOST}`)
+      - traefik.http.routers.vllm-semantic-router.rule=Host(`${VLLM_SR_HOST:-llm-router.example.test}`)
       - traefik.http.routers.vllm-semantic-router.entrypoints=websecure
       - traefik.http.routers.vllm-semantic-router.tls=true
       - traefik.http.services.vllm-semantic-router.loadbalancer.server.port=8899
@@ -350,7 +358,7 @@ services:
       PGHOST: vector-postgres
       PGDATABASE: vector_store
       PGUSER: vector
-      PGPASSWORD: ${PG_VECTOR_PASSWORD}
+      PGPASSWORD: ${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}
     command:
       - psql
       - --no-psqlrc
@@ -373,7 +381,7 @@ services:
       PGHOST: vector-postgres
       PGDATABASE: vector_store
       PGUSER: vector
-      PGPASSWORD: ${PG_VECTOR_PASSWORD}
+      PGPASSWORD: ${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}
       PG_VECTOR_EXPORTER_PASSWORD: ${PG_VECTOR_EXPORTER_PASSWORD:?Set PG_VECTOR_EXPORTER_PASSWORD in .env}
     command:
       - /bin/sh
@@ -397,15 +405,15 @@ services:
     logging: *default-logging
     image: mcr.microsoft.com/presidio-analyzer:latest@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
     environment:
-      PRESIDIO_NLP_ENGINE: spacy
-      PRESIDIO_SUPPORTED_LANGUAGES: en
+      PRESIDIO_NLP_ENGINE: ${PRESIDIO_NLP_ENGINE:-spacy}
+      PRESIDIO_SUPPORTED_LANGUAGES: ${PRESIDIO_SUPPORTED_LANGUAGES:-en}
       NLP_CONF_FILE: /app/presidio_analyzer/conf/litellm-analyzer.yaml
     volumes:
       - ./presidio/analyzer.yaml:/app/presidio_analyzer/conf/litellm-analyzer.yaml:ro
     deploy:
       resources:
         limits:
-          memory: 2g
+          memory: ${PRESIDIO_ANALYZER_MEMORY_LIMIT:-2g}
     networks: [internal]
     restart: unless-stopped
     healthcheck:
@@ -433,15 +441,15 @@ services:
     volumes:
       - ./searxng:/etc/searxng:rw
     environment:
-      SEARXNG_BASE_URL: https://${SEARXNG_HOST}/
-      SEARXNG_SECRET: ${SEARXNG_SECRET}
+      SEARXNG_BASE_URL: https://${SEARXNG_HOST:-search.example.test}/
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?Set SEARXNG_SECRET in .env}
     cap_drop: [ALL]
     cap_add: [CHOWN, SETGID, SETUID]
     networks: [edge, internal]
     restart: unless-stopped
     labels:
       - traefik.enable=true
-      - traefik.http.routers.searxng.rule=Host(`${SEARXNG_HOST}`)
+      - traefik.http.routers.searxng.rule=Host(`${SEARXNG_HOST:-search.example.test}`)
       - traefik.http.routers.searxng.entrypoints=websecure
       - traefik.http.routers.searxng.tls=true
       - traefik.http.services.searxng.loadbalancer.server.port=8080
@@ -463,11 +471,11 @@ services:
       - --allowed-host
       - xberg:8001
     environment:
-      RUST_LOG: info
+      RUST_LOG: ${XBERG_LOG_LEVEL:-info}
       XBERG_CACHE_DIR: /tmp/xberg-cache
       HF_HOME: /tmp/huggingface
-      XBERG_MAX_REQUEST_BODY_BYTES: "10485760"
-      XBERG_MAX_MULTIPART_FIELD_BYTES: "10485760"
+      XBERG_MAX_REQUEST_BODY_BYTES: "${XBERG_MAX_REQUEST_BODY_BYTES:-10485760}"
+      XBERG_MAX_MULTIPART_FIELD_BYTES: "${XBERG_MAX_MULTIPART_FIELD_BYTES:-10485760}"
       HTTP_PROXY: http://xberg-egress-proxy:3128
       HTTPS_PROXY: http://xberg-egress-proxy:3128
       ALL_PROXY: http://xberg-egress-proxy:3128
@@ -481,8 +489,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 1g
+          cpus: "${XBERG_CPU_LIMIT:-1}"
+          memory: ${XBERG_MEMORY_LIMIT:-1g}
     depends_on:
       xberg-egress-proxy:
         condition: service_healthy
@@ -539,8 +547,8 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=15d
-      - --storage.tsdb.retention.size=10GB
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION_TIME:-15d}
+      - --storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-10GB}
     volumes:
       - ./litellm/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-secrets:/etc/prometheus/secrets:ro
@@ -613,7 +621,7 @@ services:
       EVENTS: "1"
       NETWORKS: "1"
       POST: "0"
-      LOG_LEVEL: warning
+      LOG_LEVEL: ${DOCKER_SOCKET_PROXY_LOG_LEVEL:-warning}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [alloy-monitor]
@@ -688,7 +696,7 @@ services:
       start_period: 5s
     labels:
       - traefik.enable=true
-      - traefik.http.routers.langfuse-s3.rule=Host(`${LANGFUSE_S3_HOST}`)
+      - traefik.http.routers.langfuse-s3.rule=Host(`${LANGFUSE_S3_HOST:-langfuse-s3.example.test}`)
       - traefik.http.routers.langfuse-s3.entrypoints=websecure
       - traefik.http.routers.langfuse-s3.tls=true
       - traefik.http.services.langfuse-s3.loadbalancer.server.port=9000
@@ -743,19 +751,19 @@ services:
     environment:
       <<: *langfuse-environment
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?Set LANGFUSE_NEXTAUTH_SECRET in .env}
-      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: https://${LANGFUSE_S3_HOST}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: https://${LANGFUSE_S3_HOST:-langfuse-s3.example.test}
       LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://langfuse-minio:9000
-      LANGFUSE_INIT_ORG_ID: litellm-stack
-      LANGFUSE_INIT_ORG_NAME: LiteLLM Stack
-      LANGFUSE_INIT_PROJECT_ID: litellm
-      LANGFUSE_INIT_PROJECT_NAME: LiteLLM
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-litellm-stack}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-LiteLLM Stack}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-litellm}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-LiteLLM}
       LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?Set LANGFUSE_PUBLIC_KEY in .env}
       LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?Set LANGFUSE_SECRET_KEY in .env}
       LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:?Set LANGFUSE_INIT_USER_EMAIL in .env}
       LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:?Set LANGFUSE_INIT_USER_NAME in .env}
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:?Set LANGFUSE_INIT_USER_PASSWORD in .env}
-      LANGFUSE_TRUSTED_PROXY_COUNT: "1"
-      LANGFUSE_DISABLE_SIGNUP_ONBOARDING: "true"
+      LANGFUSE_TRUSTED_PROXY_COUNT: "${LANGFUSE_TRUSTED_PROXY_COUNT:-1}"
+      LANGFUSE_DISABLE_SIGNUP_ONBOARDING: "${LANGFUSE_DISABLE_SIGNUP_ONBOARDING:-true}"
     depends_on:
       langfuse-postgres:
         condition: service_healthy
@@ -775,7 +783,7 @@ services:
       start_period: 30s
     labels:
       - traefik.enable=true
-      - traefik.http.routers.langfuse.rule=Host(`${LANGFUSE_WEB_HOST}`)
+      - traefik.http.routers.langfuse.rule=Host(`${LANGFUSE_WEB_HOST:-langfuse.example.test}`)
       - traefik.http.routers.langfuse.entrypoints=websecure
       - traefik.http.routers.langfuse.tls=true
       - traefik.http.services.langfuse.loadbalancer.server.port=3000
@@ -784,10 +792,10 @@ services:
     logging: *default-logging
     image: grafana/grafana:latest@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
       GF_SECURITY_SECRET_KEY: ${GRAFANA_SECURITY_SECRET_KEY:?Set GRAFANA_SECURITY_SECRET_KEY in .env}
-      GF_SERVER_ROOT_URL: https://${GRAFANA_HOST}
-      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: https://${GRAFANA_HOST:-grafana.example.test}
+      GF_USERS_ALLOW_SIGN_UP: "${GRAFANA_ALLOW_SIGN_UP:-false}"
       GRAFANA_DATABASE_USER: ${GRAFANA_DATABASE_USER:-grafana_ro}
       GRAFANA_DATABASE_PASSWORD: ${GRAFANA_DATABASE_PASSWORD:?Set GRAFANA_DATABASE_PASSWORD in .env}
     volumes:
@@ -802,7 +810,7 @@ services:
     restart: unless-stopped
     labels:
       - traefik.enable=true
-      - traefik.http.routers.grafana.rule=Host(`${GRAFANA_HOST}`)
+      - traefik.http.routers.grafana.rule=Host(`${GRAFANA_HOST:-grafana.example.test}`)
       - traefik.http.routers.grafana.entrypoints=websecure
       - traefik.http.routers.grafana.tls=true
       - traefik.http.services.grafana.loadbalancer.server.port=3000
@@ -818,22 +826,22 @@ services:
       - ./litellm/config.prod.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
     environment:
-      DATABASE_URL: postgresql://${PG_USER}:${PG_PASSWORD}@postgres:5432/litellm_prod
-      STORE_MODEL_IN_DB: "True"
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      LITELLM_OTEL_V2: "true"
+      DATABASE_URL: postgresql://${PG_USER:-litellm}:${PG_PASSWORD:?Set PG_PASSWORD in .env}@postgres:5432/litellm_prod
+      STORE_MODEL_IN_DB: "${LITELLM_STORE_MODEL_IN_DB:-True}"
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
       LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""
       LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""
       LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""
-      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: no_content
-      OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: ".*"
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: ${OTEL_GENAI_CAPTURE_MESSAGE_CONTENT:-no_content}
+      OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: "${OTEL_PYTHON_FASTAPI_EXCLUDED_URLS:-.*}"
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?Set LANGFUSE_PUBLIC_KEY in .env}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?Set LANGFUSE_SECRET_KEY in .env}
       LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:?Set LANGFUSE_USER_ID_SALT in .env}
       LANGFUSE_HOST: http://langfuse-web:3000
-      PROXY_BASE_URL: https://${LITELLM_PROD_HOST}
-      FORWARDED_ALLOW_IPS: "*"
+      PROXY_BASE_URL: https://${LITELLM_PROD_HOST:-llm.example.test}
+      FORWARDED_ALLOW_IPS: "${LITELLM_FORWARDED_ALLOW_IPS:-*}"
     depends_on:
       postgres-init:
         condition: service_completed_successfully
@@ -851,7 +859,7 @@ services:
       start_period: 30s
     labels:
       - traefik.enable=true
-      - traefik.http.routers.litellm-prod.rule=Host(`${LITELLM_PROD_HOST}`)
+      - traefik.http.routers.litellm-prod.rule=Host(`${LITELLM_PROD_HOST:-llm.example.test}`)
       - traefik.http.routers.litellm-prod.entrypoints=websecure
       - traefik.http.routers.litellm-prod.tls=true
       - traefik.http.services.litellm-prod.loadbalancer.server.port=4000
@@ -863,8 +871,8 @@ services:
     environment:
       PGHOST: postgres
       PGDATABASE: litellm_prod
-      PGUSER: ${PG_USER}
-      PGPASSWORD: ${PG_PASSWORD}
+      PGUSER: ${PG_USER:-litellm}
+      PGPASSWORD: ${PG_PASSWORD:?Set PG_PASSWORD in .env}
     command:
       - psql
       - --no-psqlrc
@@ -891,32 +899,32 @@ services:
       - ./litellm/config.dev.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
     environment:
-      DATABASE_URL: postgresql://${PG_USER}:${PG_PASSWORD}@postgres:5432/litellm_dev
-      STORE_MODEL_IN_DB: "True"
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      LITELLM_OTEL_V2: "true"
+      DATABASE_URL: postgresql://${PG_USER:-litellm}:${PG_PASSWORD:?Set PG_PASSWORD in .env}@postgres:5432/litellm_dev
+      STORE_MODEL_IN_DB: "${LITELLM_STORE_MODEL_IN_DB:-True}"
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
       LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""
       LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""
       LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""
-      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: no_content
-      OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: ".*"
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: ${OTEL_GENAI_CAPTURE_MESSAGE_CONTENT:-no_content}
+      OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: "${OTEL_PYTHON_FASTAPI_EXCLUDED_URLS:-.*}"
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?Set LANGFUSE_PUBLIC_KEY in .env}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?Set LANGFUSE_SECRET_KEY in .env}
       LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:?Set LANGFUSE_USER_ID_SALT in .env}
       LANGFUSE_HOST: http://langfuse-web:3000
       PG_VECTOR_API_BASE: http://litellm-pgvector:8000
-      PG_VECTOR_API_KEY: ${PG_VECTOR_API_KEY}
-      VECTOR_DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD}@vector-postgres:5432/vector_store
+      PG_VECTOR_API_KEY: ${PG_VECTOR_API_KEY:?Set PG_VECTOR_API_KEY in .env}
+      VECTOR_DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}@vector-postgres:5432/vector_store
       QDRANT_API_BASE: http://qdrant:6333
       QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
-      XBERG_INDEX_EMBEDDING_MODEL: hosted_vllm/bge-m3
+      XBERG_INDEX_EMBEDDING_MODEL: ${XBERG_INDEX_EMBEDDING_MODEL:-hosted_vllm/bge-m3}
       XBERG_INDEX_EMBEDDING_API_BASE: http://bge-m3-vllm:8000
       XBERG_AUTO_INDEX_ENABLED: ${XBERG_AUTO_INDEX_ENABLED:-false}
       PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
       PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000
-      PROXY_BASE_URL: https://${LITELLM_DEV_HOST}
-      FORWARDED_ALLOW_IPS: "*"
+      PROXY_BASE_URL: https://${LITELLM_DEV_HOST:-llm-dev.example.test}
+      FORWARDED_ALLOW_IPS: "${LITELLM_FORWARDED_ALLOW_IPS:-*}"
     depends_on:
       postgres-init:
         condition: service_completed_successfully
@@ -942,7 +950,7 @@ services:
       start_period: 30s
     labels:
       - traefik.enable=true
-      - traefik.http.routers.litellm-dev.rule=Host(`${LITELLM_DEV_HOST}`)
+      - traefik.http.routers.litellm-dev.rule=Host(`${LITELLM_DEV_HOST:-llm-dev.example.test}`)
       - traefik.http.routers.litellm-dev.entrypoints=websecure
       - traefik.http.routers.litellm-dev.tls=true
       - traefik.http.services.litellm-dev.loadbalancer.server.port=4000
@@ -954,8 +962,8 @@ services:
     environment:
       PGHOST: postgres
       PGDATABASE: litellm_dev
-      PGUSER: ${PG_USER}
-      PGPASSWORD: ${PG_PASSWORD}
+      PGUSER: ${PG_USER:-litellm}
+      PGPASSWORD: ${PG_PASSWORD:?Set PG_PASSWORD in .env}
     command:
       - psql
       - --no-psqlrc
@@ -981,14 +989,14 @@ services:
       additional_contexts:
         upstream: https://github.com/BerriAI/litellm-pgvector.git#5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
     environment:
-      DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD}@vector-postgres:5432/vector_store?schema=public
-      SERVER_API_KEY: ${PG_VECTOR_API_KEY}
+      DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}@vector-postgres:5432/vector_store?schema=public
+      SERVER_API_KEY: ${PG_VECTOR_API_KEY:?Set PG_VECTOR_API_KEY in .env}
       HOST: 0.0.0.0
       PORT: "8000"
-      EMBEDDING__MODEL: openai/bge-m3
+      EMBEDDING__MODEL: ${PGVECTOR_EMBEDDING_MODEL:-openai/bge-m3}
       EMBEDDING__BASE_URL: http://litellm-dev:4000
-      EMBEDDING__API_KEY: ${LITELLM_MASTER_KEY}
-      EMBEDDING__DIMENSIONS: "1024"
+      EMBEDDING__API_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
+      EMBEDDING__DIMENSIONS: "${PGVECTOR_EMBEDDING_DIMENSIONS:-1024}"
     depends_on:
       pgvector-migrate:
         condition: service_completed_successfully
@@ -1052,7 +1060,7 @@ services:
       CONTAINERS: "1"
       IMAGES: "1"
       POST: "0"
-      LOG_LEVEL: warning
+      LOG_LEVEL: ${DOCKER_SOCKET_PROXY_LOG_LEVEL:-warning}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [security-monitor]
@@ -1078,6 +1086,7 @@ services:
     user: "${IMAGE_SECURITY_UID:-1000}:${IMAGE_SECURITY_GID:-1000}"
     environment:
       COMPOSE_PROJECT_NAME: "${COMPOSE_PROJECT_NAME:-litellm-stack}"
+      TZ: "${STACK_TIMEZONE:-Europe/Berlin}"
       DOCKER_HOST: tcp://image-security-docker-proxy:2375
       IMAGE_SECURITY_STATE_DIR: /data/state
       IMAGE_SECURITY_REPORT_DIR: /data/reports
@@ -1093,7 +1102,6 @@ services:
       - ./security-reports:/data/reports
       - ./security-metrics:/data/metrics
       - ./security/exceptions.toml:/app/security/exceptions.toml:ro
-      - /etc/localtime:/etc/localtime:ro
     depends_on:
       image-security-docker-proxy:
         condition: service_healthy
@@ -1107,10 +1115,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2"
-          memory: 2500m
-          pids: 256
-    restart: on-failure:5
+          cpus: "${IMAGE_SECURITY_CPU_LIMIT:-2}"
+          memory: ${IMAGE_SECURITY_MEMORY_LIMIT:-2500m}
+          pids: ${IMAGE_SECURITY_PIDS_LIMIT:-256}
+    restart: ${IMAGE_SECURITY_RESTART_POLICY:-on-failure:5}
 
   cadvisor:
     logging: *default-logging
