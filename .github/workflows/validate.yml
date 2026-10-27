@@ -1,6 +1,8 @@
-name: Validate stack
+name: CI
 
 on:
+  workflow_call:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [master]
@@ -8,43 +10,55 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
-      - name: Prepare ignored validation inputs
+      - name: Run hermetic validation
+        run: ./scripts/ci/validate.sh
+
+      - name: Lint shell scripts
         run: |
-          cp .env.example .env
-          mkdir -p litellm/secrets
-          printf '%s\n' 'sk-ci-validation-placeholder' > litellm/secrets/litellm-master-key
-          chmod 600 litellm/secrets/litellm-master-key
+          docker run --rm \
+            --entrypoint shellcheck \
+            --volume "$PWD:/repo:ro" \
+            koalaman/shellcheck-alpine@sha256:5921d946dac740cbeec2fb1c898747b6105e585130cc7f0602eec9a10f7ddb63 \
+            /repo/scripts/ci/validate.sh \
+            /repo/.devcontainer/post-create.sh
 
-      - name: Validate Python
+      - name: Lint GitHub Actions workflows
         run: |
-          python3 -m compileall -q scripts litellm/modules
-          python3 -m unittest discover -s scripts/tests -v
+          docker run --rm \
+            --volume "$PWD:/repo:ro" \
+            --workdir /repo \
+            rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 \
+            -color
 
-      - name: Validate Compose profiles
+      - name: Record deferred external-service checks
+        if: always()
         run: |
-          docker compose --profile prod --profile dev \
-            --profile demo --profile security config --quiet
+          {
+            echo "### External-service checks"
+            echo
+            echo "Deferred by design: full Compose startup, GPU model loading,"
+            echo "provider API calls, vulnerability-database downloads, and"
+            echo "live on-prem deployment probes."
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Validate game-day safety contracts
-        run: python3 scripts/game-day-preflight.py --env-file .env
+  devcontainer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
-      - name: Validate provisioned JSON
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          for path in Path("grafana").rglob("*.json"):
-              with path.open(encoding="utf-8") as source:
-                  value = json.load(source)
-              if not isinstance(value, dict):
-                  raise SystemExit(f"{path}: expected a JSON object")
-          PY
+      - name: Build development container
+        run: npx --yes @devcontainers/cli@0.89.0 build --workspace-folder .
