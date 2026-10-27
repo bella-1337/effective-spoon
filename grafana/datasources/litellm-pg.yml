@@ -7,12 +7,13 @@ datasources:
     access: proxy
     url: postgres:5432
     database: litellm_prod
-    user: ${PG_USER}
+    user: ${GRAFANA_DATABASE_USER}
     secureJsonData:
-      password: ${PG_PASSWORD}
+      password: ${GRAFANA_DATABASE_PASSWORD}
     jsonData:
       database: litellm_prod
       sslmode: disable
       postgresVersion: 1600
       timescaledb: false
+      maxOpenConns: 5
     editable: false

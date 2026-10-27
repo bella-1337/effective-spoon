@@ -31,16 +31,30 @@ x-langfuse-environment: &langfuse-environment
   REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:?Set LANGFUSE_REDIS_AUTH in .env}
   REDIS_TLS_ENABLED: "false"
 
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 networks:
   edge: {}
   internal: {}
   security-monitor: {}
+  traefik-monitor:
+    internal: true
+  alloy-monitor:
+    internal: true
+  xberg-sandbox:
+    internal: true
+  egress: {}
 
 volumes:
   pg-data: {}
   pgvector-data: {}
   grafana-data: {}
   prometheus-data: {}
+  prometheus-secrets: {}
   loki-data: {}
   langfuse-postgres-data: {}
   langfuse-clickhouse-data: {}
@@ -51,11 +65,13 @@ volumes:
 
 services:
   traefik:
+    logging: *default-logging
     image: traefik:v3@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0
     command:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
       - --providers.docker.network=litellm-stack_edge
+      - --providers.docker.endpoint=tcp://traefik-docker-proxy:2375
       - --providers.file.filename=/etc/traefik/dynamic.yml
       - --providers.file.watch=true
       - --entrypoints.web.address=:80
@@ -73,13 +89,41 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
       - ./traefik/certs:/certs:ro
-    networks: [edge, internal]
+    depends_on:
+      traefik-docker-proxy:
+        condition: service_healthy
+    networks: [edge, internal, traefik-monitor]
+    restart: unless-stopped
+
+  traefik-docker-proxy:
+    logging: *default-logging
+    image: ghcr.io/tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    environment:
+      CONTAINERS: "1"
+      EVENTS: "1"
+      NETWORKS: "1"
+      SERVICES: "1"
+      POST: "0"
+      LOG_LEVEL: warning
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [traefik-monitor]
+    tmpfs:
+      - /run:mode=0755
+      - /tmp:mode=1777
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:2375/_ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     restart: unless-stopped
 
   postgres:
+    logging: *default-logging
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       POSTGRES_DB: litellm_prod
@@ -96,20 +140,41 @@ services:
       retries: 5
 
   postgres-init:
+    logging: *default-logging
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       PGHOST: postgres
       PGUSER: ${PG_USER}
       PGPASSWORD: ${PG_PASSWORD}
+      GRAFANA_DATABASE_PASSWORD: ${GRAFANA_DATABASE_PASSWORD:?Set GRAFANA_DATABASE_PASSWORD in .env}
+      PG_EXPORTER_PASSWORD: ${PG_EXPORTER_PASSWORD:?Set PG_EXPORTER_PASSWORD in .env}
     command:
       - /bin/sh
       - -ec
       - |
+        psql --dbname postgres --set ON_ERROR_STOP=1 <<'SQL'
+        \getenv grafana_password GRAFANA_DATABASE_PASSWORD
+        \getenv exporter_password PG_EXPORTER_PASSWORD
+        SELECT format('CREATE ROLE grafana_ro LOGIN PASSWORD %L', :'grafana_password')
+        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'grafana_ro') \gexec
+        SELECT format('ALTER ROLE grafana_ro PASSWORD %L', :'grafana_password') \gexec
+        SELECT format('CREATE ROLE litellm_exporter LOGIN PASSWORD %L', :'exporter_password')
+        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'litellm_exporter') \gexec
+        SELECT format('ALTER ROLE litellm_exporter PASSWORD %L', :'exporter_password') \gexec
+        GRANT pg_monitor TO litellm_exporter;
+        GRANT CONNECT ON DATABASE postgres TO litellm_exporter;
+        SQL
         for db in litellm_prod litellm_dev; do
           exists="$$(psql --dbname postgres --tuples-only --no-align --command "SELECT 1 FROM pg_database WHERE datname='$${db}'")"
           if [ "$${exists}" != "1" ]; then
             psql --dbname postgres --command "CREATE DATABASE \"$${db}\""
           fi
+          psql --dbname "$${db}" --set ON_ERROR_STOP=1 --set database_name="$${db}" <<'SQL'
+        GRANT CONNECT ON DATABASE :"database_name" TO grafana_ro;
+        GRANT USAGE ON SCHEMA public TO grafana_ro;
+        GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafana_ro;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO grafana_ro;
+        SQL
         done
     depends_on:
       postgres:
@@ -118,6 +183,7 @@ services:
     restart: "no"
 
   vector-postgres:
+    logging: *default-logging
     image: pgvector/pgvector:0.8.1-pg16@sha256:33198da2828a14c30348d2ccb4750833d5ed9a44c88d840a0e523d7417120337
     environment:
       POSTGRES_DB: vector_store
@@ -135,6 +201,7 @@ services:
       retries: 5
 
   qdrant:
+    logging: *default-logging
     profiles: [dev]
     image: qdrant/qdrant:v1.19.2@sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad
     environment:
@@ -160,6 +227,7 @@ services:
       start_period: 10s
 
   bge-m3-vllm:
+    logging: *default-logging
     profiles: [dev]
     image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
     command:
@@ -206,6 +274,7 @@ services:
       start_period: 15m
 
   vllm-semantic-router:
+    logging: *default-logging
     profiles: [dev]
     image: ghcr.io/vllm-project/semantic-router/vllm-sr:latest@sha256:f613ce23a4f8e19357090ef83e614468dd7baa939b4634ad33144584e1c2cb09
     user: "65532:65532"
@@ -236,6 +305,7 @@ services:
       start_period: 5m
 
   vllm-semantic-router-envoy:
+    logging: *default-logging
     profiles: [dev]
     image: envoyproxy/envoy:v1.36.2@sha256:4972515dd9a069b44beb43cebba7851596e72a8c61cd7a7c33d8f48efc5280ba
     user: "101:101"
@@ -274,6 +344,7 @@ services:
       - traefik.http.services.vllm-semantic-router.loadbalancer.server.port=8899
 
   pgvector-migrate:
+    logging: *default-logging
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       PGHOST: vector-postgres
@@ -295,7 +366,35 @@ services:
     networks: [internal]
     restart: "no"
 
+  pgvector-access-init:
+    logging: *default-logging
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      PGHOST: vector-postgres
+      PGDATABASE: vector_store
+      PGUSER: vector
+      PGPASSWORD: ${PG_VECTOR_PASSWORD}
+      PG_VECTOR_EXPORTER_PASSWORD: ${PG_VECTOR_EXPORTER_PASSWORD:?Set PG_VECTOR_EXPORTER_PASSWORD in .env}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        psql --set ON_ERROR_STOP=1 <<'SQL'
+        \getenv exporter_password PG_VECTOR_EXPORTER_PASSWORD
+        SELECT format('CREATE ROLE vector_exporter LOGIN PASSWORD %L', :'exporter_password')
+        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'vector_exporter') \gexec
+        SELECT format('ALTER ROLE vector_exporter PASSWORD %L', :'exporter_password') \gexec
+        GRANT pg_monitor TO vector_exporter;
+        GRANT CONNECT ON DATABASE vector_store TO vector_exporter;
+        SQL
+    depends_on:
+      pgvector-migrate:
+        condition: service_completed_successfully
+    networks: [internal]
+    restart: "no"
+
   presidio-analyzer:
+    logging: *default-logging
     image: mcr.microsoft.com/presidio-analyzer:latest@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
     environment:
       PRESIDIO_NLP_ENGINE: spacy
@@ -309,13 +408,27 @@ services:
           memory: 2g
     networks: [internal]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   presidio-anonymizer:
+    logging: *default-logging
     image: mcr.microsoft.com/presidio-anonymizer:latest@sha256:a10a12a2a613d13cf29d3ad3641e3258444dd8c90403dd644a0a114c472c2483
     networks: [internal]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   searxng:
+    logging: *default-logging
     image: searxng/searxng:latest@sha256:76b0bf285aca014c7191fc4d9234c4bfb358624ac33d8883833d496c059ec072
     volumes:
       - ./searxng:/etc/searxng:rw
@@ -334,6 +447,7 @@ services:
       - traefik.http.services.searxng.loadbalancer.server.port=8080
 
   xberg:
+    logging: *default-logging
     profiles: [prod, dev]
     image: ghcr.io/xberg-io/xberg:core@sha256:f0a66d39f7322c273bb4ba2b53f5ca00dee9f2f1b3ebbec26a283017e07a865b
     command:
@@ -354,6 +468,10 @@ services:
       HF_HOME: /tmp/huggingface
       XBERG_MAX_REQUEST_BODY_BYTES: "10485760"
       XBERG_MAX_MULTIPART_FIELD_BYTES: "10485760"
+      HTTP_PROXY: http://xberg-egress-proxy:3128
+      HTTPS_PROXY: http://xberg-egress-proxy:3128
+      ALL_PROXY: http://xberg-egress-proxy:3128
+      NO_PROXY: 127.0.0.1,localhost
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -365,29 +483,97 @@ services:
         limits:
           cpus: "1"
           memory: 1g
-    networks: [internal]
+    depends_on:
+      xberg-egress-proxy:
+        condition: service_healthy
+    networks: [xberg-sandbox]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "xberg", "--version"]
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - --output
+        - /dev/null
+        - --request
+        - POST
+        - --header
+        - "Content-Type: application/json"
+        - --header
+        - "Accept: application/json, text/event-stream"
+        - --data
+        - '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"healthcheck","version":"1"}}}'
+        - http://127.0.0.1:8001/mcp
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
 
+  xberg-egress-proxy:
+    logging: *default-logging
+    image: ubuntu/squid:6.13-25.04_edge@sha256:3de2e64f0ca6efdac3e98557607dc0f23050037f3885016d5d5bfcf9950501b8
+    command: ["-f", "/etc/squid/xberg-egress-squid.conf", "-NYC"]
+    volumes:
+      - ./security/xberg-egress-squid.conf:/etc/squid/xberg-egress-squid.conf:ro
+      - ./security/xberg-egress-allowlist.txt:/etc/squid/xberg-egress-allowlist.txt:ro
+    networks: [xberg-sandbox, egress]
+    read_only: true
+    tmpfs:
+      - /run:mode=0755
+      - /var/log/squid:uid=13,gid=13,mode=0750
+      - /var/spool/squid:uid=13,gid=13,mode=0750
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/usr/bin/bash", "-ec", ": >/dev/tcp/127.0.0.1/3128"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
   prometheus:
+    logging: *default-logging
     image: prom/prometheus:latest@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=10GB
     volumes:
       - ./litellm/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./litellm/secrets:/etc/prometheus/secrets:ro
+      - prometheus-secrets:/etc/prometheus/secrets:ro
       - prometheus-data:/prometheus
+    depends_on:
+      prometheus-secrets-init:
+        condition: service_completed_successfully
     networks: [internal]
     restart: unless-stopped
 
+  prometheus-secrets-init:
+    logging: *default-logging
+    image: prom/prometheus:latest@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        install -m 0400 -o 65534 -g 65534 \
+          /source/litellm-master-key \
+          /target/litellm-master-key
+    volumes:
+      - ./litellm/secrets/litellm-master-key:/source/litellm-master-key:ro
+      - prometheus-secrets:/target
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    networks: [internal]
+    restart: "no"
+
   loki:
+    logging: *default-logging
     image: grafana/loki:3.5.12@sha256:c2a6860c2f94ecc98fffce7c10e6c8b350cf25e2ea3daa255dff27d7c6a4dffc
     command: -config.file=/etc/loki/config.yml
     volumes:
@@ -405,19 +591,46 @@ services:
       start_period: 15s
 
   alloy:
+    logging: *default-logging
     image: grafana/alloy:v1.10.2@sha256:bcf27f18c4402869af112fb39e35e1db3804a404686f4caa20bdf77814219223
-    user: "0:0"
+    user: "473:473"
     command: run /etc/alloy/config.alloy
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       loki:
         condition: service_healthy
-    networks: [internal]
+      alloy-docker-proxy:
+        condition: service_healthy
+    networks: [internal, alloy-monitor]
+    restart: unless-stopped
+
+  alloy-docker-proxy:
+    logging: *default-logging
+    image: ghcr.io/tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    environment:
+      CONTAINERS: "1"
+      EVENTS: "1"
+      NETWORKS: "1"
+      POST: "0"
+      LOG_LEVEL: warning
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [alloy-monitor]
+    tmpfs:
+      - /run:mode=0755
+      - /tmp:mode=1777
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:2375/_ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     restart: unless-stopped
 
   langfuse-postgres:
+    logging: *default-logging
     image: postgres:17@sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe
     environment:
       POSTGRES_DB: langfuse
@@ -436,6 +649,7 @@ services:
       retries: 10
 
   langfuse-clickhouse:
+    logging: *default-logging
     image: clickhouse/clickhouse-server:25.12@sha256:8a790dd3468db22b1d4e7b18a176f378ff5ff6053b9c48dd4ea1fa71a24c5ba6
     user: "101:101"
     environment:
@@ -455,6 +669,7 @@ services:
       start_period: 5s
 
   langfuse-minio:
+    logging: *default-logging
     image: cgr.dev/chainguard/minio:latest@sha256:c47b1779bfd12cdf5a4fcd3bd50671b8d66465fdae45271babc2fb467958b712
     entrypoint: sh
     command: -c 'mkdir -p /data/langfuse && exec minio server --address ":9000" --console-address ":9001" /data'
@@ -479,6 +694,7 @@ services:
       - traefik.http.services.langfuse-s3.loadbalancer.server.port=9000
 
   langfuse-redis:
+    logging: *default-logging
     image: redis:7.4.11@sha256:44960b3100c48159a66d28c18b0588c193492e25f7551d60e51dd464fc3eca5b
     command:
       - redis-server
@@ -499,6 +715,7 @@ services:
       retries: 10
 
   langfuse-worker:
+    logging: *default-logging
     image: docker.langfuse.com/langfuse/langfuse-worker:4@sha256:48f8af2c4b6bbf929380f301ade18cf99e7b31331fd26dfaf253ce670e5b39a2
     environment:
       <<: *langfuse-environment
@@ -521,6 +738,7 @@ services:
       start_period: 30s
 
   langfuse-web:
+    logging: *default-logging
     image: docker.langfuse.com/langfuse/langfuse:4@sha256:e4cc4bfd0f77285d7454135e1bd14020abdd5c4217a2f0e824b8abcbf3e3cc0f
     environment:
       <<: *langfuse-environment
@@ -563,18 +781,23 @@ services:
       - traefik.http.services.langfuse.loadbalancer.server.port=3000
 
   grafana:
+    logging: *default-logging
     image: grafana/grafana:latest@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SECURITY_SECRET_KEY: ${GRAFANA_SECURITY_SECRET_KEY:?Set GRAFANA_SECURITY_SECRET_KEY in .env}
       GF_SERVER_ROOT_URL: https://${GRAFANA_HOST}
       GF_USERS_ALLOW_SIGN_UP: "false"
-      PG_USER: ${PG_USER}
-      PG_PASSWORD: ${PG_PASSWORD}
+      GRAFANA_DATABASE_USER: ${GRAFANA_DATABASE_USER:-grafana_ro}
+      GRAFANA_DATABASE_PASSWORD: ${GRAFANA_DATABASE_PASSWORD:?Set GRAFANA_DATABASE_PASSWORD in .env}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./grafana/alerting:/etc/grafana/provisioning/alerting:ro
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
     networks: [edge, internal]
     restart: unless-stopped
     labels:
@@ -585,6 +808,7 @@ services:
       - traefik.http.services.grafana.loadbalancer.server.port=3000
 
   litellm-prod:
+    logging: *default-logging
     profiles: [prod]
     image: ghcr.io/berriai/litellm:v1.106.3@sha256:74d0696a9f0afcc993c7659d246f0c542f003368298633e852228250779f1032
     command:
@@ -614,14 +838,10 @@ services:
       postgres-init:
         condition: service_completed_successfully
       presidio-analyzer:
-        condition: service_started
+        condition: service_healthy
       presidio-anonymizer:
-        condition: service_started
-      xberg:
         condition: service_healthy
-      langfuse-web:
-        condition: service_healthy
-    networks: [edge, internal]
+    networks: [edge, internal, xberg-sandbox]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
@@ -637,6 +857,7 @@ services:
       - traefik.http.services.litellm-prod.loadbalancer.server.port=4000
 
   litellm-demo-data-prod:
+    logging: *default-logging
     profiles: [demo]
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
@@ -660,6 +881,7 @@ services:
     restart: "no"
 
   litellm-dev:
+    logging: *default-logging
     profiles: [dev]
     image: ghcr.io/berriai/litellm:v1.107.0-dev.3@sha256:e7f68da02ed3ec52f0b8d386dbb278a0aa06dbc879f5ddda5a3cf87b2bff194c
     command:
@@ -690,6 +912,9 @@ services:
       QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
       XBERG_INDEX_EMBEDDING_MODEL: hosted_vllm/bge-m3
       XBERG_INDEX_EMBEDDING_API_BASE: http://bge-m3-vllm:8000
+      XBERG_AUTO_INDEX_ENABLED: ${XBERG_AUTO_INDEX_ENABLED:-false}
+      PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
+      PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000
       PROXY_BASE_URL: https://${LITELLM_DEV_HOST}
       FORWARDED_ALLOW_IPS: "*"
     depends_on:
@@ -707,7 +932,7 @@ services:
         condition: service_healthy
       bge-m3-vllm:
         condition: service_healthy
-    networks: [edge, internal]
+    networks: [edge, internal, xberg-sandbox]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
@@ -723,6 +948,7 @@ services:
       - traefik.http.services.litellm-dev.loadbalancer.server.port=4000
 
   litellm-demo-data-dev:
+    logging: *default-logging
     profiles: [dev]
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
@@ -746,6 +972,7 @@ services:
     restart: "no"
 
   litellm-pgvector:
+    logging: *default-logging
     profiles: [dev]
     image: litellm-pgvector:5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
     build:
@@ -783,26 +1010,29 @@ services:
       start_period: 20s
 
   postgres-exporter:
+    logging: *default-logging
     image: prometheuscommunity/postgres-exporter:latest@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
     environment:
-      DATA_SOURCE_NAME: postgresql://${PG_USER}:${PG_PASSWORD}@postgres:5432/postgres?sslmode=disable
+      DATA_SOURCE_NAME: postgresql://litellm_exporter:${PG_EXPORTER_PASSWORD:?Set PG_EXPORTER_PASSWORD in .env}@postgres:5432/postgres?sslmode=disable
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
     networks: [internal]
     restart: unless-stopped
 
   pgvector-exporter:
+    logging: *default-logging
     image: prometheuscommunity/postgres-exporter:latest@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
     environment:
-      DATA_SOURCE_NAME: postgresql://vector:${PG_VECTOR_PASSWORD}@vector-postgres:5432/vector_store?sslmode=disable
+      DATA_SOURCE_NAME: postgresql://vector_exporter:${PG_VECTOR_EXPORTER_PASSWORD:?Set PG_VECTOR_EXPORTER_PASSWORD in .env}@vector-postgres:5432/vector_store?sslmode=disable
     depends_on:
-      vector-postgres:
-        condition: service_healthy
+      pgvector-access-init:
+        condition: service_completed_successfully
     networks: [internal]
     restart: unless-stopped
 
   node-exporter:
+    logging: *default-logging
     image: prom/node-exporter:latest@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
     pid: host
     command:
@@ -815,6 +1045,7 @@ services:
     restart: unless-stopped
 
   image-security-docker-proxy:
+    logging: *default-logging
     profiles: [security]
     image: ghcr.io/tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
     environment:
@@ -838,6 +1069,7 @@ services:
     restart: unless-stopped
 
   image-security-monitor:
+    logging: *default-logging
     profiles: [security]
     image: litellm-image-security-monitor:0.1.0
     build:
@@ -881,6 +1113,7 @@ services:
     restart: on-failure:5
 
   cadvisor:
+    logging: *default-logging
     image: gcr.io/cadvisor/cadvisor:latest@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
     privileged: true
     volumes:
@@ -892,6 +1125,7 @@ services:
     restart: unless-stopped
 
   blackbox:
+    logging: *default-logging
     image: prom/blackbox-exporter:latest@sha256:e753ff9f3fc458d02cca5eddab5a77e1c175eee484a8925ac7d524f04366c2fc
     networks: [internal]
     restart: unless-stopped

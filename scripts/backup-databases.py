@@ -123,6 +123,28 @@ def prune_old_backups(root: Path, retention_days: int) -> None:
         print(f"Removed expired backup {candidate}")
 
 
+def publish_success_metric() -> None:
+    metrics_dir = ROOT / "security-metrics"
+    if not metrics_dir.is_dir() or metrics_dir.is_symlink():
+        fail("security-metrics must be an existing regular directory")
+    destination = metrics_dir / "litellm_backup.prom"
+    temporary = metrics_dir / f".litellm_backup.{os.getpid()}.tmp"
+    try:
+        write_private_file(
+            temporary,
+            "# HELP litellm_backup_last_success_timestamp_seconds "
+            "Unix timestamp of the last complete database backup.\n"
+            "# TYPE litellm_backup_last_success_timestamp_seconds gauge\n"
+            f"litellm_backup_last_success_timestamp_seconds "
+            f"{int(datetime.now(timezone.utc).timestamp())}\n",
+        )
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, destination)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
 def main() -> None:
     if len(sys.argv) > 1:
         if sys.argv[1] in {"-h", "--help"} and len(sys.argv) == 2:
@@ -168,10 +190,13 @@ def main() -> None:
         )
         write_checksum_manifest(staging, [*dumps, "metadata.txt"])
         staging.rename(final)
-    prune_old_backups(root, int(retention_raw))
     print(f"Backup completed: {final}")
     if skipped:
         print(f"Completed with skipped resources: {','.join(skipped)}")
+        print("Older backups were not pruned because this backup is partial", file=sys.stderr)
+        raise SystemExit(3)
+    publish_success_metric()
+    prune_old_backups(root, int(retention_raw))
     if shutil.which("sha256sum"):
         print(f"Verify with: cd {final} && sha256sum --check SHA256SUMS")
     elif shutil.which("shasum"):

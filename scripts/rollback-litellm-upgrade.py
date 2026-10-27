@@ -41,8 +41,8 @@ USAGE = """Usage:
 
 Rolls back LiteLLM (litellm-prod / litellm-dev) to the image reference
 captured by scripts/prepare-litellm-upgrade.py. Nothing in docker-compose.yml
-is modified; the rollback image is applied through a validated, temporary
-Compose override file generated under the upgrade-state directory.
+is modified; the rollback image is persisted in docker-compose.override.yml so
+ordinary Docker Compose and maintenance commands continue using it.
 """
 STATE_KEYS = {
     "created_at_utc", "services_captured", "services_skipped", "image.litellm-prod",
@@ -133,7 +133,34 @@ def detect_drift(state: Path, allow: bool) -> None:
 
 
 def override_file(path: Path, services: list[str], images: dict[str, str]) -> None:
-    write_private_file(path, "services:\n" + "".join(f"  {service}:\n    image: {images[service]}\n" for service in services))
+    write_private_file(
+        path,
+        "x-litellm-stack-active-rollback: true\nservices:\n"
+        + "".join(f"  {service}:\n    image: {images[service]}\n" for service in services),
+    )
+
+
+def persist_active_override(source: Path) -> Path:
+    active = ROOT / "docker-compose.override.yml"
+    if active.exists():
+        if active.is_symlink() or not active.is_file():
+            fail(f"refusing to replace unsafe active rollback override: {active}")
+        if not active.read_text(encoding="utf-8").startswith(
+            "x-litellm-stack-active-rollback: true\n"
+        ):
+            fail(
+                "docker-compose.override.yml already exists and was not generated "
+                "by the rollback workflow"
+            )
+    temporary = ROOT / f".docker-compose.override.{os.getpid()}.tmp"
+    try:
+        write_private_file(temporary, source.read_text(encoding="utf-8"))
+        os.replace(temporary, active)
+        os.chmod(active, 0o600)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return active
 
 
 def wait_running(service: str) -> None:
@@ -299,9 +326,10 @@ def main() -> None:
                     liveliness[service] = "fail"
                     fail(f"service {service} was rolled back to the prior image but failed its liveliness check")
                 actions[service], liveliness[service] = "rolled-back", "pass"
-            applied_path = reports / "active-rollback-override.yml"
-            shutil.copyfile(override, applied_path)
-            os.chmod(applied_path, 0o600)
+            applied_path = persist_active_override(override)
+            report_override = reports / "active-rollback-override.yml"
+            shutil.copyfile(override, report_override)
+            os.chmod(report_override, 0o600)
             applied = str(applied_path)
             if mode == "restore-db" and pgvector_was_running:
                 failed_stage = "pgvector-restart"
@@ -336,8 +364,8 @@ def main() -> None:
             lock.rmdir()
     print(f"Rollback completed successfully (mode: {mode})")
     if applied:
-        print(f"Saved rollback override: {applied}")
-        print("Before the next default docker compose up, either pin these rollback images in docker-compose.yml or include this override with -f.")
+        print(f"Activated persistent rollback override: {applied}")
+        print("Remove it only after docker-compose.yml is pinned to the intended image.")
 
 
 if __name__ == "__main__":

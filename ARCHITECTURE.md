@@ -8,6 +8,10 @@ This repository deploys a local, Docker Compose-based LiteLLM platform with:
 - separate production and development LiteLLM profiles;
 - PII masking through Microsoft Presidio;
 - PostgreSQL-backed LiteLLM state and spend records;
+- Langfuse tracing backed by PostgreSQL, ClickHouse, Redis, and MinIO;
+- development semantic routing, Qdrant-backed semantic caching, and
+  pgvector-backed shared RAG;
+- allowlisted Xberg MCP document extraction through an egress proxy;
 - metrics in Prometheus and dashboards in Grafana;
 - Docker container logs in Loki, collected by Grafana Alloy.
 
@@ -50,15 +54,21 @@ private network. It is not a public Internet TLS solution.
 
 ## Network Boundaries
 
-Two Docker networks separate external routing from internal service traffic.
+Dedicated Docker networks separate external routing, internal service traffic,
+Docker metadata access, image-security monitoring, and untrusted fetch egress.
 
 | Network | Members | Purpose |
 | --- | --- | --- |
-| `edge` | Traefik, Grafana, SearXNG, LiteLLM prod/dev | Services reachable through Traefik routes |
-| `internal` | All services | Databases, observability, log collection, and service-to-service calls |
+| `edge` | Traefik, Grafana, SearXNG, Langfuse web/MinIO, LiteLLM prod/dev, semantic-router Envoy | Services reachable through Traefik routes |
+| `internal` | Trusted application, data, and observability services | Databases, telemetry, Presidio, and service-to-service calls |
+| `xberg-sandbox` | Xberg, its egress proxy, LiteLLM prod/dev | Internal-only MCP traffic; Xberg has no direct route to `internal` or the Internet |
+| `egress` | Xberg egress proxy | Internet route available only to the destination-filtering proxy |
+| `traefik-monitor` | Traefik and its Docker socket proxy | Read-only Docker routing metadata |
+| `alloy-monitor` | Alloy and its Docker socket proxy | Read-only Docker discovery and log metadata |
+| `security-monitor` | Image scanner and its Docker socket proxy | Isolated image and container inventory |
 
 Only Traefik publishes host ports `80` and `443`. Prometheus, Loki, PostgreSQL,
-and exporters remain internal-only.
+exporters, socket proxies, and the Xberg egress proxy remain internal-only.
 
 ## Runtime Profiles
 
@@ -102,9 +112,18 @@ blackbox `/health` probes.
 | Volume | Owner | Contents |
 | --- | --- | --- |
 | `pg-data` | PostgreSQL | LiteLLM production/development state and spend logs |
+| `pgvector-data` | PostgreSQL + pgvector | Development shared knowledge chunks and embeddings |
+| Qdrant tmpfs | Qdrant | Ephemeral development semantic-cache entries, capped at 1 GiB |
 | `grafana-data` | Grafana | Users, sessions, and provisioned dashboard state |
 | `prometheus-data` | Prometheus | Metrics time series |
+| `prometheus-secrets` | Prometheus | Non-root-readable copy of the LiteLLM metrics credential |
 | `loki-data` | Loki | Project-scoped Docker log history |
+| `langfuse-postgres-data` | Langfuse PostgreSQL | Langfuse relational state |
+| `langfuse-clickhouse-data` | ClickHouse | Langfuse trace and analytics data |
+| `langfuse-clickhouse-logs` | ClickHouse | ClickHouse service logs |
+| `langfuse-minio-data` | MinIO | Langfuse events and media objects |
+| `langfuse-redis-data` | Redis | Langfuse queues |
+| `bge-m3-vllm-cache` | vLLM | Downloaded BGE-M3 model artifacts |
 
 The PostgreSQL default database is `litellm_prod`; `postgres-init` creates
 `litellm_dev`. Do not reintroduce an unused default `litellm` database.
@@ -132,8 +151,10 @@ to `LiteLLM_ErrorLogs`.
 
 ### Container logs
 
-Grafana Alloy discovers Docker containers through the Docker socket and sends only
-the `litellm-stack` Compose project to Loki. Query logs in Grafana Explore:
+Grafana Alloy discovers Docker containers through the Docker API and sends only
+the `litellm-stack` Compose project to Loki. Alloy and Traefik reach Docker
+through dedicated POST-disabled socket proxies rather than direct socket mounts.
+Query logs in Grafana Explore:
 
 ```logql
 {compose_project="litellm-stack"}

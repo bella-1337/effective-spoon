@@ -5,7 +5,7 @@ loki.write "default" {
 }
 
 discovery.docker "containers" {
-  host             = "unix:///var/run/docker.sock"
+  host             = "tcp://alloy-docker-proxy:2375"
   refresh_interval = "5s"
 }
 
@@ -41,7 +41,7 @@ discovery.relabel "containers" {
 }
 
 loki.source.docker "containers" {
-  host       = "unix:///var/run/docker.sock"
+  host       = "tcp://alloy-docker-proxy:2375"
   targets    = discovery.relabel.containers.output
   forward_to = [loki.write.default.receiver]
   labels     = { job = "docker" }
