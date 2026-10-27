@@ -2,7 +2,7 @@ name: ${COMPOSE_PROJECT_NAME:-litellm-stack}
 
 x-langfuse-environment: &langfuse-environment
   HOSTNAME: 0.0.0.0
-  TZ: ${STACK_TIMEZONE:-Europe/Berlin}
+  TZ: UTC
   NEXTAUTH_URL: https://${LANGFUSE_WEB_HOST:-langfuse.example.test}
   DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASSWORD:?Set LANGFUSE_POSTGRES_PASSWORD in .env}@langfuse-postgres:5432/langfuse
   SALT: ${LANGFUSE_SALT:?Set LANGFUSE_SALT in .env}
@@ -644,8 +644,8 @@ services:
       POSTGRES_DB: langfuse
       POSTGRES_USER: langfuse
       POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:?Set LANGFUSE_POSTGRES_PASSWORD in .env}
-      TZ: ${STACK_TIMEZONE:-Europe/Berlin}
-      PGTZ: ${STACK_TIMEZONE:-Europe/Berlin}
+      TZ: UTC
+      PGTZ: UTC
     volumes:
       - langfuse-postgres-data:/var/lib/postgresql/data
     networks: [internal]
@@ -1102,7 +1102,6 @@ services:
       - ./security-reports:/data/reports
       - ./security-metrics:/data/metrics
       - ./security/exceptions.toml:/app/security/exceptions.toml:ro
-      - /etc/localtime:/etc/localtime:ro
     depends_on:
       image-security-docker-proxy:
         condition: service_healthy

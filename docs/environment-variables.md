@@ -24,7 +24,7 @@ as `30s`, `15m`, or `15d`.
 | Variable | Requirement / default | Format | Description and guidance |
 | --- | --- | --- | --- |
 | `COMPOSE_PROJECT_NAME` | Optional: `litellm-stack` | Docker Compose project name | Prefixes containers, networks, and volumes and is used by image-security inventory. Changing it creates a logically separate stack and new named volumes. Use lowercase letters, digits, hyphens, and underscores. |
-| `STACK_TIMEZONE` | Optional: `Europe/Berlin` | IANA timezone | Central European local time with automatic CET/CEST daylight-saving transitions. Used by Langfuse and the image-security scheduler. Keep an IANA region name rather than fixed `CET`, which cannot represent all civil-time transitions safely. |
+| `STACK_TIMEZONE` | Optional: `Europe/Berlin` | IANA timezone | Central European local time with automatic CET/CEST daylight-saving transitions. Used by the image-security scheduler. Keep an IANA region name rather than fixed `CET`, which cannot represent all civil-time transitions safely. Langfuse infrastructure remains on its required UTC default. |
 | `LOG_MAX_SIZE` | Optional: `10m` | Docker size | Maximum size of one container JSON log file before rotation. Lower values reduce disk spikes; higher values retain more local troubleshooting context. |
 | `LOG_MAX_FILE` | Optional: `3` | Positive integer | Number of rotated JSON log files retained per container. Total upper bound is approximately `LOG_MAX_SIZE * LOG_MAX_FILE` per container. |
 | `DOCKER_SOCKET_PROXY_LOG_LEVEL` | Optional: `warning` | `debug`, `info`, `warning`, `error`, or `critical` | Shared log level for the restricted Docker socket proxies. Avoid `debug` in routine production because it increases noise and may reveal operational metadata. |
@@ -128,6 +128,8 @@ Retention changes do not recover data already deleted.
 Bootstrap variables are not a general migration mechanism. After Langfuse has
 initialized its database, make supported identity or tenant changes through
 Langfuse and verify whether the bootstrap values should remain unchanged.
+Langfuse web, worker, PostgreSQL, and ClickHouse infrastructure remains on UTC
+because Langfuse does not support overriding its infrastructure timezone.
 
 ## Development model and data services
 
@@ -185,7 +187,7 @@ can cause startup failures or corrupt semantic-cache expectations.
 | --- | --- | --- |
 | `IMAGE_SECURITY_UID` | `1000`; Linux UID | Runtime UID for the monitor container. It must own or be able to write `security-state/`, `security-reports/`, and `security-metrics/`. |
 | `IMAGE_SECURITY_GID` | `1000`; Linux GID | Runtime GID for the monitor container and writable security directories. |
-| `IMAGE_SECURITY_SCHEDULE_HOUR` | `2`; integer `0-23` | Local-time hour for the daily scan. Container local time follows the host through `/etc/localtime`. |
+| `IMAGE_SECURITY_SCHEDULE_HOUR` | `2`; integer `0-23` | Local-time hour for the daily scan in `STACK_TIMEZONE`. |
 | `IMAGE_SECURITY_SCHEDULE_MINUTE` | `45`; integer `0-59` | Local-time minute for the daily scan. |
 | `IMAGE_SECURITY_RUN_ON_START` | `true`; boolean | Runs one scan when the scheduler starts. Keep enabled to avoid waiting for the first scheduled result. |
 | `IMAGE_SECURITY_CPU_LIMIT` | `2`; positive decimal CPUs | CPU limit for image scanning. Scans are CPU intensive; reduce only if longer scan times are acceptable. |
