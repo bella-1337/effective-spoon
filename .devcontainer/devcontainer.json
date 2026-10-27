@@ -5,7 +5,7 @@
     "context": ".."
   },
   "features": {
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1.6.3": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1.10.1": {
       "version": "27.4",
       "moby": true,
       "mobyBuildxVersion": "0.17.1",
