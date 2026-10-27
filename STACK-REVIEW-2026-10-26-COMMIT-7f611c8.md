@@ -1,9 +1,21 @@
-# LiteLLM Stack Review Summary
+---
+document_type: historical-audit
+status: superseded
+reviewed_date: 2026-10-26
+reviewed_commit: 7f611c88e05a828e7958faebe2f33f91025324d2
+remediated_through_commit: 2cfde033672bbd3fa3479c1950788b5ff30f5cff
+current_state_reference: repository source and current validation results
+---
 
-> This is the baseline five-model review captured before remediation. The
-> subsequent commits on this branch address the recommended correction groups
-> in order; retain this report as the audit input rather than treating every
-> finding below as current state.
+# Historical LiteLLM Stack Review - Pre-remediation Snapshot
+
+> **Superseded audit: do not use this document as a description of the current
+> stack.** Every finding and rating below applies only to commit
+> `7f611c88e05a828e7958faebe2f33f91025324d2`, reviewed on 2026-10-26. The
+> remediation series through commit
+> `2cfde033672bbd3fa3479c1950788b5ff30f5cff` changed the implementation.
+> Re-evaluate the current source and validation results before making any claim
+> about present behavior. This file is retained only as historical audit input.
 
 ## Executive verdict
 
