@@ -1,4 +1,4 @@
 tls:
   certificates:
-    - certFile: /certs/litellm-stack.pem
-      keyFile: /certs/litellm-stack-key.pem
+    - certFile: /certs/tls.crt
+      keyFile: /certs/tls.key

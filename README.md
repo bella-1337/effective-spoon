@@ -5,9 +5,10 @@ proxies behind Traefik, with PostgreSQL, Presidio, SearXNG, Xberg MCP,
 Langfuse, development vLLM model servers, Prometheus, Grafana, Loki, Grafana
 Alloy, and host/container exporters.
 
-The `prod` and `dev` names below describe LiteLLM runtime profiles. The bundled
-`mkcert` TLS setup is intended only for a private workstation or trusted local
-network; it is not public-production certificate management.
+The `prod` and `dev` names below describe LiteLLM runtime profiles. The on-prem
+deployment expects a certificate delivery process to place the configured TLS
+certificate and private key on the host. The bundled `mkcert` workflow remains
+available only for a private workstation or trusted development network.
 
 ## Prerequisites
 
@@ -17,7 +18,8 @@ network; it is not public-production certificate management.
 - Up to 7 GB of available RAM for the CPU-hosted vLLM Semantic Router
 - [`uv`](https://docs.astral.sh/uv/getting-started/installation/) for the
   maintenance scripts
-- `mkcert`
+- A delivered TLS certificate and matching private key, or `mkcert` for local
+  development only
 - `curl` for the documented manual API and health checks
 - Administrator access to install the local CA and update host resolution
 
@@ -25,111 +27,28 @@ Run all commands from this repository's root.
 
 ## 1. Configure the environment
 
-Create `.env` locally. It is intentionally ignored by Git.
-
-```dotenv
-LITELLM_PROD_HOST=llm.example.test
-LITELLM_DEV_HOST=llm-dev.example.test
-VLLM_SR_HOST=llm-router.example.test
-GRAFANA_HOST=grafana.example.test
-SEARXNG_HOST=search.example.test
-LANGFUSE_WEB_HOST=langfuse.example.test
-LANGFUSE_S3_HOST=langfuse-s3.example.test
-
-PG_USER=litellm
-PG_PASSWORD=<strong-random-password>
-GRAFANA_DATABASE_USER=grafana_ro
-GRAFANA_DATABASE_PASSWORD=<strong-random-password>
-PG_EXPORTER_PASSWORD=<strong-random-password>
-PG_VECTOR_PASSWORD=<strong-random-password>
-PG_VECTOR_EXPORTER_PASSWORD=<strong-random-password>
-PG_VECTOR_API_KEY=sk-<strong-random-value>
-QDRANT_API_KEY=<strong-random-value>
-LITELLM_MASTER_KEY=sk-<strong-random-value>
-OPENAI_API_KEY=<provider-api-key>
-BGE_M3_VLLM_GPU_MEMORY_UTILIZATION=0.35
-XBERG_AUTO_INDEX_ENABLED=false
-GRAFANA_ADMIN_PASSWORD=<strong-random-password>
-GRAFANA_SECURITY_SECRET_KEY=<strong-random-secret>
-SEARXNG_SECRET=<strong-random-secret>
-LANGFUSE_POSTGRES_PASSWORD=<strong-url-safe-random-password>
-LANGFUSE_CLICKHOUSE_PASSWORD=<strong-random-password>
-LANGFUSE_REDIS_AUTH=<strong-random-password>
-LANGFUSE_MINIO_PASSWORD=<strong-random-password>
-LANGFUSE_NEXTAUTH_SECRET=<strong-random-secret>
-LANGFUSE_SALT=<strong-random-salt>
-LANGFUSE_ENCRYPTION_KEY=<64-character-hex-key>
-LANGFUSE_PUBLIC_KEY=pk-lf-<strong-random-value>
-LANGFUSE_SECRET_KEY=sk-lf-<strong-random-value>
-LANGFUSE_USER_ID_SALT=<strong-random-secret>
-LANGFUSE_INIT_USER_EMAIL=<admin-email>
-LANGFUSE_INIT_USER_NAME=<admin-name>
-LANGFUSE_INIT_USER_PASSWORD=<strong-random-password>
-```
-
-All values are required:
-
-| Variable | Purpose |
-| --- | --- |
-| `LITELLM_PROD_HOST` | Traefik hostname for the production-profile proxy |
-| `LITELLM_DEV_HOST` | Traefik hostname for the development-profile proxy |
-| `VLLM_SR_HOST` | Traefik hostname for chat completions routed through vLLM Semantic Router |
-| `GRAFANA_HOST` | Traefik hostname for Grafana |
-| `SEARXNG_HOST` | Public base hostname advertised by SearXNG |
-| `LANGFUSE_WEB_HOST` | Traefik hostname for the Langfuse UI and API |
-| `LANGFUSE_S3_HOST` | Traefik hostname for Langfuse's signed media uploads |
-| `PG_USER` | PostgreSQL/LiteLLM database user |
-| `PG_PASSWORD` | PostgreSQL password |
-| `GRAFANA_DATABASE_USER` | Read-only PostgreSQL role used by Grafana; keep the default `grafana_ro` |
-| `GRAFANA_DATABASE_PASSWORD` | Password for the read-only Grafana database role |
-| `PG_EXPORTER_PASSWORD` | Password for the `pg_monitor` role used by the LiteLLM PostgreSQL exporter |
-| `PG_VECTOR_PASSWORD` | Password for the isolated pgvector database |
-| `PG_VECTOR_EXPORTER_PASSWORD` | Password for the `pg_monitor` role used by the pgvector exporter |
-| `PG_VECTOR_API_KEY` | Authentication key for the internal LiteLLM pgvector connector |
-| `QDRANT_API_KEY` | Authentication key for the development semantic-cache store |
-| `LITELLM_MASTER_KEY` | Administrative/authentication key for LiteLLM |
-| `OPENAI_API_KEY` | Provider credential used by the configured models |
-| `BGE_M3_VLLM_GPU_MEMORY_UTILIZATION` | Fraction of GPU memory reserved by the BGE-M3 vLLM process |
-| `XBERG_AUTO_INDEX_ENABLED` | Explicit operator opt-in for development Xberg extraction indexing; defaults to `false` |
-| `GRAFANA_ADMIN_PASSWORD` | Initial Grafana administrator password |
-| `GRAFANA_SECURITY_SECRET_KEY` | Stable secret used to encrypt Grafana datasource and notification credentials |
-| `SEARXNG_SECRET` | Secret used to sign SearXNG data |
-| `LANGFUSE_POSTGRES_PASSWORD` | Password for Langfuse's isolated PostgreSQL database |
-| `LANGFUSE_CLICKHOUSE_PASSWORD` | Password for Langfuse trace storage |
-| `LANGFUSE_REDIS_AUTH` | Password for Langfuse's internal queue |
-| `LANGFUSE_MINIO_PASSWORD` | Password for Langfuse event and media object storage |
-| `LANGFUSE_NEXTAUTH_SECRET` | Secret used to protect Langfuse web sessions |
-| `LANGFUSE_SALT` | Salt used by Langfuse for encrypted credentials |
-| `LANGFUSE_ENCRYPTION_KEY` | 32-byte hex key used by Langfuse encryption |
-| `LANGFUSE_PUBLIC_KEY` | Pre-provisioned LiteLLM project public key |
-| `LANGFUSE_SECRET_KEY` | Pre-provisioned LiteLLM project secret key |
-| `LANGFUSE_USER_ID_SALT` | HMAC salt used to pseudonymize LiteLLM principals in Langfuse |
-| `LANGFUSE_INIT_USER_EMAIL` | Initial Langfuse administrator email |
-| `LANGFUSE_INIT_USER_NAME` | Initial Langfuse administrator display name |
-| `LANGFUSE_INIT_USER_PASSWORD` | Initial Langfuse administrator password |
-
-Use literal values in `.env`; Compose does **not** execute commands such as
-`$(openssl rand ...)`. Generate values separately, then paste their output:
+Create the ignored local environment file from the versioned template:
 
 ```sh
-# PostgreSQL passwords are embedded in DATABASE_URL values, so they must
-# not contain URL-reserved characters such as @, :, /, ?, #, [, or ].
-openssl rand -hex 32
-
-# Suitable for the other secrets.
-openssl rand -base64 32
-
-# Required format for LANGFUSE_ENCRYPTION_KEY.
-openssl rand -hex 32
-
-# Pre-provisioned Langfuse project keys.
-printf 'pk-lf-%s\n' "$(openssl rand -hex 16)"
-printf 'sk-lf-%s\n' "$(openssl rand -hex 16)"
+cp .env.example .env
+chmod 600 .env
 ```
 
-Do not commit `.env`, provider keys, database passwords, or TLS private keys.
-The example `.test` names are reserved for testing. If you choose other names,
-use the same names in `.env`, the certificate command, and host resolution.
+Replace every required placeholder, review the optional operational defaults,
+and validate the result before startup:
+
+```sh
+docker compose config --quiet
+```
+
+See the [environment variable reference](docs/environment-variables.md) for the
+complete catalog, accepted formats, defaults, security classification, rotation
+guidance, change impact, and operational practices.
+
+Do not commit `.env`, provider keys, database passwords, rendered Compose
+configuration, or TLS private keys. The example `.test` names are reserved for
+testing. If you choose other names, use the same names in `.env`, the certificate
+command, and host resolution.
 
 ### Automatic virtual-key rotation
 
@@ -242,7 +161,31 @@ Before enabling key email in production:
 6. Alert on rotation or email failures; do not assume the UI setting proves
    delivery.
 
-## 2. Create local TLS certificates
+## 2. Deliver TLS certificates
+
+Set `TRAEFIK_TLS_CERT_FILE` and `TRAEFIK_TLS_KEY_FILE` to the host paths populated
+by the on-prem certificate delivery process. The defaults are:
+
+- `traefik/certs/litellm-stack.pem`;
+- `traefik/certs/litellm-stack-key.pem`.
+
+The certificate must include the full required chain and cover every configured
+public hostname. The private key must match the certificate and be readable only
+by the deployment account and Docker daemon. After certificate renewal, recreate
+Traefik so the updated bind-mounted files are loaded:
+
+```sh
+docker compose up -d --force-recreate traefik
+```
+
+Confirm the delivered certificate before startup:
+
+```sh
+openssl x509 -in "${TRAEFIK_TLS_CERT_FILE:-traefik/certs/litellm-stack.pem}" \
+  -noout -subject -issuer -dates -ext subjectAltName
+```
+
+### Local development fallback
 
 Install `mkcert` using the package instructions for your operating system, then
 run:
@@ -257,25 +200,13 @@ mkcert \
   langfuse.example.test langfuse-s3.example.test
 ```
 
-The filenames must remain exactly:
-
-- `traefik/certs/litellm-stack.pem`
-- `traefik/certs/litellm-stack-key.pem`
-
-If `.env` uses different hostnames, substitute all six names in the final
-command. Confirm that the certificate covers them:
-
-```sh
-openssl x509 -in traefik/certs/litellm-stack.pem \
-  -noout -subject -issuer -ext subjectAltName
-```
+If `.env` uses different hostnames, substitute all names in the final command.
 
 `mkcert` creates a locally trusted CA and a private key. Its certificates are
 for local/private use only: browsers on other devices will not trust them
 unless that device explicitly trusts the local CA. Never publish the generated
-private key or the CA root key. For an internet-facing deployment, replace this
-setup with certificates from a publicly trusted CA and appropriate renewal and
-key-management procedures.
+private key or the CA root key. Do not use the local fallback for the on-prem
+deployment.
 
 ## 3. Resolve the hostnames
 
