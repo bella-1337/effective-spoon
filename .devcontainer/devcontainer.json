@@ -1,0 +1,38 @@
+{
+  "name": "LiteLLM stack",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1.6.3": {
+      "version": "27.4",
+      "moby": true,
+      "mobyBuildxVersion": "0.17.1",
+      "dockerDashComposeVersion": "v2",
+      "installDockerComposeSwitch": false
+    }
+  },
+  "remoteUser": "vscode",
+  "runArgs": [
+    "--init"
+  ],
+  "remoteEnv": {
+    "LOCAL_WORKSPACE_FOLDER": "${localWorkspaceFolder}"
+  },
+  "postCreateCommand": ".devcontainer/post-create.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-azuretools.vscode-docker",
+        "ms-python.python",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "files.insertFinalNewline": true,
+        "files.trimTrailingWhitespace": true,
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
+      }
+    }
+  }
+}
