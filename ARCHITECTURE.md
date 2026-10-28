@@ -9,7 +9,7 @@ This repository deploys a local, Docker Compose-based LiteLLM platform with:
 - PII masking through Microsoft Presidio;
 - PostgreSQL-backed LiteLLM state and spend records;
 - Langfuse tracing backed by PostgreSQL, ClickHouse, Redis, and MinIO;
-- development semantic routing, Qdrant-backed semantic caching, and
+- D3-assisted coding routing, Qdrant-backed semantic caching, and
   pgvector-backed shared RAG;
 - allowlisted Xberg MCP document extraction through an egress proxy;
 - metrics in Prometheus and dashboards in Grafana;
@@ -39,7 +39,9 @@ private network. It is not a public Internet TLS solution.
        | profile-selected proxies |                         | dashboards / Explore  |
        +--+------------+----------+                         +-----+-----------+-----+
           |            |                                          |           |
-          |            |                                          |           |
+          |  HTTPS + bearer                                       |           |
+          +----------------> Remote D3-mini                        |           |
+          |                  Decisions classifier                  |           |
           |     +------v-------+                         +--------v--+   +----v-----+
           |     | Presidio     |                         | Prometheus |   | Loki     |
           |     | analyzer +   |                         | metrics    |   | logs     |
@@ -59,7 +61,7 @@ Docker metadata access, image-security monitoring, and untrusted fetch egress.
 
 | Network | Members | Purpose |
 | --- | --- | --- |
-| `edge` | Traefik, Grafana, SearXNG, Langfuse web/MinIO, LiteLLM prod/dev, semantic-router Envoy | Services reachable through Traefik routes |
+| `edge` | Traefik, Grafana, SearXNG, Langfuse web/MinIO, LiteLLM prod/dev | Services reachable through Traefik routes |
 | `internal` | Trusted application, data, and observability services | Databases, telemetry, Presidio, and service-to-service calls |
 | `xberg-sandbox` | Xberg, its egress proxy, LiteLLM prod/dev | Internal-only MCP traffic; Xberg has no direct route to `internal` or the Internet |
 | `egress` | Xberg egress proxy | Internet route available only to the destination-filtering proxy |
@@ -93,8 +95,11 @@ two LiteLLM databases on a fresh PostgreSQL volume.
 1. A client connects to a configured hostname over HTTPS.
 2. Traefik selects the matching LiteLLM, Grafana, or SearXNG route.
 3. LiteLLM authenticates API requests with `LITELLM_MASTER_KEY`.
-4. The production guardrail calls Presidio analyzer and anonymizer services.
-5. LiteLLM stores request/spend telemetry in its profile-specific PostgreSQL
+4. Requests for `coding-router` are classified by the remote authenticated D3-mini
+   Decisions endpoint. LiteLLM selects a configured coding tier and falls back to
+   `gpt-4o` if classification fails.
+5. The production guardrail calls Presidio analyzer and anonymizer services.
+6. LiteLLM stores request/spend telemetry in its profile-specific PostgreSQL
    database and emits Prometheus metrics.
 
 Presidio uses internal service addresses:
@@ -124,6 +129,12 @@ blackbox `/health` probes.
 | `langfuse-minio-data` | MinIO | Langfuse events and media objects |
 | `langfuse-redis-data` | Redis | Langfuse queues |
 | `bge-m3-vllm-cache` | vLLM | Downloaded BGE-M3 model artifacts |
+
+The D3-mini model and its cache live on a separate GPU host and are not part of
+this Compose project's persistence. That host must expose only authenticated
+Decisions routes over verified TLS and should firewall access to the LiteLLM host.
+Both LiteLLM containers mount a combined CA bundle containing the D3 issuing CA
+and standard public roots, so private-PKI trust does not break provider TLS.
 
 The PostgreSQL default database is `litellm_prod`; `postgres-init` creates
 `litellm_dev`. Do not reintroduce an unused default `litellm` database.

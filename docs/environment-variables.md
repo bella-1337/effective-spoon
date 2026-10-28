@@ -32,7 +32,6 @@ as `30s`, `15m`, or `15d`.
 | `TRAEFIK_TLS_KEY_FILE` | Optional: `./traefik/certs/litellm-stack-key.pem` | Host file path; secret | Private key matching the delivered certificate. Restrict host permissions to the deployment account and Docker daemon. Never commit or copy it into images. The file is bind-mounted read-only as `/certs/tls.key`. |
 | `LITELLM_PROD_HOST` | Optional: `llm.example.test` | DNS hostname | Public Traefik hostname and advertised base URL for the production-profile LiteLLM proxy. It must be covered by the TLS certificate. Do not include a scheme or path. |
 | `LITELLM_DEV_HOST` | Optional: `llm-dev.example.test` | DNS hostname | Public Traefik hostname and advertised base URL for the development-profile LiteLLM proxy. It must be covered by the TLS certificate. |
-| `VLLM_SR_HOST` | Optional: `llm-router.example.test` | DNS hostname | Public Traefik hostname for the development vLLM Semantic Router Envoy endpoint. |
 | `GRAFANA_HOST` | Optional: `grafana.example.test` | DNS hostname | Public Traefik hostname and Grafana root URL. Changing it can invalidate generated links and browser sessions. |
 | `SEARXNG_HOST` | Optional: `search.example.test` | DNS hostname | Public Traefik hostname used to construct the SearXNG base URL. |
 | `LANGFUSE_WEB_HOST` | Optional: `langfuse.example.test` | DNS hostname | Public Traefik hostname used by Langfuse web/API routing and `NEXTAUTH_URL`. |
@@ -157,12 +156,9 @@ can cause startup failures or corrupt semantic-cache expectations.
 | `QDRANT_STORAGE_SIZE` | `1g`; Docker tmpfs size | Volatile Qdrant storage limit. The bundled development cache is intentionally non-persistent; all contents disappear on recreation. |
 | `QDRANT_CPU_LIMIT` | `1`; positive decimal CPUs | CPU limit for Qdrant. |
 | `QDRANT_MEMORY_LIMIT` | `2g`; Docker size | Memory limit for Qdrant. Keep enough headroom for indexes and query peaks. |
-| `VLLM_SR_CPU_LIMIT` | `2`; positive decimal CPUs | CPU limit for the semantic-router service. |
-| `VLLM_SR_MEMORY_LIMIT` | `7g`; Docker size | Memory limit for router models. Lower values can cause out-of-memory termination during model loading. |
-| `VLLM_SR_HEALTH_START_PERIOD` | `5m`; Docker duration | Health-check grace period while router models initialize. |
-| `VLLM_SR_ENVOY_LOG_LEVEL` | `warning`; Envoy log level | Envoy verbosity. Use `info` or `debug` only for time-bounded troubleshooting. |
-| `VLLM_SR_ENVOY_CPU_LIMIT` | `1`; positive decimal CPUs | CPU limit for the Envoy front end. |
-| `VLLM_SR_ENVOY_MEMORY_LIMIT` | `512m`; Docker size | Memory limit for the Envoy front end. |
+| `D3_DECISION_API_BASE` | Required; HTTPS base URL | Operator-controlled remote D3-mini endpoint, without `/v1/systemone`. LiteLLM appends the path. Allowlist this destination in network policy and use a certificate trusted by the LiteLLM host. |
+| `D3_DECISION_API_KEY` | Required secret, at least 32 random characters | Bearer credential shared only by LiteLLM and the remote D3 listener. Rotate it independently of LiteLLM client keys. |
+| `D3_DECISION_CA_BUNDLE` | Required host path to a PEM bundle | CA bundle mounted into both LiteLLM containers. It must include the CA that issued the D3 certificate **and** the normal public roots needed by completion providers; setting `SSL_CERT_FILE` to a private CA alone would break those providers. |
 
 ### Presidio, Xberg, and pgvector connector
 

@@ -33,13 +33,7 @@ SEARCH = MODULES / "search.yaml"
 GUARDRAILS = MODULES / "guardrails" / "presidio.yaml"
 POLICIES = MODULES / "policies" / "eu-data-protection.yaml"
 ATTRIBUTION = MODULES / "langfuse_user_attribution.py"
-VLLM_SR_CONFIG = ROOT / "vllm-semantic-router" / "config.yaml"
-VLLM_SR_ENVOY = ROOT / "vllm-semantic-router" / "envoy.yaml"
 PROMETHEUS = LITELLM_DIR / "prometheus.yml"
-VLLM_SR_ALERTS = ROOT / "grafana" / "alerting" / "vllm-semantic-router.yml"
-VLLM_SR_DASHBOARD = (
-    ROOT / "grafana" / "dashboards" / "vllm-semantic-router" / "vllm-semantic-router.json"
-)
 IMAGE_PATTERN = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]+)?(/[A-Za-z0-9._-]+)+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$")
 
 USAGE = """Usage:
@@ -160,42 +154,41 @@ def static_checks(report: Reporter) -> None:
     (report.pass_ if semantic_cache_ok else report.fail_)(
         "Qdrant semantic caching is development-only, opt-in, end-user scoped, and uses environment-sourced credentials"
     )
-    semantic_router_config = VLLM_SR_CONFIG.read_text(encoding="utf-8")
-    semantic_router_envoy = VLLM_SR_ENVOY.read_text(encoding="utf-8")
     prometheus = PROMETHEUS.read_text(encoding="utf-8")
     compose_text = COMPOSE_FILE.read_text(encoding="utf-8")
-    router_alerts = VLLM_SR_ALERTS.read_text(encoding="utf-8")
-    router_dashboard = VLLM_SR_DASHBOARD.read_text(encoding="utf-8")
-    semantic_router_ok = all((
-        "model_name: semantic-fast" in dev_text,
-        "model_name: semantic-reasoning" in dev_text,
-        "model_name: semantic-fast" not in prod_text,
-        "model_name: semantic-reasoning" not in prod_text,
-        "model: semantic-fast" in semantic_router_config,
-        "model: semantic-reasoning" in semantic_router_config,
-        "endpoint: litellm-dev:4000" in semantic_router_config,
-        "failure_mode_allow: false" in semantic_router_envoy,
-        "envoy.filters.http.local_ratelimit" in semantic_router_envoy,
-        "envoy.filters.http.lua" in semantic_router_envoy,
-        '[":path"] = "/v1/models"' in semantic_router_envoy,
-        "- x-vsr-selected-model" in semantic_router_envoy,
-        'request_headers:remove("x-vsr-selected-model")' in semantic_router_envoy,
-        'request_headers:remove("x-vsr-looper-secret")' in semantic_router_envoy,
-        'request_headers:remove("x-authz-user-id")' in semantic_router_envoy,
-        "max_tokens: 2000" in semantic_router_envoy,
-        "tokens_per_fill: 1000" in semantic_router_envoy,
-        "address: litellm-dev" in semantic_router_envoy,
-        "port_value: 9901" in semantic_router_envoy,
-        'targets: ["vllm-semantic-router:9190"]' in prometheus,
-        'targets: ["vllm-semantic-router-envoy:9901"]' in prometheus,
-        'command: ["--all"]' in compose_text,
-        "vllm-semantic-router-down" in router_alerts,
-        "vllm-semantic-router-envoy-down" in router_alerts,
-        "vllm-semantic-router-rate-limited" in router_alerts,
-        '"uid": "vllm-semantic-router"' in router_dashboard,
-    ))
-    (report.pass_ if semantic_router_ok else report.fail_)(
-        "Development vLLM Semantic Router selects aliases served by the internal LiteLLM proxy"
+    decisions_router_ok = all(
+        item in text
+        for text in (prod_text, dev_text)
+        for item in (
+            "model_name: d3-mini",
+            "model: hosted_vllm/vllm-sr/d3-mini",
+            "api_base: os.environ/D3_DECISION_API_BASE",
+            "api_key: os.environ/D3_DECISION_API_KEY",
+            "mode: decisions",
+            "model_name: coding-router",
+            "model: auto_router/complexity_router",
+            "deployment_name: d3-mini",
+            "classifier_fallback: default_model",
+        )
+    ) and all(
+        stale not in compose_text + prometheus + dev_text + prod_text
+        for stale in (
+            "vllm-semantic-router-envoy",
+            "semantic-fast",
+            "semantic-reasoning",
+            "VLLM_SR_HOST",
+        )
+    ) and all(
+        item in service_block(service)
+        for service in ("litellm-prod", "litellm-dev")
+        for item in (
+            "D3_DECISION_CA_BUNDLE",
+            "/etc/ssl/certs/d3-decision-ca-bundle.pem:ro",
+            "SSL_CERT_FILE: /etc/ssl/certs/d3-decision-ca-bundle.pem",
+        )
+    )
+    (report.pass_ if decisions_router_ok else report.fail_)(
+        "Both profiles use the authenticated remote D3 Decisions deployment through LiteLLM Auto Router"
     )
     required_settings = (
         r"^\s*disable_spend_logs:\s*false\s*$", r"^\s*store_prompts_in_spend_logs:\s*false\s*$",
@@ -211,13 +204,26 @@ def static_checks(report: Reporter) -> None:
         for config in (prod_text, dev_text)
         for pattern in required_settings
     ) and all(
-        item in service_block(service)
-        for service in ("litellm-prod", "litellm-dev")
-        for item in (
-            'LITELLM_OTEL_V2: "true"', 'LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""',
-            'LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""', 'LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""',
-            'OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: ".*"',
+        all(
+            (
+                'LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""' in block,
+                'LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""' in block,
+                'LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""' in block,
+                re.search(
+                    r'^\s*LITELLM_OTEL_V2:\s*"(?:true|\$\{LITELLM_OTEL_V2:-true\})"\s*$',
+                    block,
+                    re.M,
+                )
+                is not None,
+                re.search(
+                    r'^\s*OTEL_PYTHON_FASTAPI_EXCLUDED_URLS:\s*"(?:\.\*|\$\{OTEL_PYTHON_FASTAPI_EXCLUDED_URLS:-\.\*\})"\s*$',
+                    block,
+                    re.M,
+                )
+                is not None,
+            )
         )
+        for block in (service_block("litellm-prod"), service_block("litellm-dev"))
     ) and all(
         item in attribution
         for item in (
@@ -227,16 +233,16 @@ def static_checks(report: Reporter) -> None:
         )
     )
     (report.pass_ if retention_ok else report.fail_)("Privacy, retention, and authenticated pseudonymous Langfuse attribution settings match both profiles")
-    prod_block, dev_block, vector_block, demo_block, bge_block, router_block, envoy_block = (
+    prod_block, dev_block, vector_block, demo_block, bge_block = (
         service_block(service)
         for service in (
             "litellm-prod", "litellm-dev", "litellm-pgvector", "litellm-demo-data-prod",
-            "bge-m3-vllm", "vllm-semantic-router", "vllm-semantic-router-envoy",
+            "bge-m3-vllm",
         )
     )
     isolation_ok = all(
         block for block in (
-            prod_block, dev_block, vector_block, demo_block, bge_block, router_block, envoy_block
+            prod_block, dev_block, vector_block, demo_block, bge_block
         )
     ) and all((
         re.search(r"^\s*profiles:\s*\[prod\]\s*$", prod_block, re.M) is not None,
@@ -244,18 +250,14 @@ def static_checks(report: Reporter) -> None:
         re.search(r"^\s*profiles:\s*\[dev\]\s*$", vector_block, re.M) is not None,
         re.search(r"^\s*profiles:\s*\[demo\]\s*$", demo_block, re.M) is not None,
         re.search(r"^\s*profiles:\s*\[dev\]\s*$", bge_block, re.M) is not None,
-        re.search(r"^\s*profiles:\s*\[dev\]\s*$", router_block, re.M) is not None,
-        re.search(r"^\s*profiles:\s*\[dev\]\s*$", envoy_block, re.M) is not None,
         "litellm_prod" in prod_block, "litellm_dev" in dev_block,
         "LITELLM_PROD_HOST" in prod_block, "LITELLM_DEV_HOST" in dev_block,
         "litellm_dev" not in prod_block, "litellm_prod" not in dev_block,
         "hosted_vllm/bge-m3" not in prod_text,
-        "semantic-fast" not in prod_text,
-        "semantic-reasoning" not in prod_text,
         "test-model" not in prod_text,
         "ports:" not in bge_block,
-        "ports:" not in router_block,
-        "ports:" not in envoy_block,
+        "vllm-semantic-router" not in compose_text,
+        "envoyproxy/envoy" not in compose_text,
     ))
     (report.pass_ if isolation_ok else report.fail_)("Development and production services, databases, hostnames, and model lists remain isolated in docker-compose.yml")
 
@@ -707,9 +709,16 @@ def main() -> None:
         try:
             xberg_container = start_validation_mcp_server(network)
             qdrant_container = start_validation_qdrant(network)
-            prod_code, prod_output = docker_run_validation(candidate, PROD, network, [])
+            decision_environment = [
+                "-e", "D3_DECISION_API_BASE=https://d3-mini.example.test:8443",
+                "-e", "D3_DECISION_API_KEY=upgrade-check-placeholder-key",
+            ]
+            prod_code, prod_output = docker_run_validation(
+                candidate, PROD, network, decision_environment
+            )
             dev_code, dev_output = docker_run_validation(candidate, DEV, network,
-                                                          ["-e", "PG_VECTOR_API_BASE=http://upgrade-check-placeholder:8000",
+                                                          [*decision_environment,
+                                                           "-e", "PG_VECTOR_API_BASE=http://upgrade-check-placeholder:8000",
                                                            "-e", "PG_VECTOR_API_KEY=upgrade-check-placeholder",
                                                            "-e", "QDRANT_API_BASE=http://qdrant:6333",
                                                            "-e", "QDRANT_API_KEY=upgrade-check-placeholder"])
@@ -790,7 +799,7 @@ def main() -> None:
             )
         isolated = not any(
             item in prod_output
-            for item in ("semantic-fast", "semantic-reasoning", "test-model", "vector_store")
+            for item in ("test-model", "bge-m3", "vector_store")
         )
         if isolated:
             report.pass_("Production and development candidate-image validations ran in fully isolated containers without leaking one profile's models into the other")

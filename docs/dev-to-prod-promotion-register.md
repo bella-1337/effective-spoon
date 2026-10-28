@@ -81,9 +81,9 @@ and the repository regression checks. Release notes alone are not sufficient.
 | `D2P-011` | LiteLLM pgvector connector | `dev-only` | `unverified` | service |
 | `D2P-012` | Xberg automatic indexing | `dev-only` | `unverified` | callback |
 | `D2P-013` | Feature environment and secrets | `dev-only` | not version-gated | service |
-| `D2P-014` | vLLM Semantic Router | `dev-only` | `unverified` | service |
-| `D2P-015` | Envoy semantic-router ingress | `dev-only` | not LiteLLM-only | route |
-| `D2P-016` | Router DNS and TLS endpoint | `dev-only` | not version-gated | infrastructure |
+| `D2P-014` | Remote D3-mini decision model | shared | `unverified` | service |
+| `D2P-015` | LiteLLM coding Auto Router | shared | `unverified` | config |
+| `D2P-016` | D3 DNS, TLS, and network policy | shared | not version-gated | infrastructure |
 | `D2P-017` | Automatic demo-data seeding | `never-promote` | not applicable | profile |
 | `D2P-018` | Dev database, hostname, and route | `never-promote` | not applicable | isolation |
 | `D2P-019` | Feature monitoring and dashboards | `dev-only` | not version-gated | observability |
@@ -115,16 +115,15 @@ Promotion plan:
 Tags: `register-added:v1.0.0`, `state:mixed`,
 `stable-support:unverified`, `activation:config`.
 
-Dev adds `test-model`, `semantic-fast`, `semantic-reasoning`, and `bge-m3`.
-Production separately contains `gpt-4o`, so model lists must be merged, never
-overwritten.
+Dev adds `test-model` and `bge-m3`. Both profiles expose `d3-mini` for direct
+Decisions calls and `coding-router` for four-tier coding classification.
 
 Promotion plan:
 
 - `test-model`: tag `state:never-promote`; keep a regression assertion that it is
   absent from production.
-- `semantic-fast` and `semantic-reasoning`: promote with `D2P-014`; assign
-  reviewed production deployments, budgets, rate limits, and fallback behavior.
+- `d3-mini` and `coding-router`: validate with `D2P-014` and `D2P-015`; assign
+  budgets, rate limits, tier models, and fallback behavior before broad access.
 - `bge-m3`: promote with `D2P-008`; do not expose it before production embedding
   capacity and access policy are defined.
 
@@ -309,47 +308,48 @@ Promotion plan:
 4. Never reuse dev credentials or publish resolved Compose output.
 5. Add rotation and revocation procedures.
 
-### D2P-014 - vLLM Semantic Router
+### D2P-014 - Remote D3-mini decision model
 
-Tags: `register-added:v1.0.0`, `state:dev-only`,
+Tags: `register-added:v1.0.0`, `state:shared`,
 `stable-support:unverified`, `activation:service`.
 
 Promotion plan:
 
-1. Select an upstream release containing the required LiteLLM compatibility fix.
-2. Create a prod router config with no `litellm-dev` references.
-3. Assign reviewed production models to routing aliases.
-4. Evaluate routing accuracy on a production-representative prompt set.
-5. Test deterministic fallback, timeouts, route-cache behavior, concurrency, and
-   router unavailability.
-6. Pin the router image and keep routing independently disableable.
+1. Deploy the pinned D3-mini CUDA image and model revision on the separate GPU
+   host with `scripts/deploy-d3-mini.sh`.
+2. Benchmark memory, latency, throughput, and thermal stability on the actual
+   16 GB GPU.
+3. Evaluate the four coding tiers on a representative, labeled prompt set.
+4. Test malformed requests, oversized input, concurrency, and model unavailability.
+5. Keep the D3 credential independent from LiteLLM client credentials and rotate it.
+6. Use `d3-nano` if D3-mini lacks safe memory headroom.
 
-### D2P-015 - Envoy semantic-router ingress
+### D2P-015 - LiteLLM coding Auto Router
 
-Tags: `register-added:v1.0.0`, `state:dev-only`,
-`stable-support:not-litellm-only`, `activation:route`.
+Tags: `register-added:v1.0.0`, `state:shared`,
+`stable-support:unverified`, `activation:config`.
 
 Promotion plan:
 
-1. Create a production Envoy config targeting `litellm-prod`.
-2. Preserve fail-closed authentication checks and LiteLLM's second validation.
-3. Preserve removal of client-supplied internal routing and authorization
-   headers.
-4. Define body, token, timeout, and rate limits from measured capacity.
-5. Test missing, invalid, and forged credentials and router failure.
-6. Keep the Envoy admin API private and expose metrics only.
+1. Keep `d3-mini` registered as a Decisions deployment in both profiles.
+2. Keep clients on the normal LiteLLM authentication and policy boundary.
+3. Review SIMPLE, MEDIUM, COMPLEX, and REASONING model assignments.
+4. Preserve the 15-second classifier timeout and fail-safe `gpt-4o` fallback.
+5. Verify the classifier response header so fallback cannot masquerade as success.
+6. Monitor classifier latency, errors, tier distribution, and fallback rate.
 
-### D2P-016 - Router DNS and TLS endpoint
+### D2P-016 - D3 DNS, TLS, and network policy
 
-Tags: `register-added:v1.0.0`, `state:dev-only`,
+Tags: `register-added:v1.0.0`, `state:shared`,
 `stable-support:not-version-gated`, `activation:infrastructure`.
 
 Promotion plan:
 
-1. Allocate a production hostname distinct from the dev router hostname.
-2. Configure DNS and publicly trusted, managed TLS.
-3. Add the Traefik route only after the prod Envoy and backend are healthy.
-4. Define client migration and rollback behavior.
+1. Allocate an internal DNS name covered by an operator-managed certificate.
+2. Restrict the D3 port at the firewall to LiteLLM hosts.
+3. Enforce TLS 1.2+ and certificate verification; never add an insecure mode.
+4. Expose only `/v1/systemone`, `/v1/decisions`, and model discovery.
+5. Define credential and certificate rotation plus rollback procedures.
 
 ### D2P-017 - Automatic demo-data seeding
 
@@ -382,8 +382,9 @@ Permanent plan:
 Tags: `register-added:v1.0.0`, `state:dev-only`,
 `stable-support:not-version-gated`, `activation:observability`.
 
-Dev-feature monitoring includes LiteLLM dev, router, Envoy, pgvector, dashboards,
-alerts, and the dev PostgreSQL Grafana datasource.
+Feature monitoring includes LiteLLM classifier metrics and logs, pgvector
+dashboards, alerts, and the development PostgreSQL Grafana datasource. The
+separate D3 host must be monitored by its infrastructure owner.
 
 Promotion plan:
 
