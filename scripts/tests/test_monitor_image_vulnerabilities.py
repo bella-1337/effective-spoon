@@ -31,11 +31,11 @@ class MonitorImageVulnerabilitiesTests(unittest.TestCase):
     def test_explicit_scope_retains_requested_services(self) -> None:
         arguments = argparse.Namespace(
             all=False,
-            services="litellm-dev,vllm-semantic-router",
+            services="litellm-dev,bge-m3-vllm",
         )
         self.assertEqual(
             monitor.selected_services(arguments),
-            ("litellm-dev", "vllm-semantic-router"),
+            ("litellm-dev", "bge-m3-vllm"),
         )
 
     def test_exception_removes_finding_from_policy_but_not_report(self) -> None:

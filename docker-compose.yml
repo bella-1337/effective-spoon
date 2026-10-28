@@ -281,76 +281,6 @@ services:
       retries: 15
       start_period: ${BGE_M3_HEALTH_START_PERIOD:-15m}
 
-  vllm-semantic-router:
-    logging: *default-logging
-    profiles: [dev]
-    image: ghcr.io/vllm-project/semantic-router/vllm-sr:latest@sha256:f613ce23a4f8e19357090ef83e614468dd7baa939b4634ad33144584e1c2cb09
-    user: "65532:65532"
-    command: ["/app/config.yaml"]
-    volumes:
-      - ./vllm-semantic-router/config.yaml:/app/config.yaml:ro
-    init: true
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp:mode=1777
-      - /app/.vllm-sr:uid=65532,gid=65532,mode=0750
-      - /app/models:uid=65532,gid=65532,mode=0750
-    deploy:
-      resources:
-        limits:
-          cpus: "${VLLM_SR_CPU_LIMIT:-2}"
-          memory: ${VLLM_SR_MEMORY_LIMIT:-7g}
-    networks: [internal]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: ${VLLM_SR_HEALTH_START_PERIOD:-5m}
-
-  vllm-semantic-router-envoy:
-    logging: *default-logging
-    profiles: [dev]
-    image: envoyproxy/envoy:v1.36.2@sha256:4972515dd9a069b44beb43cebba7851596e72a8c61cd7a7c33d8f48efc5280ba
-    user: "101:101"
-    command: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "${VLLM_SR_ENVOY_LOG_LEVEL:-warning}"]
-    volumes:
-      - ./vllm-semantic-router/envoy.yaml:/etc/envoy/envoy.yaml:ro
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp:mode=1777
-    deploy:
-      resources:
-        limits:
-          cpus: "${VLLM_SR_ENVOY_CPU_LIMIT:-1}"
-          memory: ${VLLM_SR_ENVOY_MEMORY_LIMIT:-512m}
-    depends_on:
-      vllm-semantic-router:
-        condition: service_healthy
-      litellm-dev:
-        condition: service_healthy
-    networks: [edge, internal]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "bash", "-ec", ": >/dev/tcp/127.0.0.1/19000"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.vllm-semantic-router.rule=Host(`${VLLM_SR_HOST:-llm-router.example.test}`)
-      - traefik.http.routers.vllm-semantic-router.entrypoints=websecure
-      - traefik.http.routers.vllm-semantic-router.tls=true
-      - traefik.http.services.vllm-semantic-router.loadbalancer.server.port=8899
-
   pgvector-migrate:
     logging: *default-logging
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
@@ -825,11 +755,15 @@ services:
     volumes:
       - ./litellm/config.prod.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
+      - ${D3_DECISION_CA_BUNDLE:?Set D3_DECISION_CA_BUNDLE in .env}:/etc/ssl/certs/d3-decision-ca-bundle.pem:ro
     environment:
       DATABASE_URL: postgresql://${PG_USER:-litellm}:${PG_PASSWORD:?Set PG_PASSWORD in .env}@postgres:5432/litellm_prod
       STORE_MODEL_IN_DB: "${LITELLM_STORE_MODEL_IN_DB:-True}"
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
+      D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
+      SSL_CERT_FILE: /etc/ssl/certs/d3-decision-ca-bundle.pem
       LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
       LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""
       LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""
@@ -898,11 +832,15 @@ services:
     volumes:
       - ./litellm/config.dev.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
+      - ${D3_DECISION_CA_BUNDLE:?Set D3_DECISION_CA_BUNDLE in .env}:/etc/ssl/certs/d3-decision-ca-bundle.pem:ro
     environment:
       DATABASE_URL: postgresql://${PG_USER:-litellm}:${PG_PASSWORD:?Set PG_PASSWORD in .env}@postgres:5432/litellm_dev
       STORE_MODEL_IN_DB: "${LITELLM_STORE_MODEL_IN_DB:-True}"
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
+      D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
+      SSL_CERT_FILE: /etc/ssl/certs/d3-decision-ca-bundle.pem
       LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
       LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""
       LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""

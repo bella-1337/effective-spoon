@@ -12,6 +12,28 @@ model_list:
     litellm_params:
       model: openai/gpt-4o-mini
       api_key: os.environ/OPENAI_API_KEY
+  - model_name: d3-mini
+    litellm_params:
+      model: hosted_vllm/vllm-sr/d3-mini
+      api_base: os.environ/D3_DECISION_API_BASE
+      api_key: os.environ/D3_DECISION_API_KEY
+    model_info:
+      mode: decisions
+  - model_name: coding-router
+    litellm_params:
+      model: auto_router/complexity_router
+      complexity_router_default_model: gpt-4o
+      complexity_router_config:
+        classifier_type: oss_classifier
+        opensource_classifier_config:
+          deployment_name: d3-mini
+          timeout_ms: 15000
+        tiers:
+          SIMPLE: gpt-4o-mini
+          MEDIUM: gpt-4o-mini
+          COMPLEX: gpt-4o
+          REASONING: gpt-4o
+        classifier_fallback: default_model
 
 mcp_servers:
   xberg:

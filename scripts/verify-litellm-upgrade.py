@@ -41,7 +41,7 @@ from maintenance_common import (
 
 ALL_CHECKS = (
     "compose-config", "compose-health", "network-exposure", "prod-auth", "dev-auth", "isolation",
-    "dev-vllm-embedding", "semantic-routing", "pgvector", "presidio", "searxng", "xberg-mcp",
+    "dev-vllm-embedding", "coding-routing", "pgvector", "presidio", "searxng", "xberg-mcp",
     "langfuse", "observability", "logs",
 )
 USAGE = """Usage: scripts/verify-litellm-upgrade.py [--only CHECK[,CHECK...]] [--skip CHECK[,CHECK...]] [--list]
@@ -54,7 +54,7 @@ already-running Compose stack. Start the desired profile(s) first:
 
 Checks (run in this order unless filtered):
   compose-config compose-health network-exposure prod-auth dev-auth isolation
-  dev-vllm-embedding semantic-routing pgvector presidio searxng xberg-mcp
+  dev-vllm-embedding coding-routing pgvector presidio searxng xberg-mcp
   langfuse observability logs
 
 Options:
@@ -73,12 +73,10 @@ class Suite:
     def __init__(self) -> None:
         self.prod_host = env_or_dotenv("LITELLM_PROD_HOST", "llm.example.test")
         self.dev_host = env_or_dotenv("LITELLM_DEV_HOST", "llm-dev.example.test")
-        self.vllm_sr_host = env_or_dotenv("VLLM_SR_HOST", "llm-router.example.test")
         self.grafana_host = env_or_dotenv("GRAFANA_HOST", "grafana.example.test")
         self.searxng_host = env_or_dotenv("SEARXNG_HOST", "search.example.test")
         self.langfuse_host = env_or_dotenv("LANGFUSE_WEB_HOST", "langfuse.example.test")
         self.prod_url, self.dev_url = f"https://{self.prod_host}", f"https://{self.dev_host}"
-        self.vllm_sr_url = f"https://{self.vllm_sr_host}"
         self.grafana_url, self.searxng_url = f"https://{self.grafana_host}", f"https://{self.searxng_host}"
         self.langfuse_url = f"https://{self.langfuse_host}"
         self.prod_running, self.dev_running = service_is_running("litellm-prod"), service_is_running("litellm-dev")
@@ -434,21 +432,58 @@ WHERE vector_store_id = 'sme-knowledge'
         self.fail_(f"dev-vllm-embedding: bge-m3 returned an unexpected embedding (dimensions: {dimensions or 'none'})")
         return 1
 
-    def check_semantic_routing(self) -> int:
-        if not self.dev_running: return self.skip("semantic-routing: litellm-dev is not running")
-        required_services = ("vllm-semantic-router", "vllm-semantic-router-envoy")
-        if not all(service_is_running(service) for service in required_services):
-            self.fail_("semantic-routing: required router and Envoy services are not running")
-            return 1
+    def check_coding_routing(self) -> int:
+        if not self.dev_running:
+            return self.skip("coding-routing: litellm-dev is not running")
         headers = self.auth_headers()
-        if not headers: self.fail_("semantic-routing: could not read LITELLM_MASTER_KEY"); return 1
+        if not headers:
+            self.fail_("coding-routing: could not read LITELLM_MASTER_KEY")
+            return 1
+        decision_status, decision = self.request(
+            f"{self.dev_url}/v1/systemone",
+            "POST",
+            {
+                "Authorization": headers["Authorization"],
+                "Content-Type": "application/json",
+            },
+            {
+                "model": "d3-mini",
+                "state": "Refactor authentication across several modules and preserve compatibility.",
+                "questions": {
+                    "tier": {
+                        "type": "choice",
+                        "instructions": "Choose the required coding effort.",
+                        "criteria": {
+                            "SIMPLE": "Small local and reversible change",
+                            "MEDIUM": "Bounded multi-step implementation",
+                            "COMPLEX": "Cross-module or compatibility work",
+                            "REASONING": "Security, data-loss, or architecture risk",
+                        },
+                    }
+                },
+            },
+            30,
+        )
+        tier = (
+            decision.get("answers", {}).get("tier", {}).get("choice")
+            if isinstance(decision, dict)
+            else None
+        )
+        if decision_status != 200 or tier not in {
+            "SIMPLE", "MEDIUM", "COMPLEX", "REASONING"
+        }:
+            self.fail_(
+                "coding-routing: D3 Decisions probe failed "
+                f"(HTTP {decision_status}, tier {tier or 'none'})"
+            )
+            return 1
         self.nonce = "probe-" + "".join(secrets.choice(string.ascii_lowercase) for _ in range(16))
         status, response_headers, response = self.request_with_headers(
-            f"{self.vllm_sr_url}/v1/chat/completions",
+            f"{self.dev_url}/v1/chat/completions",
             "POST",
             {"Authorization": headers["Authorization"], "Content-Type": "application/json"},
             {
-                "model": "vllm-sr/auto",
+                "model": "coding-router",
                 "messages": [
                     {
                         "role": "user",
@@ -465,20 +500,20 @@ WHERE vector_store_id = 'sme-knowledge'
         )
         routed_model = response.get("model", "") if isinstance(response, dict) else ""
         choices = response.get("choices", []) if isinstance(response, dict) else []
-        selected_alias = response_headers.get("x-vsr-selected-model", "")
+        classifier_cause = response_headers.get("x-litellm-complexity-router-cause", "")
         if (
             status == 200
             and isinstance(routed_model, str)
             and bool(routed_model)
             and choices
-            and selected_alias == "semantic-reasoning"
+            and classifier_cause == "jev_classifier"
         ):
             self.nonce_service = "litellm-dev"
-            self.pass_("semantic-routing: vLLM Semantic Router selected a LiteLLM completion alias")
+            self.pass_("coding-routing: D3 classified a request and LiteLLM Auto Router completed it")
             return 0
         self.fail_(
-            "semantic-routing: routed inference did not return the expected LiteLLM completion "
-            f"(HTTP {status}, model {routed_model or 'none'}, selected alias {selected_alias or 'none'})"
+            "coding-routing: Auto Router did not use the D3 classifier "
+            f"(HTTP {status}, model {routed_model or 'none'}, cause {classifier_cause or 'none'})"
         )
         return 1
 
@@ -768,8 +803,6 @@ WHERE vector_store_id = 'sme-knowledge'
                 self.fail_(f"observability: Grafana datasource '{datasource}' did not report healthy")
                 bad = True
         dashboard_uids = ["litellm-stack", "litellm-cost", "litellm-admin", "litellm-team-cost"]
-        if self.dev_running:
-            dashboard_uids.append("vllm-semantic-router")
         for uid in dashboard_uids:
             _, data = self.request(f"{self.grafana_url}/api/dashboards/uid/{uid}", headers=headers)
             if isinstance(data, dict) and isinstance(data.get("dashboard"), dict) and data["dashboard"].get("uid") == uid:
@@ -857,19 +890,6 @@ SELECT
             elif any(target.get("health") != "up" for target in matching):
                 self.fail_(f"observability: Prometheus job '{job}' is unhealthy")
                 bad = True
-        if self.dev_running:
-            for job in ("vllm-semantic-router", "vllm-semantic-router-envoy"):
-                matching = [
-                    target
-                    for target in active
-                    if isinstance(target, dict) and target.get("labels", {}).get("job") == job
-                ]
-                if not matching:
-                    self.fail_(f"observability: Prometheus job '{job}' has no active target")
-                    bad = True
-                elif any(target.get("health") != "up" for target in matching):
-                    self.fail_(f"observability: Prometheus job '{job}' is unhealthy")
-                    bad = True
         if not bad:
             self.pass_("observability: expected Prometheus scrape targets are healthy")
         return int(bad)

@@ -259,7 +259,7 @@ mkdir -p traefik/certs
 mkcert \
   -cert-file traefik/certs/litellm-stack.pem \
   -key-file traefik/certs/litellm-stack-key.pem \
-  llm.example.test llm-dev.example.test llm-router.example.test grafana.example.test search.example.test \
+  llm.example.test llm-dev.example.test grafana.example.test search.example.test \
   langfuse.example.test langfuse-s3.example.test
 ```
 
@@ -276,7 +276,7 @@ deployment.
 For a stack running on this machine, add one line to `/etc/hosts`:
 
 ```text
-127.0.0.1 llm.example.test llm-dev.example.test llm-router.example.test grafana.example.test search.example.test langfuse.example.test langfuse-s3.example.test
+127.0.0.1 llm.example.test llm-dev.example.test grafana.example.test search.example.test langfuse.example.test langfuse-s3.example.test
 ```
 
 On Windows, edit
@@ -392,14 +392,14 @@ curl --fail --show-error --silent \
 curl --fail --show-error --silent --output /dev/null https://search.example.test/
 ```
 
-For the development profile, also verify the internal router readiness and
-metrics endpoints without publishing them to the host:
+For either profile, verify the remote D3 integration through LiteLLM rather than
+calling the classifier host directly:
 
 ```sh
-docker compose exec -T vllm-semantic-router \
-  curl --fail --silent http://127.0.0.1:8080/ready
-docker compose exec -T vllm-semantic-router \
-  curl --fail --silent http://127.0.0.1:9190/metrics >/dev/null
+curl --fail --silent https://llm-dev.example.test/v1/systemone \
+  -H "Authorization: ******" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"d3-mini","state":"Fix a local typo.","questions":{"tier":{"type":"choice","instructions":"Choose coding effort.","criteria":{"SIMPLE":"Local change","MEDIUM":"Bounded multi-step change","COMPLEX":"Cross-module change","REASONING":"High-risk reasoning"}}}}'
 ```
 
 If command-line `curl` does not use the operating system trust store, point it
@@ -486,7 +486,7 @@ Append a line filter when useful, for example
 currently running profile and services; use the label browser rather than
 assuming that every example value is present.
 
-Grafana provisions five dashboards in the **LiteLLM** folder:
+Grafana provisions four dashboards in the **LiteLLM** folder:
 
 - **LiteLLM Stack (dev/prod)** for request, latency, failure, spend, deployment,
   and guardrail metrics.
@@ -497,21 +497,14 @@ Grafana provisions five dashboards in the **LiteLLM** folder:
 - **LiteLLM Team Costing** for per-team spend, requests, tokens, models, member
   attribution, and expensive requests. Select any current team; new teams appear
   automatically.
-- **vLLM Semantic Router** for router and Envoy target health, inference
-  outcomes, decision rate, model-routing latency, downstream request rate, and
-  inference error ratio.
 
-Prometheus scrapes the router directly on internal port `9190` and Envoy through
-the metrics-only listener on internal port `9901`. The Envoy listener proxies
-only `/stats/prometheus`; all other paths return `404`, and the full Envoy admin
-API remains loopback-only. Grafana provisions alerts when the development
-LiteLLM proxy is active and either router target is down, when routed inference
-errors exceed 5% for 10 minutes, or when p95 model-selection latency exceeds
-500 ms for 10 minutes. Envoy also limits each routed ingress instance to a
-sustained 1,000 requests per second with a 2,000-request burst before semantic
-classification, and Grafana alerts when that protection remains active for five
-minutes. Configure a Grafana contact point and notification policy for these
-alerts; repository configuration does not contain notification credentials.
+D3 classifier calls flow through LiteLLM and therefore use the normal LiteLLM
+request, failure, latency, spend-log, and trace surfaces. The external GPU host
+is intentionally not scraped across the trust boundary by this Compose stack;
+its owner must monitor GPU memory, utilization, temperature, process readiness,
+and TLS certificate expiry. Configure a Grafana contact point and notification
+policy for stack alerts; repository configuration contains no notification
+credentials.
 
 The development profile automatically seeds two persistent demonstration teams
 and four users after its database schema is ready. Production seeds the same
@@ -618,33 +611,50 @@ Responses API; it does not change MCP permissions or direct
 `/mcp-rest/tools/call` requests. Production keeps semantic filtering disabled
 because the local model containers are intentionally development-only.
 
-The development profile also runs vLLM Semantic Router on CPU with Envoy as its
-inference listener. Requests sent to `VLLM_SR_HOST` pass through Envoy and the
-router before reaching the internal LiteLLM proxy. The router selects either
-the `semantic-fast` or `semantic-reasoning` LiteLLM alias; both currently map to
-the approved `gpt-4o-mini` deployment until additional completion models are
-reviewed. BGE-M3 remains a separate pooling service and embeddings do not pass
-through the chat router.
+Both LiteLLM profiles register a remote `vllm-sr/d3-mini` deployment as a native
+Decisions model. The `coding-router` Auto Router sends only the classification
+request to D3, then selects `gpt-4o-mini` for SIMPLE/MEDIUM work and `gpt-4o` for
+COMPLEX/REASONING work. If the classifier is unavailable or times out after 15
+seconds, routing fails safe to `gpt-4o`. BGE-M3 remains an independent local
+pooling service; embeddings never pass through D3.
 
-Before Envoy buffers a request body or invokes the semantic router, it validates
-the bearer credential against LiteLLM's internal `/v1/models` endpoint. Missing
-or invalid credentials are rejected without semantic classification, and an
-unavailable authentication check fails closed with `503`. LiteLLM remains the
-authoritative authentication boundary and validates the credential again when
-it receives the routed request.
+Deploy D3-mini on the separate NVIDIA GPU machine before starting this stack.
+The script requires Docker Compose, one CUDA-capable GPU, a DNS name, an
+operator-provided TLS certificate/key, and a random API key of at least 32
+characters:
+
+```sh
+export D3_SERVER_NAME=d3-mini.example.test
+export D3_API_KEY="$(openssl rand -hex 32)"
+export D3_TLS_CERT_FILE=/secure/path/d3-mini.crt
+export D3_TLS_KEY_FILE=/secure/path/d3-mini.key
+export D3_CA_CERT_FILE=/secure/path/issuing-ca.crt
+./scripts/deploy-d3-mini.sh
+```
+
+The deployment uses immutable CUDA runtime and unprivileged Nginx image digests,
+pins the built-in D3-mini model revision, persists model downloads, exposes only
+the three Decisions routes over TLS, and checks a real four-tier decision before
+reporting success. It is sized for a single 16 GB GPU; use `d3-nano` instead if
+the actual GPU cannot provide sufficient runtime headroom. Restrict the remote
+port at the firewall to the LiteLLM host. Copy the endpoint and the same secret
+to `D3_DECISION_API_BASE` and `D3_DECISION_API_KEY` in this stack's `.env`.
+Create `D3_DECISION_CA_BUNDLE` as a combined PEM containing the normal public
+root bundle plus the CA that issued D3's certificate. LiteLLM uses that combined
+bundle for both D3 and completion-provider TLS verification.
 
 ```sh
 docker compose --profile dev up -d
 ```
 
-Call the routed hostname with the same LiteLLM bearer credential:
+Call the router through the normal LiteLLM hostname and credential:
 
 ```sh
-curl --fail --silent https://llm-router.example.test/v1/chat/completions \
+curl --fail --silent https://llm-dev.example.test/v1/chat/completions \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "vllm-sr/auto",
+    "model": "coding-router",
     "messages": [{
       "role": "user",
       "content": "Analyze this architecture and compare its tradeoffs."
@@ -653,18 +663,11 @@ curl --fail --silent https://llm-router.example.test/v1/chat/completions \
   }'
 ```
 
-The router uses an explicit priority rule: coding, analysis, architecture,
-comparison, and multi-question prompts select `semantic-reasoning`; unmatched
-requests use `semantic-fast`. Envoy fails closed when its external processor is
-unavailable and strips client-supplied internal routing headers before
-forwarding. LiteLLM remains the authentication, policy, guardrail, provider,
-spend, and observability boundary.
-
-This integration is development-only. The pinned router image is a
-post-v0.4.0 build containing the buffered LiteLLM response compatibility fix;
-the current upstream integration is not yet a formal LiteLLM product
-commitment. Avoid list-valued request metadata until upstream semantic-router
-metadata compatibility is resolved.
+LiteLLM remains the only client-facing authentication, policy, guardrail,
+provider, spend, and observability boundary. The remote listener uses a separate
+bearer credential, TLS 1.2+, and a narrow route allowlist. Neither endpoint logs
+prompt content by default. Validate D3's coding-tier accuracy on representative
+internal prompts before relying on cost savings.
 
 ### Development semantic response cache
 
@@ -1150,14 +1153,13 @@ used by each configured gateway and local-model container:
 ```
 
 The default scope is every running service in the Compose project. This includes
-`bge-m3-vllm`, `vllm-semantic-router`, and
-`vllm-semantic-router-envoy` whenever the development profile is active, without
+`bge-m3-vllm` whenever the development profile is active, without
 reporting intentionally inactive profile services as unknown. Restrict a manual
 scan only when a narrower reviewed scope is required:
 
 ```bash
 ./scripts/maintenance.py security-scan \
-  --services litellm-dev,bge-m3-vllm,vllm-semantic-router,vllm-semantic-router-envoy
+  --services litellm-dev,bge-m3-vllm
 ```
 
 The monitor reads running-container metadata directly from Docker. It never
@@ -1242,14 +1244,14 @@ proxies with Docker API `POST` disabled. They do not mount the Docker socket
 directly. Keep those proxies on their isolated internal networks and do not
 enable additional API sections unless the consumer demonstrably requires them.
 
-The same maintenance workflow verifies the router after upgrades. With the
-development profile running, the semantic-routing and observability checks fail
-if BGE-M3, the router, Envoy, either Prometheus target, or the dedicated Grafana
-dashboard is missing or unhealthy:
+The same maintenance workflow verifies coding routing after upgrades. With the
+development profile running, the check fails unless the D3 Decisions request
+succeeds and the Auto Router response reports the decision classifier rather
+than a silent fallback:
 
 ```bash
 ./scripts/maintenance.py upgrade-verify \
-  --only dev-vllm-embedding,semantic-routing,observability
+  --only dev-vllm-embedding,coding-routing,observability
 ```
 
 ### Run the scheduler inside the stack
