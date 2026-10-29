@@ -647,6 +647,8 @@ services:
       CLICKHOUSE_USER: langfuse
       CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?Set LANGFUSE_CLICKHOUSE_PASSWORD in .env}
     volumes:
+      - ./langfuse/clickhouse/config.d/observability.xml:/etc/clickhouse-server/config.d/observability.xml:ro
+      - ./langfuse/clickhouse/users.d/observability.xml:/etc/clickhouse-server/users.d/observability.xml:ro
       - langfuse-clickhouse-data:/var/lib/clickhouse
       - langfuse-clickhouse-logs:/var/log/clickhouse-server
     networks: [internal]
@@ -657,6 +659,35 @@ services:
       timeout: 5s
       retries: 10
       start_period: 5s
+
+  langfuse-clickhouse-observability-setup:
+    logging: *default-logging
+    image: clickhouse/clickhouse-server:25.12@sha256:8a790dd3468db22b1d4e7b18a176f378ff5ff6053b9c48dd4ea1fa71a24c5ba6
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        exec clickhouse-client \
+          --host langfuse-clickhouse \
+          --user "$$CLICKHOUSE_USER" \
+          --password "$$CLICKHOUSE_PASSWORD" \
+          --multiquery \
+          --queries-file /cleanup/cleanup-system-logs.sql
+    environment:
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?Set LANGFUSE_CLICKHOUSE_PASSWORD in .env}
+    volumes:
+      - ./langfuse/clickhouse/cleanup-system-logs.sql:/cleanup/cleanup-system-logs.sql:ro
+    depends_on:
+      langfuse-clickhouse:
+        condition: service_healthy
+    networks: [internal]
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
 
   langfuse-minio:
     logging: *default-logging
@@ -714,6 +745,8 @@ services:
         condition: service_healthy
       langfuse-clickhouse:
         condition: service_healthy
+      langfuse-clickhouse-observability-setup:
+        condition: service_completed_successfully
       langfuse-minio:
         condition: service_healthy
       langfuse-redis:
@@ -751,6 +784,8 @@ services:
         condition: service_healthy
       langfuse-clickhouse:
         condition: service_healthy
+      langfuse-clickhouse-observability-setup:
+        condition: service_completed_successfully
       langfuse-minio:
         condition: service_healthy
       langfuse-redis:

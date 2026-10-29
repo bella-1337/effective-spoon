@@ -7,6 +7,7 @@ import math
 import re
 import sys
 import unittest
+import xml.etree.ElementTree as ET
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -163,6 +164,71 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         for name in names:
             self.assertRegex(name, metrics.NAME)
+
+
+class ClickHouseObservabilityTests(unittest.TestCase):
+    def test_diagnostics_are_bounded_without_disabling_incident_evidence(self) -> None:
+        root = ET.parse(
+            ROOT / "langfuse" / "clickhouse" / "config.d" / "observability.xml"
+        ).getroot()
+        logger = root.find("logger")
+        self.assertIsNotNone(logger)
+        self.assertEqual(logger.findtext("level"), "warning")
+        self.assertEqual(logger.findtext("size"), "100M")
+        self.assertEqual(logger.findtext("count"), "3")
+        for name, days in {
+            "query_log": 7,
+            "query_views_log": 7,
+            "part_log": 7,
+            "background_schedule_pool_log": 7,
+            "text_log": 7,
+            "error_log": 30,
+        }.items():
+            self.assertIn(f"INTERVAL {days} DAY DELETE", root.findtext(f"{name}/ttl", ""))
+        for name in {
+            "trace_log",
+            "query_thread_log",
+            "metric_log",
+            "instrumentation_trace_log",
+            "query_metric_log",
+            "asynchronous_metric_log",
+            "opentelemetry_span_log",
+            "processors_profile_log",
+        }:
+            self.assertEqual(root.find(name).get("remove"), "1")
+
+    def test_prometheus_replaces_clickhouse_metric_log_tables(self) -> None:
+        config = ET.parse(
+            ROOT / "langfuse" / "clickhouse" / "config.d" / "observability.xml"
+        ).getroot()
+        self.assertEqual(config.findtext("prometheus/port"), "9363")
+        prometheus = (ROOT / "litellm" / "prometheus.yml").read_text(encoding="utf-8")
+        self.assertIn("job_name: langfuse-clickhouse", prometheus)
+        self.assertIn('targets: ["langfuse-clickhouse:9363"]', prometheus)
+
+    def test_cleanup_is_limited_to_disabled_clickhouse_system_logs(self) -> None:
+        cleanup = (
+            ROOT / "langfuse" / "clickhouse" / "cleanup-system-logs.sql"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("default.", cleanup)
+        self.assertNotIn("events_", cleanup)
+        for name in {
+            "trace_log",
+            "metric_log",
+            "asynchronous_metric_log",
+            "opentelemetry_span_log",
+            "processors_profile_log",
+        }:
+            self.assertIn(f"system.{name}", cleanup)
+        for name in {
+            "background_schedule_pool_log_0",
+            "error_log_0",
+            "part_log_0",
+            "query_log_0",
+            "query_views_log_0",
+            "text_log_0",
+        }:
+            self.assertIn(f"DROP TABLE IF EXISTS system.{name}", cleanup)
 
 
 class UsageTests(unittest.TestCase):

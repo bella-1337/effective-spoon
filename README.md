@@ -1136,9 +1136,21 @@ development hostname after policy changes.
   before/after values out of PostgreSQL.
 - LiteLLM audit logging is enabled for supported administrative changes.
 - Langfuse trace metadata is stored in its dedicated PostgreSQL, ClickHouse,
-  Redis, and MinIO volumes. Define and operate an explicit Langfuse retention
-  and backup policy before production use; the database-only backup scripts in
-  this repository do not constitute a complete Langfuse backup.
+  Redis, and MinIO volumes. ClickHouse keeps warning-or-higher server logs
+  continuously, rotates each file channel at 100 MB with three files retained,
+  and retains query, view, part, scheduler, and structured warning logs for 7
+  days plus error logs for 30 days. High-volume query profiler, internal metric,
+  and internal OpenTelemetry tables are disabled; equivalent live capacity and
+  engine counters are scraped by Prometheus and surfaced on **Infrastructure:
+  Host & Containers** with disk-pressure, scrape-failure, and log-storm alerts.
+  This preserves always-on incident evidence without requiring an operator to
+  predict when to enable diagnostics.
+- Langfuse application event retention remains a separate concern. The
+  project-level automatic retention feature is available only in Langfuse
+  Enterprise Edition; OSS self-hosted event data is indefinite by default.
+  Define and operate a supported Langfuse deletion/export policy and a complete
+  backup policy before production use. The database-only backup scripts in this
+  repository do not constitute a complete Langfuse backup.
 
 These periods must be recorded in the deployment's retention schedule and
 reviewed against its documented purposes. Restrict proxy-admin access because

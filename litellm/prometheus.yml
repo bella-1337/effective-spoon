@@ -31,6 +31,9 @@ scrape_configs:
   - job_name: cadvisor
     static_configs: [{ targets: ["cadvisor:8080"] }]
 
+  - job_name: langfuse-clickhouse
+    static_configs: [{ targets: ["langfuse-clickhouse:9363"] }]
+
   - job_name: blackbox-http
     metrics_path: /probe
     params: { module: [http_2xx] }

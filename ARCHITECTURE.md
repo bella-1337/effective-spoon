@@ -138,8 +138,8 @@ blackbox `/health` probes.
 | `prometheus-secrets` | Prometheus | Non-root-readable copy of the LiteLLM metrics credential |
 | `loki-data` | Loki (optional) | Project-scoped Docker log history |
 | `langfuse-postgres-data` | Langfuse PostgreSQL | Langfuse relational state |
-| `langfuse-clickhouse-data` | ClickHouse | Langfuse trace and analytics data |
-| `langfuse-clickhouse-logs` | ClickHouse | ClickHouse service logs |
+| `langfuse-clickhouse-data` | ClickHouse | Langfuse trace and analytics data plus bounded 7/30-day incident diagnostics |
+| `langfuse-clickhouse-logs` | ClickHouse | Warning-or-higher ClickHouse logs, rotated at 100 MB with three files per channel |
 | `langfuse-minio-data` | MinIO | Langfuse events and media objects |
 | `langfuse-redis-data` | Redis | Langfuse queues |
 | `bge-m3-vllm-cache` | vLLM | Downloaded BGE-M3 model artifacts |

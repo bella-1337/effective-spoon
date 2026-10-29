@@ -1087,6 +1087,8 @@ def _infrastructure(b: Builder) -> None:
             b.metric_series("litellm-vis-containers-mem", "Container memory by service", "container_memory_bytes", split="labels.service", split_size=40, y_label="bytes"),
             b.metric_series("litellm-vis-containers-net", "Container network by service", "container_network_bytes_per_second", split_size=40, y_label="bytes/s"),
             b.metric_series("litellm-vis-containers-restarts", "Container restarts (1h)", "container_restarts_1h", split="labels.service", split_size=40),
+            b.metric_series("litellm-vis-clickhouse-free", "Langfuse ClickHouse filesystem free ratio", "langfuse_clickhouse_data_free_ratio", y_label="ratio"),
+            b.metric_series("litellm-vis-clickhouse-logs", "Langfuse ClickHouse retained logs", "langfuse_clickhouse_log_messages_per_second", y_label="logs/s"),
         ],
         time_from="now-6h",
     )

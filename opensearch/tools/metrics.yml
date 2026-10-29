@@ -33,6 +33,8 @@ raw:
     selector: '{__name__=~"probe_.+"}'
   - name: security-and-backup
     selector: '{__name__=~"image_security_.+|litellm_backup_.+|node_textfile_.+"}'
+  - name: langfuse-clickhouse-capacity
+    selector: '{__name__=~"ClickHouseAsyncMetrics_(FilesystemMainPathAvailableBytes|FilesystemMainPathTotalBytes|FilesystemLogsPathAvailableBytes|FilesystemLogsPathTotalBytes)|ClickHouseProfileEvents_(AsyncLoggingTextLogTotalMessages|AsyncLoggingErrorFileLogTotalMessages)"}'
 
 expressions:
   # --- LiteLLM Stack (dev/prod) -------------------------------------------
@@ -104,6 +106,12 @@ expressions:
   - name: probe_duration_seconds
     title: Blackbox probe duration
     query: probe_duration_seconds{job="blackbox-http"}
+  - name: langfuse_clickhouse_data_free_ratio
+    title: Langfuse ClickHouse data filesystem free ratio
+    query: ClickHouseAsyncMetrics_FilesystemMainPathAvailableBytes{job="langfuse-clickhouse"} / ClickHouseAsyncMetrics_FilesystemMainPathTotalBytes{job="langfuse-clickhouse"}
+  - name: langfuse_clickhouse_log_messages_per_second
+    title: Langfuse ClickHouse retained log messages per second
+    query: rate(ClickHouseProfileEvents_AsyncLoggingTextLogTotalMessages{job="langfuse-clickhouse"}[5m])
 
   # --- Host (Node Exporter Full core panels) -----------------------------
   - name: node_cpu_busy_percent
