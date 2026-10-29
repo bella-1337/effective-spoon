@@ -57,6 +57,13 @@ volumes:
   prometheus-data: {}
   prometheus-secrets: {}
   loki-data: {}
+  alloy-data: {}
+  alloy-loki-data: {}
+  opensearch-data: {}
+  opensearch-ca-private: {}
+  opensearch-ca: {}
+  opensearch-node-certs: {}
+  opensearch-admin-certs: {}
   langfuse-postgres-data: {}
   langfuse-clickhouse-data: {}
   langfuse-clickhouse-logs: {}
@@ -85,7 +92,14 @@ services:
       - --metrics.prometheus.addEntryPointsLabels=true
       - --metrics.prometheus.addServicesLabels=true
       - --accesslog=true
+      - --accesslog.format=json
+      # Never persist client addresses or credentials; request headers are
+      # dropped by Traefik's default header mode.
       - --accesslog.fields.names.ClientHost=drop
+      - --accesslog.fields.names.ClientAddr=drop
+      - --accesslog.fields.names.ClientPort=drop
+      - --accesslog.fields.names.ClientUsername=drop
+      - --accesslog.fields.headers.defaultmode=drop
     ports:
       - "80:80"
       - "443:443"
@@ -154,35 +168,49 @@ services:
       PGHOST: postgres
       PGUSER: ${PG_USER:-litellm}
       PGPASSWORD: ${PG_PASSWORD:?Set PG_PASSWORD in .env}
-      GRAFANA_DATABASE_PASSWORD: ${GRAFANA_DATABASE_PASSWORD:?Set GRAFANA_DATABASE_PASSWORD in .env}
+      OPENSEARCH_DATABASE_PASSWORD: ${OPENSEARCH_DATABASE_PASSWORD:?Set OPENSEARCH_DATABASE_PASSWORD in .env}
+      # Optional: only required when the grafana profile is used.
+      GRAFANA_DATABASE_PASSWORD: ${GRAFANA_DATABASE_PASSWORD:-}
       PG_EXPORTER_PASSWORD: ${PG_EXPORTER_PASSWORD:?Set PG_EXPORTER_PASSWORD in .env}
     command:
       - /bin/sh
       - -ec
       - |
         psql --dbname postgres --set ON_ERROR_STOP=1 <<'SQL'
-        \getenv grafana_password GRAFANA_DATABASE_PASSWORD
+        \getenv opensearch_password OPENSEARCH_DATABASE_PASSWORD
         \getenv exporter_password PG_EXPORTER_PASSWORD
-        SELECT format('CREATE ROLE grafana_ro LOGIN PASSWORD %L', :'grafana_password')
-        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'grafana_ro') \gexec
-        SELECT format('ALTER ROLE grafana_ro PASSWORD %L', :'grafana_password') \gexec
+        SELECT format('CREATE ROLE opensearch_ro LOGIN PASSWORD %L', :'opensearch_password')
+        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'opensearch_ro') \gexec
+        SELECT format('ALTER ROLE opensearch_ro PASSWORD %L', :'opensearch_password') \gexec
         SELECT format('CREATE ROLE litellm_exporter LOGIN PASSWORD %L', :'exporter_password')
         WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'litellm_exporter') \gexec
         SELECT format('ALTER ROLE litellm_exporter PASSWORD %L', :'exporter_password') \gexec
         GRANT pg_monitor TO litellm_exporter;
         GRANT CONNECT ON DATABASE postgres TO litellm_exporter;
         SQL
+        readers="opensearch_ro"
+        if [ -n "$${GRAFANA_DATABASE_PASSWORD}" ]; then
+          psql --dbname postgres --set ON_ERROR_STOP=1 <<'SQL'
+        \getenv grafana_password GRAFANA_DATABASE_PASSWORD
+        SELECT format('CREATE ROLE grafana_ro LOGIN PASSWORD %L', :'grafana_password')
+        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'grafana_ro') \gexec
+        SELECT format('ALTER ROLE grafana_ro PASSWORD %L', :'grafana_password') \gexec
+        SQL
+          readers="$${readers} grafana_ro"
+        fi
         for db in litellm_prod litellm_dev; do
           exists="$$(psql --dbname postgres --tuples-only --no-align --command "SELECT 1 FROM pg_database WHERE datname='$${db}'")"
           if [ "$${exists}" != "1" ]; then
             psql --dbname postgres --command "CREATE DATABASE \"$${db}\""
           fi
-          psql --dbname "$${db}" --set ON_ERROR_STOP=1 --set database_name="$${db}" <<'SQL'
-        GRANT CONNECT ON DATABASE :"database_name" TO grafana_ro;
-        GRANT USAGE ON SCHEMA public TO grafana_ro;
-        GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafana_ro;
-        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO grafana_ro;
+          for reader in $${readers}; do
+            psql --dbname "$${db}" --set ON_ERROR_STOP=1 --set database_name="$${db}" --set reader="$${reader}" <<'SQL'
+        GRANT CONNECT ON DATABASE :"database_name" TO :"reader";
+        GRANT USAGE ON SCHEMA public TO :"reader";
+        GRANT SELECT ON ALL TABLES IN SCHEMA public TO :"reader";
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO :"reader";
         SQL
+          done
         done
     depends_on:
       postgres:
@@ -503,7 +531,8 @@ services:
       - ./litellm/secrets/litellm-master-key:/source/litellm-master-key:ro
       - prometheus-secrets:/target
     cap_drop: [ALL]
-    cap_add: [CHOWN, DAC_OVERRIDE]
+    # FOWNER lets install(1) set the mode after handing ownership to nobody.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -512,6 +541,7 @@ services:
 
   loki:
     logging: *default-logging
+    profiles: [grafana]
     image: grafana/loki:3.5.12@sha256:c2a6860c2f94ecc98fffce7c10e6c8b350cf25e2ea3daa255dff27d7c6a4dffc
     command: -config.file=/etc/loki/config.yml
     volumes:
@@ -532,9 +562,31 @@ services:
     logging: *default-logging
     image: grafana/alloy:v1.10.2@sha256:bcf27f18c4402869af112fb39e35e1db3804a404686f4caa20bdf77814219223
     user: "473:473"
-    command: run /etc/alloy/config.alloy
+    command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy/data"]
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-litellm-stack}
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy/data
+    depends_on:
+      data-prepper:
+        condition: service_started
+      alloy-docker-proxy:
+        condition: service_healthy
+    networks: [internal, alloy-monitor]
+    restart: unless-stopped
+
+  alloy-loki:
+    logging: *default-logging
+    profiles: [grafana]
+    image: grafana/alloy:v1.10.2@sha256:bcf27f18c4402869af112fb39e35e1db3804a404686f4caa20bdf77814219223
+    user: "473:473"
+    command: ["run", "/etc/alloy/loki.alloy", "--storage.path=/var/lib/alloy/data"]
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-litellm-stack}
+    volumes:
+      - ./alloy/loki.alloy:/etc/alloy/loki.alloy:ro
+      - alloy-loki-data:/var/lib/alloy/data
     depends_on:
       loki:
         condition: service_healthy
@@ -718,16 +770,28 @@ services:
       - traefik.http.routers.langfuse.tls=true
       - traefik.http.services.langfuse.loadbalancer.server.port=3000
 
+  # Optional: enable with --profile grafana. OpenSearch Dashboards is the
+  # default multi-user observability UI.
   grafana:
     logging: *default-logging
+    profiles: [grafana]
     image: grafana/grafana:latest@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        # Grafana secrets are optional for the default stack but mandatory here.
+        test -n "$${GF_SECURITY_ADMIN_PASSWORD}" || { echo "Set GRAFANA_ADMIN_PASSWORD in .env to use the grafana profile" >&2; exit 64; }
+        test -n "$${GF_SECURITY_SECRET_KEY}" || { echo "Set GRAFANA_SECURITY_SECRET_KEY in .env to use the grafana profile" >&2; exit 64; }
+        test -n "$${GRAFANA_DATABASE_PASSWORD}" || { echo "Set GRAFANA_DATABASE_PASSWORD in .env to use the grafana profile" >&2; exit 64; }
+        exec /run.sh
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
-      GF_SECURITY_SECRET_KEY: ${GRAFANA_SECURITY_SECRET_KEY:?Set GRAFANA_SECURITY_SECRET_KEY in .env}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GF_SECURITY_SECRET_KEY: ${GRAFANA_SECURITY_SECRET_KEY:-}
       GF_SERVER_ROOT_URL: https://${GRAFANA_HOST:-grafana.example.test}
       GF_USERS_ALLOW_SIGN_UP: "${GRAFANA_ALLOW_SIGN_UP:-false}"
       GRAFANA_DATABASE_USER: ${GRAFANA_DATABASE_USER:-grafana_ro}
-      GRAFANA_DATABASE_PASSWORD: ${GRAFANA_DATABASE_PASSWORD:?Set GRAFANA_DATABASE_PASSWORD in .env}
+      GRAFANA_DATABASE_PASSWORD: ${GRAFANA_DATABASE_PASSWORD:-}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
@@ -736,6 +800,8 @@ services:
     depends_on:
       postgres-init:
         condition: service_completed_successfully
+      loki:
+        condition: service_healthy
     networks: [edge, internal]
     restart: unless-stopped
     labels:
@@ -744,6 +810,221 @@ services:
       - traefik.http.routers.grafana.entrypoints=websecure
       - traefik.http.routers.grafana.tls=true
       - traefik.http.services.grafana.loadbalancer.server.port=3000
+
+  opensearch-certs:
+    logging: *default-logging
+    image: litellm-opensearch-tools:0.1.0
+    build: &opensearch-tools-build
+      context: .
+      dockerfile: opensearch/tools/Dockerfile
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/app/generate-certs.sh"]
+    environment:
+      OPENSEARCH_CERT_VALIDITY_DAYS: "${OPENSEARCH_CERT_VALIDITY_DAYS:-397}"
+      OPENSEARCH_CERT_RENEW_BEFORE_DAYS: "${OPENSEARCH_CERT_RENEW_BEFORE_DAYS:-30}"
+    volumes:
+      - opensearch-ca-private:/certs/ca-private
+      - opensearch-ca:/certs/ca
+      - opensearch-node-certs:/certs/node
+      - opensearch-admin-certs:/certs/admin
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE]
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+    restart: "no"
+
+  opensearch:
+    logging: *default-logging
+    image: opensearchproject/opensearch:3.9.0@sha256:3b55f6b6249cfdb92b52ee59adc8a266203ba9ef9f5d82544fad6f1af2f3609e
+    environment:
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms${OPENSEARCH_JAVA_HEAP:-1g} -Xmx${OPENSEARCH_JAVA_HEAP:-1g}"
+      OPENSEARCH_DATASOURCES_MASTER_KEY: ${OPENSEARCH_DATASOURCES_MASTER_KEY:?Set OPENSEARCH_DATASOURCES_MASTER_KEY in .env}
+    volumes:
+      - ./opensearch/opensearch.yml:/usr/share/opensearch/config/opensearch.yml:ro
+      - ./opensearch/security/internal_users.yml:/usr/share/opensearch/config/opensearch-security/internal_users.yml:ro
+      - ./opensearch/security/roles_mapping.yml:/usr/share/opensearch/config/opensearch-security/roles_mapping.yml:ro
+      - opensearch-node-certs:/usr/share/opensearch/config/certs:ro
+      - opensearch-data:/usr/share/opensearch/data
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          memory: ${OPENSEARCH_MEMORY_LIMIT:-3g}
+    depends_on:
+      opensearch-certs:
+        condition: service_completed_successfully
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      # 401 proves TLS is up and the security index is initialized.
+      test: ["CMD-SHELL", "test \"$$(curl -s -o /dev/null -w '%{http_code}' --cacert /usr/share/opensearch/config/certs/ca.pem https://localhost:9200/)\" = 401"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  opensearch-setup:
+    logging: *default-logging
+    image: litellm-opensearch-tools:0.1.0
+    build: *opensearch-tools-build
+    command: ["setup-cluster"]
+    environment:
+      OPENSEARCH_URL: https://opensearch:9200
+      OPENSEARCH_CA_FILE: /certs/admin/ca.pem
+      OPENSEARCH_ADMIN_PASSWORD: ${OPENSEARCH_ADMIN_PASSWORD:?Set OPENSEARCH_ADMIN_PASSWORD in .env}
+      OPENSEARCH_DASHBOARDS_SERVER_PASSWORD: ${OPENSEARCH_DASHBOARDS_SERVER_PASSWORD:?Set OPENSEARCH_DASHBOARDS_SERVER_PASSWORD in .env}
+      OPENSEARCH_INGEST_PASSWORD: ${OPENSEARCH_INGEST_PASSWORD:?Set OPENSEARCH_INGEST_PASSWORD in .env}
+      OPENSEARCH_BRIDGE_PASSWORD: ${OPENSEARCH_BRIDGE_PASSWORD:?Set OPENSEARCH_BRIDGE_PASSWORD in .env}
+      OPENSEARCH_LOG_RETENTION_DAYS: "${OPENSEARCH_LOG_RETENTION_DAYS:-7}"
+      OPENSEARCH_METRICS_RETENTION_DAYS: "${OPENSEARCH_METRICS_RETENTION_DAYS:-15}"
+      OPENSEARCH_AUDIT_RETENTION_DAYS: "${OPENSEARCH_AUDIT_RETENTION_DAYS:-90}"
+      OPENSEARCH_TRACE_RETENTION_DAYS: "${OPENSEARCH_TRACE_RETENTION_DAYS:-15}"
+      OPENSEARCH_BRIDGE_INTERVAL_SECONDS: "${OPENSEARCH_BRIDGE_INTERVAL_SECONDS:-60}"
+      OPENSEARCH_ALERT_CHANNEL_ID: ${OPENSEARCH_ALERT_CHANNEL_ID:-}
+      PROMETHEUS_URL: http://prometheus:9090
+    volumes:
+      - opensearch-admin-certs:/certs/admin:ro
+      - ./grafana/alerting:/app/alerting:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks: [internal]
+    restart: "no"
+
+  opensearch-dashboards:
+    logging: *default-logging
+    image: opensearchproject/opensearch-dashboards:3.9.0@sha256:256d4cea5928868ac09bca642a0ac8285a2b7e4b7fdd45c4ec06e75a5cf3184c
+    environment:
+      OPENSEARCH_DASHBOARDS_SERVER_PASSWORD: ${OPENSEARCH_DASHBOARDS_SERVER_PASSWORD:?Set OPENSEARCH_DASHBOARDS_SERVER_PASSWORD in .env}
+      OPENSEARCH_DASHBOARDS_COOKIE_PASSWORD: ${OPENSEARCH_DASHBOARDS_COOKIE_PASSWORD:?Set OPENSEARCH_DASHBOARDS_COOKIE_PASSWORD in .env}
+    volumes:
+      - ./opensearch/dashboards/opensearch_dashboards.yml:/usr/share/opensearch-dashboards/config/opensearch_dashboards.yml:ro
+      - opensearch-ca:/usr/share/opensearch-dashboards/config/certs:ro
+    depends_on:
+      opensearch-setup:
+        condition: service_completed_successfully
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks: [edge, internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5601/api/status); [ \"$$code\" = 200 ] || [ \"$$code\" = 401 ]"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.opensearch-dashboards.rule=Host(`${OPENSEARCH_DASHBOARDS_HOST:-opensearch.example.test}`)
+      - traefik.http.routers.opensearch-dashboards.entrypoints=websecure
+      - traefik.http.routers.opensearch-dashboards.tls=true
+      - traefik.http.services.opensearch-dashboards.loadbalancer.server.port=5601
+
+  opensearch-dashboards-setup:
+    logging: *default-logging
+    image: litellm-opensearch-tools:0.1.0
+    build: *opensearch-tools-build
+    command: ["setup-dashboards"]
+    environment:
+      OPENSEARCH_DASHBOARDS_URL: http://opensearch-dashboards:5601
+      OPENSEARCH_ADMIN_PASSWORD: ${OPENSEARCH_ADMIN_PASSWORD:?Set OPENSEARCH_ADMIN_PASSWORD in .env}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      opensearch-dashboards:
+        condition: service_healthy
+    networks: [internal]
+    restart: "no"
+
+  data-prepper:
+    logging: *default-logging
+    image: opensearchproject/data-prepper:2.16.0@sha256:6e74ebeddfd66549f623e6f3b8131111b34e85695f54bd68aac7563e80d6b546
+    entrypoint: ["/bin/bash", "/etc/data-prepper/entrypoint.sh"]
+    environment:
+      OPENSEARCH_INGEST_PASSWORD: ${OPENSEARCH_INGEST_PASSWORD:?Set OPENSEARCH_INGEST_PASSWORD in .env}
+      JAVA_OPTS: "${DATA_PREPPER_JAVA_OPTS:--Xms256m -Xmx512m}"
+    volumes:
+      - ./opensearch/data-prepper:/etc/data-prepper:ro
+      - opensearch-ca:/usr/share/data-prepper/certs:ro
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: ${DATA_PREPPER_MEMORY_LIMIT:-1g}
+    depends_on:
+      opensearch-setup:
+        condition: service_completed_successfully
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-ec", ": >/dev/tcp/127.0.0.1/21892 && : >/dev/tcp/127.0.0.1/21890"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  opensearch-bridge:
+    logging: *default-logging
+    image: litellm-opensearch-tools:0.1.0
+    build: *opensearch-tools-build
+    command: ["bridge"]
+    environment:
+      OPENSEARCH_URL: https://opensearch:9200
+      OPENSEARCH_CA_FILE: /certs/ca/ca.pem
+      OPENSEARCH_USERNAME: litellm_bridge
+      OPENSEARCH_PASSWORD: ${OPENSEARCH_BRIDGE_PASSWORD:?Set OPENSEARCH_BRIDGE_PASSWORD in .env}
+      PROMETHEUS_URL: http://prometheus:9090
+      LITELLM_DATABASE_HOST: postgres
+      LITELLM_DATABASE_USER: opensearch_ro
+      LITELLM_DATABASE_PASSWORD: ${OPENSEARCH_DATABASE_PASSWORD:?Set OPENSEARCH_DATABASE_PASSWORD in .env}
+      OPENSEARCH_BRIDGE_INTERVAL_SECONDS: "${OPENSEARCH_BRIDGE_INTERVAL_SECONDS:-60}"
+      OPENSEARCH_USAGE_RETENTION_DAYS: "${OPENSEARCH_USAGE_RETENTION_DAYS:-180}"
+      OPENSEARCH_USAGE_OVERLAP_MINUTES: "${OPENSEARCH_USAGE_OVERLAP_MINUTES:-30}"
+    volumes:
+      - opensearch-ca:/certs/ca:ro
+      - ./grafana/alerting:/app/alerting:ro
+      - ./opensearch/tools/metrics.yml:/app/metrics.yml:ro
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      opensearch-setup:
+        condition: service_completed_successfully
+      postgres-init:
+        condition: service_completed_successfully
+      prometheus:
+        condition: service_started
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "litellm_opensearch", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 3m
 
   litellm-prod:
     logging: *default-logging
@@ -765,6 +1046,12 @@ services:
       D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
       SSL_CERT_FILE: /etc/ssl/certs/d3-decision-ca-bundle.pem
       LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
+      # Request and service spans also go to OpenSearch Trace Analytics through
+      # Data Prepper; Langfuse keeps its own exporter.
+      OTEL_EXPORTER: ${LITELLM_OTEL_TRACE_EXPORTER:-otlp_grpc}
+      OTEL_ENDPOINT: http://data-prepper:21890
+      OTEL_SERVICE_NAME: litellm-prod
+      OTEL_ENVIRONMENT_NAME: production
       LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""
       LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""
       LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""
@@ -842,6 +1129,12 @@ services:
       D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
       SSL_CERT_FILE: /etc/ssl/certs/d3-decision-ca-bundle.pem
       LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
+      # Request and service spans also go to OpenSearch Trace Analytics through
+      # Data Prepper; Langfuse keeps its own exporter.
+      OTEL_EXPORTER: ${LITELLM_OTEL_TRACE_EXPORTER:-otlp_grpc}
+      OTEL_ENDPOINT: http://data-prepper:21890
+      OTEL_SERVICE_NAME: litellm-dev
+      OTEL_ENVIRONMENT_NAME: development
       LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""
       LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""
       LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""

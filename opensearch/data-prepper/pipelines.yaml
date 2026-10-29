@@ -1,0 +1,121 @@
+# The entrypoint substitutes __OPENSEARCH_INGEST_PASSWORD__ at start-up.
+#
+# Every source listens with plain gRPC on the isolated internal Compose
+# network, matching the stack's Loki push path. Enable TLS before using an
+# untrusted network.
+
+# Container logs: Grafana Alloy -> OTLP/gRPC -> OpenSearch litellm-logs-*.
+container-logs:
+  workers: 2
+  delay: 1000
+  source:
+    otlp_logs:
+      port: 21892
+      ssl: false
+      health_check_service: true
+      max_request_length: 10mb
+  buffer:
+    bounded_blocking:
+      buffer_size: 25600
+      batch_size: 512
+  processor:
+    - rename_keys:
+        entries:
+          - from_key: "time"
+            to_key: "@timestamp"
+            overwrite_if_to_key_exists: true
+    - copy_values:
+        entries:
+          # OTel log attributes live under /attributes until the sink flattens them.
+          - from_key: "attributes/log.attributes.level"
+            to_key: "severityText"
+            overwrite_if_to_key_exists: true
+    # Traefik writes JSON access logs (client addresses and headers dropped).
+    - parse_json:
+        source: "body"
+        destination: "http"
+        parse_when: '/attributes/log.attributes.compose_service == "traefik" and startsWith(/body, "{")'
+        tags_on_failure: ["access_log_parse_failure"]
+    - add_entries:
+        entries:
+          - key: "http/duration_ms"
+            value_expression: "/http/Duration / 1000000"
+            add_when: '/http/Duration != null'
+  sink:
+    - opensearch:
+        hosts: ["https://opensearch:9200"]
+        cert: /usr/share/data-prepper/certs/ca.pem
+        username: data_prepper
+        password: "__OPENSEARCH_INGEST_PASSWORD__"
+        index: "litellm-logs-%{yyyy.MM.dd}"
+        index_type: custom
+        bulk_size: 5
+        max_retries: 16
+
+# LiteLLM request and service spans: LiteLLM -> OTLP/gRPC -> Trace Analytics.
+otel-traces:
+  workers: 2
+  delay: 100
+  source:
+    otlp_traces:
+      port: 21890
+      ssl: false
+      health_check_service: true
+  buffer:
+    bounded_blocking:
+      buffer_size: 25600
+      batch_size: 256
+  sink:
+    - pipeline:
+        name: "raw-traces"
+    - pipeline:
+        name: "service-map"
+
+raw-traces:
+  workers: 2
+  delay: 1000
+  source:
+    pipeline:
+      name: "otel-traces"
+  buffer:
+    bounded_blocking:
+      buffer_size: 25600
+      batch_size: 256
+  processor:
+    - otel_traces:
+    - add_entries:
+        entries:
+          - key: "durationInMillis"
+            value_expression: "/durationInNanos / 1000000"
+            add_when: '/durationInNanos != null'
+  sink:
+    - opensearch:
+        hosts: ["https://opensearch:9200"]
+        cert: /usr/share/data-prepper/certs/ca.pem
+        username: data_prepper
+        password: "__OPENSEARCH_INGEST_PASSWORD__"
+        index_type: trace-analytics-raw
+        bulk_size: 5
+        max_retries: 16
+
+service-map:
+  delay: 1000
+  source:
+    pipeline:
+      name: "otel-traces"
+  buffer:
+    bounded_blocking:
+      buffer_size: 25600
+      batch_size: 256
+  processor:
+    - service_map:
+        window_duration: 180
+  sink:
+    - opensearch:
+        hosts: ["https://opensearch:9200"]
+        cert: /usr/share/data-prepper/certs/ca.pem
+        username: data_prepper
+        password: "__OPENSEARCH_INGEST_PASSWORD__"
+        index_type: trace-analytics-service-map
+        bulk_size: 5
+        max_retries: 16

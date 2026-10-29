@@ -106,7 +106,9 @@ or the measured recovery time exceeds the objective.
 
 Coordinate with the notification recipient before triggering alerts.
 
-1. In Grafana, confirm these provisioned rules are healthy:
+1. In OpenSearch Dashboards (**Alerting → Monitors**, prefixed `[LiteLLM]`), and
+   in Grafana when the optional `grafana` profile runs, confirm these
+   provisioned rules are healthy:
    - Production LiteLLM is unavailable
    - LiteLLM PostgreSQL is unavailable
    - LiteLLM host disk space is low
@@ -124,10 +126,11 @@ Coordinate with the notification recipient before triggering alerts.
    docker compose --profile prod up -d --wait litellm-prod
    ```
 
-4. Validate the backup-stale rule in a non-production Prometheus/Grafana pair by
+4. Validate the backup-stale rule in a non-production Prometheus/OpenSearch pair by
    withholding the complete-backup metric beyond its threshold. A partial
    backup must not advance the metric.
-5. Review the disk and PostgreSQL rules in Grafana's expression preview. Trigger
+5. Review the disk and PostgreSQL rules in the **Security, Backups & Alerts**
+   dashboard (latest evaluated state) or Grafana's expression preview. Trigger
    them only in an isolated project; do not fill a production disk or stop the
    production database for this exercise.
 

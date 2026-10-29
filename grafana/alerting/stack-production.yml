@@ -16,7 +16,7 @@ groups:
             model:
               datasource: { type: prometheus, uid: prom }
               editorMode: code
-              expr: (up{job="litellm-prod"} == 0) and on() (max_over_time(up{job="litellm-prod"}[24h]) == 1)
+              expr: (up{job="litellm-prod"} == bool 0) and on() (max_over_time(up{job="litellm-prod"}[24h]) == 1)
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -42,7 +42,7 @@ groups:
             model:
               datasource: { type: prometheus, uid: prom }
               editorMode: code
-              expr: (up{job="postgres"} == 0) or absent(up{job="postgres"})
+              expr: (up{job="postgres"} == bool 0) or absent(up{job="postgres"})
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200

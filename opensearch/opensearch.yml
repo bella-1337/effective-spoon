@@ -1,0 +1,50 @@
+---
+# Single-node OpenSearch for the LiteLLM stack. TLS material is created by the
+# opensearch-certs one-shot service; see README section "OpenSearch".
+cluster.name: litellm-stack
+node.name: opensearch
+network.host: 0.0.0.0
+discovery.type: single-node
+# Plugin system indices would otherwise request an unassignable replica.
+cluster.default_number_of_replicas: 0
+bootstrap.memory_lock: false
+
+# Keep machine-generated telemetry indices bounded and avoid accidental
+# wildcard deletes.
+action.destructive_requires_name: true
+action.auto_create_index: true
+
+plugins.security.ssl.transport.pemcert_filepath: certs/node.pem
+plugins.security.ssl.transport.pemkey_filepath: certs/node-key.pem
+plugins.security.ssl.transport.pemtrustedcas_filepath: certs/ca.pem
+plugins.security.ssl.transport.enforce_hostname_verification: true
+plugins.security.ssl.http.enabled: true
+plugins.security.ssl.http.pemcert_filepath: certs/node.pem
+plugins.security.ssl.http.pemkey_filepath: certs/node-key.pem
+plugins.security.ssl.http.pemtrustedcas_filepath: certs/ca.pem
+# Client certificates are optional so users and services can authenticate with
+# internal credentials; only the admin DN below receives super-admin rights.
+plugins.security.ssl.http.clientauth_mode: OPTIONAL
+
+plugins.security.authcz.admin_dn:
+  - "CN=litellm-stack-opensearch-admin,OU=OpenSearch,O=LiteLLM Stack"
+plugins.security.nodes_dn:
+  - "CN=opensearch,OU=OpenSearch,O=LiteLLM Stack"
+plugins.security.allow_default_init_securityindex: true
+plugins.security.allow_unsafe_democertificates: false
+plugins.security.enable_snapshot_restore_privilege: true
+plugins.security.check_snapshot_restore_write_privileges: true
+plugins.security.restapi.roles_enabled: ["all_access", "security_rest_api_access"]
+plugins.security.restapi.password_min_length: 12
+plugins.security.system_indices.enabled: true
+
+# Record authentication failures, privilege denials, and security
+# configuration changes for every OpenSearch Dashboards user.
+plugins.security.audit.type: internal_opensearch
+# Monthly audit indices keep the shard count bounded over the retention period.
+plugins.security.audit.config.index: "'security-auditlog-'YYYY.MM"
+plugins.security.audit.config.disabled_rest_categories: [AUTHENTICATED, GRANTED_PRIVILEGES]
+plugins.security.audit.config.disabled_transport_categories: [AUTHENTICATED, GRANTED_PRIVILEGES]
+
+# Required by the SQL/PPL direct-query data source registered for Prometheus.
+plugins.query.datasources.encryption.masterkey: ${OPENSEARCH_DATASOURCES_MASTER_KEY}

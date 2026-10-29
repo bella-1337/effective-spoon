@@ -32,6 +32,14 @@ class GameDayPreflightTests(unittest.TestCase):
                     }
                 },
                 "alloy-docker-proxy": {"environment": {"NETWORKS": "1"}},
+                "alloy": {},
+                "opensearch": {},
+                "opensearch-dashboards": {},
+                "opensearch-bridge": {},
+                "data-prepper": {},
+                "grafana": {"profiles": ["grafana"]},
+                "loki": {"profiles": ["grafana"]},
+                "alloy-loki": {"profiles": ["grafana"]},
                 "xberg": {
                     "environment": {"NO_PROXY": "127.0.0.1,localhost"},
                     "healthcheck": {"test": ["CMD", "curl", "--fail"]},
@@ -71,6 +79,18 @@ class GameDayPreflightTests(unittest.TestCase):
         self.assertTrue(any("network metadata" in failure for failure in failures))
         self.assertTrue(any("loopback health" in failure for failure in failures))
         self.assertTrue(any("HTTP error" in failure for failure in failures))
+
+    def test_opensearch_is_default_and_grafana_is_optional(self) -> None:
+        config = self.valid_config()
+        config["services"]["opensearch"]["profiles"] = ["observability"]
+        del config["services"]["opensearch-bridge"]
+        config["services"]["grafana"] = {}
+
+        failures = self.module.validate_contracts(config)
+
+        self.assertTrue(any("must not require a profile: opensearch" in f for f in failures), failures)
+        self.assertTrue(any("missing: opensearch-bridge" in f for f in failures), failures)
+        self.assertTrue(any("grafana profile: grafana" in f for f in failures), failures)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,115 @@
+// Optional Grafana profile: ship container logs to Loki for Grafana Explore.
+// The default OpenSearch pipeline lives in config.alloy.
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+discovery.docker "containers" {
+  host             = "tcp://alloy-docker-proxy:2375"
+  refresh_interval = "5s"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = sys.env("COMPOSE_PROJECT_NAME")
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "compose_service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+}
+
+// The log stream is only known per entry, so it is relabeled by the source.
+loki.relabel "docker_stream" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__meta_docker_container_log_stream"]
+    target_label  = "stream"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "tcp://alloy-docker-proxy:2375"
+  targets       = discovery.relabel.containers.output
+  relabel_rules = loki.relabel.docker_stream.rules
+  forward_to    = [loki.process.containers.receiver]
+  labels        = { job = "docker" }
+}
+
+// Shared parsing for both collectors: join multi-line entries (stack traces,
+// pretty-printed JSON) and attach a normalized "level" label.
+loki.process "containers" {
+  forward_to = [loki.write.default.receiver]
+
+  // Continuation lines start with whitespace or a closing bracket.
+  stage.multiline {
+    firstline     = "^[^\\s}\\]]"
+    max_wait_time = "3s"
+    max_lines     = 500
+  }
+
+  // Strip ANSI colour codes written by some services.
+  stage.replace {
+    expression = "(\\x1b\\[[0-9;]*m)"
+    replace    = ""
+  }
+
+  // Never persist search terms: redact q/query URL parameters (for example in
+  // SearXNG upstream errors) before logs leave the host.
+  stage.replace {
+    expression = "[?&](?:q|query)=([^&\\s\"']+)"
+    replace    = "REDACTED"
+  }
+
+  // First level-like token, e.g. "INFO:", "[WARN ]", "level=error", "\"level\":\"info\"".
+  stage.regex {
+    expression = "(?i)(?:^|[\\s\\[\"'=:|])(?P<level>trace|debug|info|notice|warn|warning|error|err|crit|critical|fatal|panic|emerg)(?:$|[\\s\\]\"',:|])"
+  }
+
+  stage.match {
+    selector = "{job=\"docker\"} |~ \"^Traceback \\\\(most recent call last\\\\)\""
+    stage.static_labels {
+      values = { tb = "1" }
+    }
+  }
+
+  stage.template {
+    source   = "level"
+    template = "{{ $v := ToUpper .Value }}{{ if eq $v \"WARNING\" }}WARN{{ else if eq $v \"ERR\" }}ERROR{{ else if eq $v \"CRIT\" }}CRITICAL{{ else }}{{ $v }}{{ end }}"
+  }
+
+  stage.labels {
+    values = { level = "" }
+  }
+
+  stage.match {
+    selector = "{tb=\"1\"}"
+    stage.static_labels {
+      values = { level = "ERROR" }
+    }
+  }
+
+  stage.label_drop {
+    values = ["tb"]
+  }
+}

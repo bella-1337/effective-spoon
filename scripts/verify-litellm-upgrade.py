@@ -42,7 +42,7 @@ from maintenance_common import (
 ALL_CHECKS = (
     "compose-config", "compose-health", "network-exposure", "prod-auth", "dev-auth", "isolation",
     "dev-vllm-embedding", "coding-routing", "pgvector", "presidio", "searxng", "xberg-mcp",
-    "langfuse", "observability", "logs",
+    "langfuse", "observability", "opensearch", "opensearch-logs", "logs",
 )
 USAGE = """Usage: scripts/verify-litellm-upgrade.py [--only CHECK[,CHECK...]] [--skip CHECK[,CHECK...]] [--list]
 
@@ -55,7 +55,10 @@ already-running Compose stack. Start the desired profile(s) first:
 Checks (run in this order unless filtered):
   compose-config compose-health network-exposure prod-auth dev-auth isolation
   dev-vllm-embedding coding-routing pgvector presidio searxng xberg-mcp
-  langfuse observability logs
+  langfuse observability opensearch opensearch-logs logs
+
+The "logs" check and the Grafana parts of "observability" apply only when the
+optional grafana profile is running.
 
 Options:
   --only CHECK[,CHECK...]  Run only the listed checks (comma-separated)
@@ -63,6 +66,14 @@ Options:
   --list                   Print the available check names and exit
   -h, --help               Print this help and exit
 """
+
+OPENSEARCH_NOTEBOOKS = {
+    "edf4ccfe-75a8-5dc6-820b-ed87152f2ebb": "01 - Stack First Response",
+    "31e86378-fcc0-5fba-b14c-f2478eb35a5d": "02 - LiteLLM Requests and Integrations",
+    "2d3564e3-b6b1-5ef0-94e8-793961f64045": "03 - Missing Logs, Metrics, Traces, or Alerts",
+    "ebcadb4e-f576-5f7b-aaa1-517504bc1bed": "04 - Data, Cost, Backup, and Upgrade Recovery",
+    "b39a2a84-0126-5e13-bf70-989111996e12": "05 - Access, Authentication, and Audit",
+}
 
 
 def usage(stream: object = sys.stdout) -> None:
@@ -74,6 +85,9 @@ class Suite:
         self.prod_host = env_or_dotenv("LITELLM_PROD_HOST", "llm.example.test")
         self.dev_host = env_or_dotenv("LITELLM_DEV_HOST", "llm-dev.example.test")
         self.grafana_host = env_or_dotenv("GRAFANA_HOST", "grafana.example.test")
+        self.opensearch_dashboards_url = "https://" + env_or_dotenv(
+            "OPENSEARCH_DASHBOARDS_HOST", "opensearch.example.test"
+        )
         self.searxng_host = env_or_dotenv("SEARXNG_HOST", "search.example.test")
         self.langfuse_host = env_or_dotenv("LANGFUSE_WEB_HOST", "langfuse.example.test")
         self.prod_url, self.dev_url = f"https://{self.prod_host}", f"https://{self.dev_host}"
@@ -222,15 +236,15 @@ WHERE vector_store_id = 'sme-knowledge'
         )
         return result.stdout.strip() if result.returncode == 0 else None
 
-    def master_key(self) -> str | None:
-        service = "litellm-dev" if self.dev_running else "litellm-prod" if self.prod_running else ""
+    def master_key(self, service: str | None = None) -> str | None:
+        service = service or ("litellm-dev" if self.dev_running else "litellm-prod" if self.prod_running else "")
         if not service:
             return None
         result = compose(["exec", "-T", service, "printenv", "LITELLM_MASTER_KEY"], capture_output=True, check=False)
         return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
 
-    def auth_headers(self) -> dict[str, str] | None:
-        key = self.master_key()
+    def auth_headers(self, service: str | None = None) -> dict[str, str] | None:
+        key = self.master_key(service)
         return {"Authorization": f"Bearer {key}", "x-litellm-api-key": key} if key else None
 
     def grafana_admin_password(self) -> str | None:
@@ -278,9 +292,13 @@ WHERE vector_store_id = 'sme-knowledge'
             return 1
         states = {str(item.get("Service")): str(item.get("State")) for item in containers}
         bad = False
-        for service in ("traefik", "postgres", "presidio-analyzer", "presidio-anonymizer", "searxng", "xberg",
-                        "prometheus", "loki", "alloy", "langfuse-postgres", "langfuse-clickhouse", "langfuse-minio",
-                        "langfuse-redis", "langfuse-worker", "langfuse-web", "grafana"):
+        shared = ["traefik", "postgres", "presidio-analyzer", "presidio-anonymizer", "searxng", "xberg",
+                  "prometheus", "alloy", "langfuse-postgres", "langfuse-clickhouse", "langfuse-minio",
+                  "langfuse-redis", "langfuse-worker", "langfuse-web", "opensearch", "opensearch-dashboards",
+                  "data-prepper", "opensearch-bridge"]
+        if states.get("grafana") == "running":
+            shared += ["loki", "alloy-loki"]
+        for service in shared:
             if states.get(service) != "running":
                 self.fail_(f"shared service '{service}' is not running (state: {states.get(service, 'missing')})")
                 bad = True
@@ -288,7 +306,8 @@ WHERE vector_store_id = 'sme-knowledge'
             if item.get("Health") == "unhealthy":
                 self.fail_(f"unhealthy service(s): {item.get('Service')}")
                 bad = True
-        for job in ("postgres-init", "pgvector-migrate"):
+        for job in ("postgres-init", "pgvector-migrate", "opensearch-certs", "opensearch-setup",
+                    "opensearch-dashboards-setup"):
             for item in containers:
                 if item.get("Service") == job and str(item.get("ExitCode", "")) not in {"", "0"}:
                     self.fail_(f"one-off job '{job}' exited with code {item.get('ExitCode')}")
@@ -782,34 +801,34 @@ WHERE vector_store_id = 'sme-knowledge'
         return int(bad)
 
     def check_observability(self) -> int:
-        if not service_is_running("grafana"): return self.skip("observability: grafana is not running")
-        admin_password = self.grafana_admin_password()
-        if admin_password is None:
-            self.fail_("observability: could not read Grafana admin password")
-            return 1
-        if not admin_password:
-            self.fail_("observability: Grafana admin password is empty")
-            return 1
-        headers = self.basic_headers(admin_password)
         bad = False
-        status, _ = self.request(f"{self.grafana_url}/api/health")
-        if status == 200: self.pass_("observability: Grafana health endpoint returned HTTP 200")
-        else: self.fail_(f"observability: Grafana health endpoint returned HTTP {status} (expected 200)"); bad = True
-        for datasource in ("prom", "loki"):
-            _, data = self.request(f"{self.grafana_url}/api/datasources/uid/{datasource}/health", headers=headers)
-            if isinstance(data, dict) and data.get("status") in {"OK", "success"}:
-                self.pass_(f"observability: Grafana datasource '{datasource}' reports healthy")
-            else:
-                self.fail_(f"observability: Grafana datasource '{datasource}' did not report healthy")
-                bad = True
-        dashboard_uids = ["litellm-stack", "litellm-cost", "litellm-admin", "litellm-team-cost"]
-        for uid in dashboard_uids:
-            _, data = self.request(f"{self.grafana_url}/api/dashboards/uid/{uid}", headers=headers)
-            if isinstance(data, dict) and isinstance(data.get("dashboard"), dict) and data["dashboard"].get("uid") == uid:
-                self.pass_(f"observability: Grafana dashboard '{uid}' is provisioned")
-            else:
-                self.fail_(f"observability: Grafana dashboard '{uid}' is not provisioned")
-                bad = True
+        headers: dict[str, str] | None = None
+        if service_is_running("grafana"):
+            admin_password = self.grafana_admin_password()
+            if not admin_password:
+                self.fail_("observability: could not read a non-empty Grafana admin password")
+                return 1
+            headers = self.basic_headers(admin_password)
+            status, _ = self.request(f"{self.grafana_url}/api/health")
+            if status == 200: self.pass_("observability: Grafana health endpoint returned HTTP 200")
+            else: self.fail_(f"observability: Grafana health endpoint returned HTTP {status} (expected 200)"); bad = True
+            for datasource in ("prom", "loki"):
+                _, data = self.request(f"{self.grafana_url}/api/datasources/uid/{datasource}/health", headers=headers)
+                if isinstance(data, dict) and data.get("status") in {"OK", "success"}:
+                    self.pass_(f"observability: Grafana datasource '{datasource}' reports healthy")
+                else:
+                    self.fail_(f"observability: Grafana datasource '{datasource}' did not report healthy")
+                    bad = True
+            dashboard_uids = ["litellm-stack", "litellm-cost", "litellm-admin", "litellm-team-cost"]
+            for uid in dashboard_uids:
+                _, data = self.request(f"{self.grafana_url}/api/dashboards/uid/{uid}", headers=headers)
+                if isinstance(data, dict) and isinstance(data.get("dashboard"), dict) and data["dashboard"].get("uid") == uid:
+                    self.pass_(f"observability: Grafana dashboard '{uid}' is provisioned")
+                else:
+                    self.fail_(f"observability: Grafana dashboard '{uid}' is not provisioned")
+                    bad = True
+        else:
+            self.info("observability: the optional grafana profile is not running; checking Prometheus directly")
         demo_query = """WITH demo_spend AS (
   SELECT team_id, "user" AS user_id, api_key, SUM(spend) AS spend
   FROM "LiteLLM_SpendLogs"
@@ -870,7 +889,10 @@ SELECT
             else:
                 self.fail_(f"observability: litellm_dev demo data result was '{counts}' (expected 2|4|12|2|4|4)")
                 bad = True
-        _, targets = self.request(f"{self.grafana_url}/api/datasources/proxy/uid/prom/api/v1/targets", headers=headers)
+        targets = self.prometheus_targets()
+        if targets is None:
+            self.fail_("observability: could not query Prometheus targets")
+            return 1
         active = targets.get("data", {}).get("activeTargets", []) if isinstance(targets, dict) else []
         for job in ("traefik", "postgres", "pgvector", "node", "cadvisor", "blackbox-http"):
             matching = [target for target in active if isinstance(target, dict) and target.get("labels", {}).get("job") == job]
@@ -894,8 +916,256 @@ SELECT
             self.pass_("observability: expected Prometheus scrape targets are healthy")
         return int(bad)
 
+    @staticmethod
+    def prometheus_targets() -> dict[str, object] | None:
+        # Prometheus is internal-only; reuse a Python runtime on the same network.
+        for service in ("opensearch-bridge", "litellm-prod", "litellm-dev"):
+            if service_is_running(service):
+                status, body = container_http_request(service, "http://prometheus:9090/api/v1/targets")
+                if status == 200:
+                    try:
+                        parsed = json.loads(body)
+                    except json.JSONDecodeError:
+                        return None
+                    return parsed if isinstance(parsed, dict) else None
+        return None
+
+    @staticmethod
+    def opensearch_query(path: str, body: object | None = None) -> tuple[int, object | None]:
+        """Query OpenSearch inside its container as the admin user (password via stdin)."""
+        password = env_or_dotenv("OPENSEARCH_ADMIN_PASSWORD", "")
+        if not password:
+            raise ScriptError("OPENSEARCH_ADMIN_PASSWORD is not set in the environment or .env")
+        config = f'user = "admin:{password}"\n'
+        args = ["exec", "-T", "opensearch", "curl", "--silent", "--show-error", "--config", "-",
+                "--cacert", "/usr/share/opensearch/config/certs/ca.pem", "--write-out", "\n%{http_code}"]
+        if body is not None:
+            config += "header = \"Content-Type: application/json\"\ndata = " + json.dumps(json.dumps(body)) + "\n"
+        result = compose([*args, f"https://localhost:9200{path}"], input_data=config, capture_output=True, check=False)
+        output = result.stdout if isinstance(result.stdout, str) else ""
+        payload, _, status = output.rpartition("\n")
+        try:
+            return int(status), json.loads(payload) if payload else None
+        except (ValueError, json.JSONDecodeError):
+            return 0, None
+
+    def check_opensearch(self) -> int:
+        if not service_is_running("opensearch"): return self.skip("opensearch: opensearch is not running")
+        bad = False
+        status, health = self.opensearch_query("/_cluster/health")
+        if status == 200 and isinstance(health, dict) and health.get("status") in {"green", "yellow"}:
+            self.pass_(f"opensearch: cluster health is {health.get('status')}")
+        else:
+            self.fail_(f"opensearch: cluster health request returned HTTP {status}")
+            return 1
+        password = env_or_dotenv("OPENSEARCH_ADMIN_PASSWORD", "")
+        headers = {**self.basic_headers(password), "securitytenant": "global"}
+        status, _ = self.request(f"{self.opensearch_dashboards_url}/api/status", headers=headers)
+        if status == 200: self.pass_("opensearch: OpenSearch Dashboards status returned HTTP 200 through Traefik")
+        else: self.fail_(f"opensearch: OpenSearch Dashboards status returned HTTP {status}"); bad = True
+        status, _ = self.request(f"{self.opensearch_dashboards_url}/api/status")
+        if status == 401: self.pass_("opensearch: OpenSearch Dashboards rejects anonymous requests")
+        else: self.fail_(f"opensearch: anonymous Dashboards request returned HTTP {status} (expected 401)"); bad = True
+        for uid in ("litellm-dash-stack", "litellm-dash-cost", "litellm-dash-admin", "litellm-dash-team",
+                    "litellm-dash-logs", "litellm-dash-access", "litellm-dash-traces", "litellm-dash-host"):
+            status, data = self.request(f"{self.opensearch_dashboards_url}/api/saved_objects/dashboard/{uid}", headers=headers)
+            if status == 200 and isinstance(data, dict) and data.get("id") == uid:
+                self.pass_(f"opensearch: dashboard '{uid}' is provisioned in the Global tenant")
+            else:
+                self.fail_(f"opensearch: dashboard '{uid}' is not provisioned (HTTP {status})")
+                bad = True
+        for uid, title in OPENSEARCH_NOTEBOOKS.items():
+            status, data = self.request(
+                f"{self.opensearch_dashboards_url}/api/observability/notebooks/note/savedNotebook/{uid}",
+                headers=headers,
+            )
+            paragraphs = data.get("paragraphs", []) if isinstance(data, dict) else []
+            if status == 200 and isinstance(data, dict) and data.get("name") == title and paragraphs:
+                self.pass_(f"opensearch: troubleshooting notebook '{uid}' is provisioned in the Global tenant")
+            else:
+                self.fail_(
+                    f"opensearch: troubleshooting notebook '{uid}' is not usable "
+                    f"(HTTP {status}, paragraphs {len(paragraphs)})"
+                )
+                bad = True
+        status, data = self.request(
+            f"{self.opensearch_dashboards_url}/api/observability/notebooks/savedNotebook",
+            headers=headers,
+        )
+        notebook_ids = {
+            item.get("id")
+            for item in data.get("data", [])
+            if isinstance(item, dict)
+        } if status == 200 and isinstance(data, dict) else set()
+        legacy_ids = {
+            "litellm-nb-first-response",
+            "litellm-nb-requests",
+            "litellm-nb-observability",
+            "litellm-nb-data-recovery",
+            "litellm-nb-access",
+        }
+        stale = sorted(notebook_ids & legacy_ids)
+        if status == 200 and not stale:
+            self.pass_("opensearch: obsolete non-UUID troubleshooting notebooks were removed")
+        else:
+            self.fail_(f"opensearch: obsolete troubleshooting notebooks remain: {stale}")
+            bad = True
+        status, monitors = self.opensearch_query(
+            "/_plugins/_alerting/monitors/_search", {"size": 200, "query": {"exists": {"field": "monitor.name"}}}
+        )
+        names = [hit.get("_source", {}).get("name", "") for hit in (monitors or {}).get("hits", {}).get("hits", [])] \
+            if isinstance(monitors, dict) else []
+        litellm_monitors = [name for name in names if name.startswith("[LiteLLM] ")]
+        if len(litellm_monitors) >= 7:
+            self.pass_(f"opensearch: {len(litellm_monitors)} LiteLLM alerting monitors are provisioned")
+        else:
+            self.fail_(f"opensearch: only {len(litellm_monitors)} LiteLLM alerting monitors are provisioned")
+            bad = True
+        status, _ = self.opensearch_query("/_plugins/_query/_datasources/prometheus")
+        if status == 200: self.pass_("opensearch: the Prometheus direct-query data source is registered")
+        else: self.fail_(f"opensearch: the Prometheus data source is missing (HTTP {status})"); bad = True
+        for pattern, label in (("litellm-metrics-*", "metric"), ("litellm-alert-state-*", "alert-state")):
+            status, result = self.opensearch_query(
+                f"/{pattern}/_count", {"query": {"range": {"@timestamp": {"gte": "now-5m"}}}}
+            )
+            count = result.get("count", 0) if isinstance(result, dict) else 0
+            if status == 200 and count > 0:
+                self.pass_(f"opensearch: opensearch-bridge wrote {count} {label} document(s) in the last five minutes")
+            else:
+                self.fail_(f"opensearch: no {label} documents reached OpenSearch in the last five minutes")
+                bad = True
+        trace_services = (
+            ("litellm-prod", self.prod_url, self.prod_running),
+            ("litellm-dev", self.dev_url, self.dev_running),
+        )
+        for service, url, running in trace_services:
+            if not running:
+                continue
+            trace_query = {"query": {"bool": {"filter": [
+                {"term": {"serviceName": service}},
+                {"range": {"startTime": {"gte": "now-2m"}}},
+            ]}}}
+            status, result = self.opensearch_query(
+                "/otel-v1-apm-span-*/_count?allow_no_indices=true", trace_query
+            )
+            before = result.get("count", 0) if status == 200 and isinstance(result, dict) else -1
+            service_headers = self.auth_headers(service)
+            probe_status, _ = self.request(
+                f"{url}/v1/models",
+                headers={"Authorization": service_headers["Authorization"]} if service_headers else {},
+            )
+            count = before
+            if probe_status == 200 and before >= 0:
+                for _ in range(12):
+                    time.sleep(5)
+                    status, result = self.opensearch_query(
+                        "/otel-v1-apm-span-*/_count?allow_no_indices=true", trace_query
+                    )
+                    count = result.get("count", 0) if status == 200 and isinstance(result, dict) else -1
+                    if count > before:
+                        break
+            if probe_status == 200 and count > before:
+                self.pass_(f"opensearch: {service} delivered a deterministic request trace")
+            else:
+                self.fail_(
+                    f"opensearch: {service} trace probe failed "
+                    f"(HTTP {probe_status}, span count {before} -> {count})"
+                )
+                bad = True
+        if self.prod_running:
+            status, result = self.opensearch_query(
+                "/litellm-spend-*/_count?allow_no_indices=true",
+                {"query": {"bool": {"filter": [{"term": {"environment": "prod"}}, {"prefix": {"request_id": "demo-"}}]}}},
+            )
+            count = result.get("count", 0) if isinstance(result, dict) else 0
+            if status == 200 and count in (0, 12):
+                self.pass_(f"opensearch: litellm_prod demo spend in OpenSearch is consistent ({count} rows)")
+            else:
+                self.fail_(f"opensearch: litellm_prod demo spend count in OpenSearch is {count} (expected 0 or 12)")
+                bad = True
+        return int(bad)
+
+    def check_opensearch_logs(self) -> int:
+        if not service_is_running("opensearch"): return self.skip("opensearch-logs: opensearch is not running")
+        bad = False
+        field = "log.attributes.compose_service"
+        status, result = self.opensearch_query(
+            "/litellm-logs-*/_search?allow_no_indices=true",
+            {"size": 0, "query": {"range": {"@timestamp": {"gte": "now-7d"}}},
+             "aggs": {"services": {"terms": {"field": field, "size": 500}}}},
+        )
+        buckets = result.get("aggregations", {}).get("services", {}).get("buckets", []) if isinstance(result, dict) else []
+        available = {bucket.get("key") for bucket in buckets}
+        if status != 200:
+            self.fail_(f"opensearch-logs: log aggregation returned HTTP {status}")
+            return 1
+        missing = [service for service in compose_capture(["ps", "--services", "--status", "running"]).splitlines()
+                   if service not in available]
+        if missing:
+            self.fail_(f"opensearch-logs: OpenSearch has no log lines for running service(s): {' '.join(missing)}")
+            bad = True
+        else:
+            self.pass_("opensearch-logs: OpenSearch has log lines for every currently running Compose service")
+        status, result = self.opensearch_query(
+            "/litellm-logs-*/_search?allow_no_indices=true",
+            {"size": 0, "query": {"range": {"@timestamp": {"gte": "now-1h"}}},
+             "aggs": {"levels": {"filter": {"exists": {"field": "log.attributes.level"}}},
+                      "access": {"filter": {"exists": {"field": "http.DownstreamStatus"}}},
+                      "client": {"filter": {"bool": {"should": [
+                          {"exists": {"field": "http.ClientAddr"}}, {"exists": {"field": "http.ClientHost"}},
+                      ]}}}}},
+        )
+        aggregations = result.get("aggregations", {}) if isinstance(result, dict) else {}
+        if status == 200 and aggregations.get("levels", {}).get("doc_count", 0) > 0:
+            self.pass_("opensearch-logs: log lines carry a normalized severity level")
+        else:
+            self.fail_("opensearch-logs: no log line in the last hour carries a severity level")
+            bad = True
+        if service_is_running("traefik"):
+            if status == 200 and aggregations.get("access", {}).get("doc_count", 0) > 0:
+                self.pass_("opensearch-logs: Traefik access logs are parsed into structured http.* fields")
+            else:
+                self.fail_("opensearch-logs: no structured Traefik access log reached OpenSearch in the last hour")
+                bad = True
+            if status == 200 and aggregations.get("client", {}).get("doc_count", 1) == 0:
+                self.pass_("opensearch-logs: Traefik access logs contain no client address fields")
+            else:
+                self.fail_("opensearch-logs: Traefik access logs contain client address fields")
+                bad = True
+        if self.nonce and self.nonce_service:
+            status, result = self.opensearch_query(
+                "/litellm-logs-*/_count?allow_no_indices=true",
+                {"query": {"bool": {"filter": [
+                    {"term": {field: self.nonce_service}},
+                    {"match_phrase": {"body": self.nonce}},
+                    {"range": {"@timestamp": {"gte": "now-10m"}}},
+                ]}}},
+            )
+            count = result.get("count", -1) if isinstance(result, dict) else -1
+            if status == 200 and count == 0:
+                self.pass_(f"opensearch-logs: the chat probe text was not found in {self.nonce_service} logs")
+            else:
+                self.fail_(f"opensearch-logs: the chat probe text appeared in {self.nonce_service} logs or the query failed")
+                bad = True
+            status, result = self.opensearch_query(
+                "/otel-v1-apm-span-*/_count?allow_no_indices=true",
+                {"query": {"bool": {"filter": [
+                    {"range": {"startTime": {"gte": "now-10m"}}},
+                    {"query_string": {"query": f"*{self.nonce}*", "fields": ["span.attributes.*", "name", "status.message"]}},
+                ]}}},
+            )
+            count = result.get("count", -1) if isinstance(result, dict) else -1
+            if status == 200 and count == 0:
+                self.pass_("opensearch-logs: the chat probe text was not found in LiteLLM trace spans")
+            else:
+                self.fail_("opensearch-logs: the chat probe text appeared in LiteLLM trace spans or the query failed")
+                bad = True
+        else:
+            self.info("opensearch-logs: skipping the log-leak probe because no deterministic chat probe ran")
+        return int(bad)
+
     def check_logs(self) -> int:
-        if not service_is_running("loki"): return self.skip("logs: loki is not running")
+        if not service_is_running("loki"): return self.skip("logs: the optional grafana profile (loki) is not running")
         if not service_is_running("grafana"): return self.skip("logs: grafana is not running (used as the Loki query proxy)")
         headers = self.grafana_headers()
         if not headers:

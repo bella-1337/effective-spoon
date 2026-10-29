@@ -36,8 +36,8 @@ Restores databases present in a backup created by backup-databases.py.
 This operation restores each archive into staging and renames the current target
 aside before promotion.
 Start only postgres and vector-postgres in the target Compose project. LiteLLM,
-Grafana, the pgvector connector, and the pgvector exporter must remain stopped
-until restoration is complete.
+Grafana, the OpenSearch bridge, the pgvector connector, and the pgvector exporter
+must remain stopped until restoration is complete.
 """
 DATABASES = (("postgres", "litellm_prod"), ("postgres", "litellm_dev"), ("vector-postgres", "vector_store"))
 ALLOWED_FILES = {"litellm_prod.dump", "litellm_dev.dump", "vector_store.dump", "metadata.txt", "SHA256SUMS"}
@@ -88,6 +88,7 @@ def require_application_services_stopped() -> None:
         "litellm-dev",
         "litellm-pgvector",
         "grafana",
+        "opensearch-bridge",
         "pgvector-exporter",
     ):
         if service_is_running(service):
