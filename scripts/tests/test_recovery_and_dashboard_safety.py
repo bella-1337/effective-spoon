@@ -150,6 +150,7 @@ class RestoreSafetyTests(unittest.TestCase):
                 "litellm-dev",
                 "litellm-pgvector",
                 "grafana",
+                "opensearch-bridge",
                 "pgvector-exporter",
             ],
         )

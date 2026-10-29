@@ -2,8 +2,11 @@
 
 A Docker Compose stack for running separate LiteLLM production and development
 proxies behind Traefik, with PostgreSQL, Presidio, SearXNG, Xberg MCP,
-Langfuse, development vLLM model servers, Prometheus, Grafana, Loki, Grafana
-Alloy, and host/container exporters.
+Langfuse, development vLLM model servers, Prometheus, host/container exporters,
+and OpenSearch with OpenSearch Dashboards as the default multi-user
+observability platform for logs, metrics, LiteLLM usage, alerting, and audit
+trails. Grafana, Loki, and a Loki collector remain available through the
+optional `grafana` profile.
 
 The `prod` and `dev` names below describe LiteLLM runtime profiles. The on-prem
 deployment expects a certificate delivery process to place the configured TLS
@@ -17,6 +20,14 @@ available only for a private workstation or trusted development network.
 - An NVIDIA GPU and NVIDIA Container Toolkit for the development profile's
   BGE-M3 vLLM service
 - Up to 7 GB of available RAM for the CPU-hosted vLLM Semantic Router
+- About 4.5 GB of additional RAM for OpenSearch, OpenSearch Dashboards, and Data
+  Prepper. On Linux hosts, OpenSearch requires `vm.max_map_count` of at least
+  262144:
+
+  ```sh
+  sudo sysctl -w vm.max_map_count=262144
+  echo 'vm.max_map_count=262144' | sudo tee /etc/sysctl.d/99-opensearch.conf
+  ```
 - [`uv`](https://docs.astral.sh/uv/getting-started/installation/) for the
   maintenance scripts
 - A delivered TLS certificate and matching private key, or `mkcert` for local
@@ -259,11 +270,12 @@ mkdir -p traefik/certs
 mkcert \
   -cert-file traefik/certs/litellm-stack.pem \
   -key-file traefik/certs/litellm-stack-key.pem \
-  llm.example.test llm-dev.example.test grafana.example.test search.example.test \
-  langfuse.example.test langfuse-s3.example.test
+  llm.example.test llm-dev.example.test opensearch.example.test search.example.test \
+  langfuse.example.test langfuse-s3.example.test grafana.example.test
 ```
 
 If `.env` uses different hostnames, substitute all names in the final command.
+`grafana.example.test` is needed only for the optional `grafana` profile.
 
 `mkcert` creates a locally trusted CA and a private key. Its certificates are
 for local/private use only: browsers on other devices will not trust them
@@ -276,7 +288,7 @@ deployment.
 For a stack running on this machine, add one line to `/etc/hosts`:
 
 ```text
-127.0.0.1 llm.example.test llm-dev.example.test grafana.example.test search.example.test langfuse.example.test langfuse-s3.example.test
+127.0.0.1 llm.example.test llm-dev.example.test opensearch.example.test search.example.test langfuse.example.test langfuse-s3.example.test grafana.example.test
 ```
 
 On Windows, edit
@@ -291,11 +303,14 @@ getent hosts llm.example.test 2>/dev/null || \
   dscacheutil -q host -a name llm.example.test
 ```
 
-## 4. Fetch Grafana dashboards
+## 4. Fetch Grafana dashboards (optional `grafana` profile only)
 
-The repository's fetch script downloads maintained dashboards into Grafana's
-provisioning tree. Run it before the first start and whenever you intentionally
-want to refresh those upstream assets:
+OpenSearch Dashboards objects are generated and imported automatically by
+`opensearch-dashboards-setup`; no download is required for the default stack.
+When you enable the optional `grafana` profile, the repository's fetch script
+downloads maintained dashboards into Grafana's provisioning tree. Run it before
+the first Grafana start and whenever you intentionally want to refresh those
+upstream assets:
 
 ```sh
 ./scripts/fetch-dashboards.py
@@ -337,6 +352,7 @@ Validate both Compose profiles without starting containers:
 docker compose --profile prod config --quiet
 docker compose --profile dev config --quiet
 docker compose --profile prod --profile demo config --quiet
+docker compose --profile prod --profile grafana config --quiet
 ```
 
 To inspect the fully interpolated model, use `docker compose config` carefully:
@@ -361,6 +377,22 @@ Both proxies can be run together when needed:
 docker compose --profile prod --profile dev up -d
 ```
 
+OpenSearch, OpenSearch Dashboards, Data Prepper, Alloy, and `opensearch-bridge`
+are shared services and start with every profile. The first start generates the
+private OpenSearch CA and certificates, provisions users, roles, index
+templates, lifecycle policies, alert monitors, and the Prometheus data source,
+and imports the dashboards. Grafana is optional; add the `grafana` profile to
+any command to start Grafana, Loki, and the Loki collector as well:
+
+```sh
+docker compose --profile prod --profile grafana up -d
+```
+
+The Grafana container refuses to start until `GRAFANA_ADMIN_PASSWORD`,
+`GRAFANA_SECURITY_SECRET_KEY`, and `GRAFANA_DATABASE_PASSWORD` are set; re-run
+`docker compose up -d postgres-init` after setting the database password so the
+`grafana_ro` role exists.
+
 Synthetic production dashboard data is opt-in. To seed it explicitly, activate
 the `demo` profile together with production:
 
@@ -369,7 +401,7 @@ docker compose --profile prod --profile demo up -d
 ```
 
 The production and development proxies use separate databases and config files,
-while PostgreSQL, Traefik, Langfuse, Grafana, Prometheus, SearXNG, Presidio,
+while PostgreSQL, Traefik, Langfuse, OpenSearch, Prometheus, SearXNG, Presidio,
 and exporters are shared.
 
 ## 8. Verify the stack
@@ -386,7 +418,9 @@ HTTPS routes (substitute your configured hosts):
 
 ```sh
 curl --fail --show-error --silent https://llm.example.test/health/liveliness
-curl --fail --show-error --silent https://grafana.example.test/api/health
+# OpenSearch Dashboards requires authentication; 401 proves the route is up.
+curl --silent --output /dev/null --write-out '%{http_code}\n' \
+  https://opensearch.example.test/api/status
 curl --fail --show-error --silent \
   'https://langfuse.example.test/api/public/health?failIfDatabaseUnavailable=true'
 curl --fail --show-error --silent --output /dev/null https://search.example.test/
@@ -412,8 +446,9 @@ curl --cacert "$(mkcert -CAROOT)/rootCA.pem" \
 ```
 
 Do not use `curl -k` as a permanent workaround; it disables certificate
-verification. Open `https://grafana.example.test` to verify provisioning and
-sign in with the Grafana admin password from `.env`.
+verification. Open `https://opensearch.example.test`, sign in as `admin` with
+`OPENSEARCH_ADMIN_PASSWORD` from `.env`, choose the **Global** tenant, and open
+**Dashboards → LiteLLM Overview**.
 
 ## 9. Use the hybrid logging pipeline
 
@@ -427,7 +462,8 @@ Prompt and response content is deliberately excluded by both
 
 Langfuse is an LLM tracing platform, not a general Docker log collector. Alloy
 therefore remains in the stack and sends stdout/stderr from LiteLLM and every
-other Compose service to Loki. This hybrid split preserves the existing
+other Compose service to OpenSearch through Data Prepper (and, with the optional
+`grafana` profile, to Loki). This hybrid split preserves the existing
 infrastructure and application log coverage while adding structured LiteLLM
 traces. Do not enable the legacy `langfuse` callback alongside
 `langfuse_otel`, because doing so duplicates traces.
@@ -461,10 +497,158 @@ must not prevent the core authenticated model gateway from starting or being
 recreated. Their failures remain visible through service health, request errors,
 and the observability checks.
 
-### View container logs in Grafana
+### OpenSearch: the default multi-user observability platform
 
-Grafana Alloy sends container standard output and standard error to Loki, so raw
-container logs are now available in Grafana. To view them:
+OpenSearch replaces Grafana as the default UI because Grafana OSS cannot
+restrict data sources or dashboards per user. The OpenSearch security plugin
+provides internal users, role-based index and document/field-level security,
+read-only users, Global/Private tenants, and an audit log without a commercial
+license. Every OpenSearch transport and HTTP connection uses TLS with a private
+CA created by `opensearch-certs`; only Traefik exposes OpenSearch Dashboards.
+
+| Component | Role |
+| --- | --- |
+| `opensearch` | Single-node store with security, alerting, ISM, SQL/PPL, observability, and notifications plugins |
+| `opensearch-dashboards` | Multi-user UI at `https://${OPENSEARCH_DASHBOARDS_HOST}` |
+| `alloy` → `data-prepper` | Container stdout/stderr over OTLP into `litellm-logs-*`, with multi-line entries joined, a normalized severity, ANSI colours stripped, search terms redacted, and Traefik access logs parsed into `http.*` fields |
+| LiteLLM → `data-prepper` | Content-free OpenTelemetry request, guardrail, model, and database spans into Trace Analytics (`otel-v1-apm-span-*`, `otel-v1-apm-service-map`) |
+| `opensearch-bridge` | Prometheus expressions and raw series into `litellm-metrics-*`, alert-rule state into `litellm-alert-state-*`, non-content LiteLLM spend, provider-error, audit, user, team, and key data into `litellm-spend-*`, `litellm-provider-errors-*`, `litellm-audit-*`, and `litellm-entities` |
+| `opensearch-setup` | Idempotent provisioning of users, roles, templates, lifecycle policies, the Prometheus direct-query data source, and alert monitors |
+| `opensearch-dashboards-setup` | Imports index patterns, visualizations, saved searches, dashboards, and troubleshooting notebooks into the Global tenant |
+
+Dashboards in the Global tenant (start at **LiteLLM Overview**):
+
+- **LiteLLM Stack (dev/prod)** – every panel of the Grafana stack dashboard plus
+  tokens, provider latency, time to first token, proxy overhead, proxy status
+  codes and exceptions, deployment state, guardrail errors, cache hit ratio,
+  and in-flight requests from the upstream LiteLLM dashboard.
+- **LiteLLM Cost Attribution**, **LiteLLM Admin Overview**, and **LiteLLM Team
+  Costing** – every panel of the matching Grafana SQL dashboards, with
+  environment, model, and team filters.
+- **Container Logs** – log volume by service and severity, error, warning, and
+  stderr lines per Compose service, plus searchable log tables.
+- **Traefik Access Logs** – every HTTPS request with router, status, method,
+  path, and latency percentiles; error responses and slowest requests.
+- **LiteLLM Request Traces** (operators) – requests by route, span latency by
+  operation, model calls, guardrail outcomes, database latency by table, error
+  spans, and the slowest spans. **Observability → Trace Analytics** adds trace
+  waterfalls and the service map.
+- **Infrastructure: Host & Containers**, **Infrastructure: PostgreSQL**, and
+  **Infrastructure: Traefik, Probes & Targets** – the core Node Exporter Full,
+  cAdvisor, PostgreSQL, Traefik, blackbox, TLS-expiry, and scrape-target panels.
+- **Security, Backups & Alerts** – image-security metrics, backup age, and the
+  latest state of every alert rule.
+- **Metric Explorer** – any mirrored Prometheus metric by name and series.
+- **OpenSearch Security Audit** – failed logins, privilege denials, and security
+  configuration changes.
+
+Troubleshooting notebooks under **Observability → Notebooks** turn the repository's
+tested verification and recovery paths into a top-to-bottom, user-symptom workflow:
+
+1. **Stack First Response** – unavailable UI/API, ingress status, scrape targets,
+   service errors, and restarts.
+2. **LiteLLM Requests and Integrations** – failed or slow requests, providers,
+   routing, guardrails, pgvector, SearXNG, Xberg MCP, and Langfuse.
+3. **Missing Logs, Metrics, Traces, or Alerts** – freshness and completeness at
+   every producer, collector, bridge, Data Prepper, and OpenSearch layer.
+4. **Data, Cost, Backup, and Upgrade Recovery** – PostgreSQL, spend freshness,
+   backups, game-day preflight, and guarded rollback paths.
+5. **Access, Authentication, and Audit** – 401/403 responses, Dashboards roles,
+   tenants, failed logins, and missing privileges.
+
+Each notebook starts with the user-visible symptom, narrows the failing layer with
+live PPL, and ends with the smallest matching `verify-litellm-upgrade.py` or
+recovery command. PPL cells use OpenSearch's native `QUERY` paragraph schema, so
+they execute with the signed-in user's read permissions when the notebook opens;
+running them does not require granting shared-dashboard write access. Index
+authorization still applies: the first-response notebook needs
+`litellm_ops_viewer` or broader, cost/recovery checks need `litellm_viewer` or
+`litellm_operator`, and trace and security-audit queries remain operator-only even
+though the shared notebook itself is visible in the Global tenant.
+
+Beyond the dashboards, OpenSearch Dashboards provides **Discover** over every
+index pattern, **Observability → Logs** (PPL, for example
+``source = litellm-logs-* | where `log.attributes.stream` = 'stderr'``),
+**Observability → Metrics** and PPL over every Prometheus series through the
+registered `prometheus` data source (for example
+`source = prometheus.query_range('rate(litellm_requests_metric_total[5m])', now() - 1h, now(), '1m')`),
+**Query Workbench**, **Notebooks**, **Reporting**, **Anomaly Detection**, and
+**Alerting**. The PromQL expressions and raw-series selectors stored in
+OpenSearch are defined in `opensearch/tools/metrics.yml`.
+
+#### Users, roles, and tenants
+
+Sign in as `admin` and create people under **Security → Internal users**, or
+connect an external identity provider through the security plugin's
+`config.yml`. Map users to the provisioned roles:
+
+| Role | Grants |
+| --- | --- |
+| `litellm_viewer` | Read logs, metrics, alert state, spend, provider errors, and entities; Global tenant read-only |
+| `litellm_ops_viewer` | Read logs, metrics, and alert state only (no cost or identity data) |
+| `litellm_cost_viewer` | Read spend, provider errors, and entities only |
+| `litellm_operator` | Read everything above plus LiteLLM request traces and the LiteLLM and OpenSearch audit trails; edit shared dashboards |
+| `litellm_dashboards_read_only` | Hides editing UI in OpenSearch Dashboards |
+
+Every human user also needs the built-in `kibana_user` role. Add the built-in
+`alerting_read_access` or `alerting_full_access` roles for alert visibility or
+management. For example, a read-only team lead:
+
+```sh
+curl --cacert ca.pem -u "admin:${OPENSEARCH_ADMIN_PASSWORD}" -X PUT \
+  https://opensearch:9200/_plugins/_security/api/internalusers/alice \
+  -H 'Content-Type: application/json' \
+  -d '{"password":"<16+ chars>","opendistro_security_roles":["kibana_user","litellm_viewer","litellm_dashboards_read_only"]}'
+```
+
+The same call is easier through **Security → Internal users** in the UI. To
+limit someone to one team's costs, create a role with document-level security,
+for example index pattern `litellm-spend-*` with the DLS query
+`{"term": {"team_id": "demo-team-atlas"}}`. The Admin Overview dashboard
+exposes identities, budgets, key aliases, and audit activity; grant it only to
+operators. Private tenants let each user build personal dashboards without
+affecting the shared Global tenant.
+
+#### Alerting
+
+`opensearch-setup` translates every rule in `grafana/alerting/` into an
+OpenSearch Alerting monitor named `[LiteLLM] <rule title>`, so the Grafana files
+remain the single source of truth. A monitor fires only after its rule's
+condition held for the full Grafana `for` duration, honoring the rule's
+`noDataState` and `execErrState`. Four extra monitors fire when alert-rule
+evaluation, Prometheus metrics, container logs, or LiteLLM trace spans stop
+reaching OpenSearch.
+
+The repository contains no notification credentials. Create a channel under
+**Notifications → Channels** (Slack, Microsoft Teams, Chime, email, SNS, or a
+webhook), copy its ID into `OPENSEARCH_ALERT_CHANNEL_ID`, and re-run
+`docker compose up -d opensearch-setup` to attach it to every monitor with a
+one-hour throttle. Without a channel, alerts are visible under **Alerting** but
+notify no one.
+
+#### Rotation and recovery
+
+`opensearch-setup` re-applies the service passwords from `.env` on every run
+using the private admin certificate, so rotate a service password by updating
+`.env` and running:
+
+```sh
+docker compose up -d --force-recreate opensearch-setup
+docker compose up -d --force-recreate opensearch-dashboards data-prepper opensearch-bridge
+```
+
+Users created in the UI are not overwritten. `opensearch-certs` renews node and
+admin certificates 30 days before expiry whenever it runs. OpenSearch volumes are
+not part of the database backup; use OpenSearch snapshots if the observability
+history itself must be recoverable. The LiteLLM usage indices can always be
+rebuilt from PostgreSQL by deleting `litellm-bridge-state` and restarting
+`opensearch-bridge`.
+
+### Optional Grafana profile
+
+With `--profile grafana`, the `alloy-loki` collector also sends container logs to
+Loki and Grafana provisions its original dashboards, data sources, and alert
+rules. To view logs in Grafana:
 
 1. Open Grafana and select **Explore**.
 2. Select the **Loki** data source.
@@ -472,7 +656,8 @@ container logs are now available in Grafana. To view them:
    and run the query. You can add more labels to narrow the stream.
 
 Grafana Alloy provides `compose_project`, `compose_service`, `container`, and
-`stream` (`stdout` or `stderr`) labels, plus `job="docker"`. For example, run
+`stream` (`stdout` or `stderr`) labels, plus `job="docker"`. The OpenSearch log
+documents carry the same values under `log.attributes.*`. For example, run
 either of these Loki label selectors to show all discovered container streams
 or one Compose service:
 
@@ -498,13 +683,17 @@ Grafana provisions four dashboards in the **LiteLLM** folder:
   attribution, and expensive requests. Select any current team; new teams appear
   automatically.
 
+Grafana sign-up and anonymous access remain disabled. Grafana OSS cannot
+restrict data sources per user, so keep Grafana access limited to operators and
+use OpenSearch Dashboards for everyone else.
+
+### Demonstration data and telemetry stores
+
 D3 classifier calls flow through LiteLLM and therefore use the normal LiteLLM
 request, failure, latency, spend-log, and trace surfaces. The external GPU host
 is intentionally not scraped across the trust boundary by this Compose stack;
 its owner must monitor GPU memory, utilization, temperature, process readiness,
-and TLS certificate expiry. Configure a Grafana contact point and notification
-policy for stack alerts; repository configuration contains no notification
-credentials.
+and TLS certificate expiry.
 
 The development profile automatically seeds two persistent demonstration teams
 and four users after its database schema is ready. Production seeds the same
@@ -520,18 +709,17 @@ Development refreshes it when that profile starts; production refreshes it only
 when the `demo` profile is explicitly started. Existing seeded rows remain in
 the persistent database until they are intentionally removed or expire.
 
-Grafana sign-up and anonymous access remain disabled. The initial Grafana
-administrator can grant narrowly scoped viewer access later, but the admin
-dashboard should remain restricted because it exposes operational identities,
-budgets, key aliases, and audit activity.
-
 Use each observability store for its intended telemetry:
 
-- **Loki** contains raw container log lines collected by Grafana Alloy.
+- **OpenSearch** contains container logs, mirrored metrics, alert-rule state,
+  non-content copies of LiteLLM usage data, and the OpenSearch security audit
+  log.
 - **Langfuse** contains content-redacted LiteLLM request traces.
-- **Prometheus** contains time-series service and infrastructure metrics.
-- **LiteLLM PG (prod)** and **LiteLLM PG (dev)** query structured LiteLLM
-  database telemetry, such as spend records; they are not log stores.
+- **Prometheus** contains every scraped time series and remains the metrics
+  source of truth.
+- **LiteLLM PostgreSQL** remains the system of record for spend and identity
+  data; OpenSearch holds read-only copies.
+- **Loki** (optional `grafana` profile) contains raw container log lines.
 
 ## 10. Use SearXNG search through LiteLLM
 
@@ -926,15 +1114,43 @@ development hostname after policy changes.
   itself establish that a system is high risk or that the retention period is
   appropriate for every purpose.
 - LiteLLM health-check rows are retained for 7 days.
-- Loki container logs are retained for 7 days.
+- OpenSearch container logs are retained for 7 days, LiteLLM trace spans,
+  mirrored metrics, and alert-rule state for 15 days, LiteLLM usage copies for 180 days, and the
+  OpenSearch security audit log for 90 days (monthly indices, so up to one
+  extra month). See `OPENSEARCH_*_RETENTION_DAYS`.
+- Loki container logs (optional `grafana` profile) are retained for 7 days.
 - Prometheus metrics are retained for 15 days.
-- Traefik omits `ClientHost` from access logs to avoid persisting client IP
-  addresses in Loki.
+- Traefik omits client addresses, ports, and user names from its JSON access
+  logs to avoid persisting client IP addresses in OpenSearch or Loki.
+- Traefik writes JSON access logs without client addresses, ports, user names,
+  or request headers. Alloy redacts `q=`/`query=` URL parameters in every log
+  line, so search terms (for example in SearXNG upstream errors) are not
+  persisted.
+- LiteLLM trace spans carry the same content-free attributes as the Langfuse
+  traces (model, route, token counts, cost, guardrail outcome, and the
+  pseudonymous user ID) and are readable only by `litellm_operator`. Set
+  `LITELLM_OTEL_TRACE_EXPORTER=console` only for short debugging sessions; it
+  prints spans to stdout and therefore into the container logs.
+- `opensearch-bridge` never copies prompts, responses, request metadata,
+  client IP addresses, virtual-key hashes, provider exception text, or audit
+  before/after values out of PostgreSQL.
 - LiteLLM audit logging is enabled for supported administrative changes.
 - Langfuse trace metadata is stored in its dedicated PostgreSQL, ClickHouse,
-  Redis, and MinIO volumes. Define and operate an explicit Langfuse retention
-  and backup policy before production use; the database-only backup scripts in
-  this repository do not constitute a complete Langfuse backup.
+  Redis, and MinIO volumes. ClickHouse keeps warning-or-higher server logs
+  continuously, rotates each file channel at 100 MB with three files retained,
+  and retains query, view, part, scheduler, and structured warning logs for 7
+  days plus error logs for 30 days. High-volume query profiler, internal metric,
+  and internal OpenTelemetry tables are disabled; equivalent live capacity and
+  engine counters are scraped by Prometheus and surfaced on **Infrastructure:
+  Host & Containers** with disk-pressure, scrape-failure, and log-storm alerts.
+  This preserves always-on incident evidence without requiring an operator to
+  predict when to enable diagnostics.
+- Langfuse application event retention remains a separate concern. The
+  project-level automatic retention feature is available only in Langfuse
+  Enterprise Edition; OSS self-hosted event data is indefinite by default.
+  Define and operate a supported Langfuse deletion/export policy and a complete
+  backup policy before production use. The database-only backup scripts in this
+  repository do not constitute a complete Langfuse backup.
 
 These periods must be recorded in the deployment's retention schedule and
 reviewed against its documented purposes. Restrict proxy-admin access because
@@ -953,8 +1169,9 @@ before deploying an update.
 External routes use TLS through Traefik. The LiteLLM and Langfuse containers
 trust forwarded headers because they are not published directly and only
 Traefik is expected to reach them on the edge network. Internal Compose traffic,
-including PostgreSQL, ClickHouse, Redis, MinIO, Loki, Presidio, and SearXNG
-traffic, is not encrypted. Treat the isolated Docker networks as a compensating
+including PostgreSQL, ClickHouse, Redis, MinIO, Loki, Presidio, SearXNG, and the
+Alloy-to-Data Prepper OTLP stream, is not encrypted. OpenSearch traffic always
+uses verified TLS. Treat the isolated Docker networks as a compensating
 control for local use; enable authenticated internal TLS before using an
 untrusted or multi-host network.
 
@@ -972,7 +1189,7 @@ must separately:
 - establish a valid Chapter V transfer mechanism and transfer impact assessment
   for non-EU recipients, or configure an eligible EU-resident provider;
 - implement data-subject access, correction, export, restriction, and deletion
-  procedures across PostgreSQL, Loki, provider systems, and backups;
+  procedures across PostgreSQL, OpenSearch, Loki, provider systems, and backups;
 - define breach detection, documentation, escalation, and the GDPR 72-hour
   notification process;
 - appoint trained human oversight with the authority to revoke keys, disable
@@ -1210,14 +1427,17 @@ Do not add permanent wildcard exceptions. An expired exception is no longer
 applied, and Grafana warns seven days before the earliest active exception
 expires.
 
-### Prometheus and Grafana alerts
+### Prometheus, OpenSearch, and Grafana alerts
 
 The Compose configuration enables node-exporter's official textfile collector
-and mounts `security-metrics/` read-only. Grafana provisions the rules under
-`grafana/alerting/`. Recreate these two services after deploying this change:
+and mounts `security-metrics/` read-only. The rules under `grafana/alerting/`
+become OpenSearch Alerting monitors by default and are also provisioned into
+Grafana when the optional `grafana` profile runs. Recreate these services after
+changing a rule:
 
 ```bash
-docker compose up -d --force-recreate node-exporter grafana
+docker compose up -d --force-recreate node-exporter opensearch-setup opensearch-bridge
+docker compose --profile grafana up -d --force-recreate grafana   # optional profile
 ```
 
 Provisioned rules alert on:
@@ -1233,11 +1453,11 @@ Provisioned rules alert on:
 - PostgreSQL exporter loss and host disk exhaustion; and
 - a missing or stale complete database backup.
 
-The repository deliberately does not commit notification credentials. Configure
-an existing Grafana contact point and notification policy in the Grafana UI, or
-provision one using an environment-sourced secret. A firing rule without a
-routed contact point is visible in Grafana but cannot notify an operator.
-Grafana reads file-provisioned alerting resources at startup.
+The repository deliberately does not commit notification credentials. Set
+`OPENSEARCH_ALERT_CHANNEL_ID` to an OpenSearch Notifications channel (see
+**Alerting** in section 9); with the Grafana profile, also configure a Grafana
+contact point and notification policy. A firing rule without a routed channel is
+visible in the UI but cannot notify an operator.
 
 Traefik and Alloy reach Docker metadata through dedicated read-only socket
 proxies with Docker API `POST` disabled. They do not mount the Docker socket
@@ -1426,7 +1646,7 @@ CRON_TZ=UTC
 ```
 
 The script intentionally does not copy `.env`, TLS private keys, or live
-Grafana, Loki, and Prometheus volume files. Keep secrets in their existing
+OpenSearch, Grafana, Loki, and Prometheus volume files. Keep secrets in their existing
 secret-management system. Use storage-level snapshots designed for those
 observability volumes if their historical data must be retained. Replicate
 completed backups to access-controlled, encrypted off-host storage and test
@@ -1444,8 +1664,8 @@ docker compose up -d --wait postgres vector-postgres
 
 The confirmation flag is mandatory because each database found in the backup
 replaces its current target. The restore script refuses to run while
-`litellm-prod`, `litellm-dev`, `litellm-pgvector`, Grafana, or the pgvector
-exporter is running. It rejects symbolic links, unexpected files, unknown
+`litellm-prod`, `litellm-dev`, `litellm-pgvector`, Grafana, `opensearch-bridge`,
+or the pgvector exporter is running. It rejects symbolic links, unexpected files, unknown
 databases, malformed metadata, unsafe checksum entries, and checksum mismatches
 before changing a target database.
 
@@ -1569,7 +1789,9 @@ List or select checks when diagnosing a failure:
 The suite checks Compose health and exposure, authentication, prod/dev
 isolation, vLLM embeddings, vLLM Semantic Router routing,
 pgvector, Presidio behavior, SearXNG, Xberg MCP extraction, Prometheus targets,
-Grafana datasources, and Loki log delivery. A
+OpenSearch health, dashboards, monitors, data sources, bridge freshness, and log
+delivery, plus the Grafana data sources and Loki log delivery when the optional
+`grafana` profile runs. A
 missing optional prerequisite is reported as `SKIP`; once a prerequisite is
 present, a failed assertion makes the command exit nonzero.
 
@@ -1616,7 +1838,8 @@ docker compose --profile prod down
 ```
 
 Use `docker compose down --volumes` only when you intentionally want to delete
-PostgreSQL, Grafana, and Prometheus data. That operation is destructive.
+PostgreSQL, OpenSearch, Grafana, and Prometheus data, including the private
+OpenSearch CA. That operation is destructive.
 
 ## Security notes
 

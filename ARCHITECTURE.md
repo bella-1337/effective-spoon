@@ -12,8 +12,12 @@ This repository deploys a local, Docker Compose-based LiteLLM platform with:
 - D3-assisted coding routing, Qdrant-backed semantic caching, and
   pgvector-backed shared RAG;
 - allowlisted Xberg MCP document extraction through an egress proxy;
-- metrics in Prometheus and dashboards in Grafana;
-- Docker container logs in Loki, collected by Grafana Alloy.
+- metrics scraped by Prometheus;
+- OpenSearch and OpenSearch Dashboards (default) as the multi-user store and UI
+  for container logs, Prometheus metrics, LiteLLM usage data, alerting, and
+  security audit trails;
+- optional Grafana, Loki, and a Loki-specific Alloy collector (`grafana`
+  profile) for operators who still want the Grafana dashboards.
 
 The bundled `mkcert` configuration is for a trusted local workstation or
 private network. It is not a public Internet TLS solution.
@@ -21,37 +25,38 @@ private network. It is not a public Internet TLS solution.
 ## Topology
 
 ```text
-                              +--------------------------+
-                              | Browser / API client     |
-                              +------------+-------------+
-                                           |
-                                      HTTPS :443
-                                           |
-                              +------------v-------------+
-                              | Traefik                  |
-                              | mkcert TLS / routing     |
-                              +---+-----------+----------+
-                                  |           |
-                    +-------------+           +---------------------+
-                    |                                                   |
-       +------------v-------------+                         +-----------v-----------+
-       | LiteLLM prod / dev       |                         | Grafana               |
-       | profile-selected proxies |                         | dashboards / Explore  |
-       +--+------------+----------+                         +-----+-----------+-----+
-          |            |                                          |           |
-          |  HTTPS + bearer                                       |           |
-          +----------------> Remote D3-mini                        |           |
-          |                  Decisions classifier                  |           |
-          |     +------v-------+                         +--------v--+   +----v-----+
-          |     | Presidio     |                         | Prometheus |   | Loki     |
-          |     | analyzer +   |                         | metrics    |   | logs     |
-          |     | anonymizer   |                         +------------+   +----+-----+
-          |     +--------------+                                             |
-          |                                                                   |
-       +--v----------------+                                      +-----------v-----+
-       | PostgreSQL        |                                      | Grafana Alloy    |
-       | prod + dev DBs    |                                      | Docker log intake |
-       +-------------------+                                      +------------------+
+                               +--------------------------+
+                               | Browser / API client     |
+                               +------------+-------------+
+                                            | HTTPS :443
+                               +------------v-------------+
+                               | Traefik (TLS / routing)  |
+                               +--+----------+---------+--+
+                                  |          |         |
+             +--------------------+          |         +-------------------------+
+             |                               |                                   |
+ +-----------v-----------+   +---------------v------------+   +------------------v------+
+ | LiteLLM prod / dev    |   | OpenSearch Dashboards      |   | Grafana (optional,      |
+ | profile-selected      |   | multi-user, tenants, RBAC  |   | grafana profile)        |
+ +--+---------+------+---+   +---------------+------------+   +----+-------------+------+
+    |         |      |                       | HTTPS (private CA)  |             |
+    |  Presidio      | /metrics      +-------v--------+            |       +-----v----+
+    |                |               | OpenSearch     |<--+        |       | Loki     |
+ +--v-------------+  |               | security, ISM, |   |        |       +-----^----+
+ | PostgreSQL     |  |               | alerting, SQL  |   |        |             |
+ | prod + dev DBs |  |               +--^---------^---+   |        |       +-----+------+
+ +--+-------------+  |                  |         |       |        |       | alloy-loki |
+    |         +------v------+   +-------+------+  |  +----+------+ |       +------------+
+    |         | Prometheus  |-->| opensearch-  |  |  | Data      | |
+    |         | (all jobs)  |   | bridge       |  |  | Prepper   | |
+    |         +------^------+   +-------^------+  |  +----^------+ |
+    |                |                  |         |       | OTLP   |
+    +----------------+------------------+         |  +----+------+ |
+     exporters, cAdvisor, blackbox   read-only    |  | Alloy     | |
+                                      SQL         |  | Docker    | |
+                                                  |  | logs      | |
+                                                  |  +-----------+ |
+                                  Prometheus direct query (PPL) <---+
 ```
 
 ## Network Boundaries
@@ -61,7 +66,7 @@ Docker metadata access, image-security monitoring, and untrusted fetch egress.
 
 | Network | Members | Purpose |
 | --- | --- | --- |
-| `edge` | Traefik, Grafana, SearXNG, Langfuse web/MinIO, LiteLLM prod/dev | Services reachable through Traefik routes |
+| `edge` | Traefik, OpenSearch Dashboards, optional Grafana, SearXNG, Langfuse web/MinIO, LiteLLM prod/dev | Services reachable through Traefik routes |
 | `internal` | Trusted application, data, and observability services | Databases, telemetry, Presidio, and service-to-service calls |
 | `xberg-sandbox` | Xberg, its egress proxy, LiteLLM prod/dev | Internal-only MCP traffic; Xberg has no direct route to `internal` or the Internet |
 | `egress` | Xberg egress proxy | Internet route available only to the destination-filtering proxy |
@@ -69,8 +74,9 @@ Docker metadata access, image-security monitoring, and untrusted fetch egress.
 | `alloy-monitor` | Alloy and its Docker socket proxy | Read-only Docker discovery and log metadata |
 | `security-monitor` | Image scanner and its Docker socket proxy | Isolated image and container inventory |
 
-Only Traefik publishes host ports `80` and `443`. Prometheus, Loki, PostgreSQL,
-exporters, socket proxies, and the Xberg egress proxy remain internal-only.
+Only Traefik publishes host ports `80` and `443`. OpenSearch, Data Prepper,
+Prometheus, Loki, PostgreSQL, exporters, socket proxies, and the Xberg egress
+proxy remain internal-only. `opensearch-certs` runs without any network.
 
 ## Runtime Profiles
 
@@ -86,6 +92,7 @@ docker compose --profile prod --profile dev up -d
 | --- | --- | --- | --- |
 | `prod` | `litellm-prod` | `litellm_prod` | Normal proxy configuration with Presidio PII guardrail |
 | `dev` | `litellm-dev` | `litellm_dev` | Debug-oriented proxy configuration |
+| `grafana` | `grafana`, `loki`, `alloy-loki` | read-only `grafana_ro` | Optional Grafana dashboards, Explore, and alert rules |
 
 `postgres-init` is a required one-shot service, not redundant: it creates the
 two LiteLLM databases on a fresh PostgreSQL volume.
@@ -93,7 +100,8 @@ two LiteLLM databases on a fresh PostgreSQL volume.
 ## Request and PII Flow
 
 1. A client connects to a configured hostname over HTTPS.
-2. Traefik selects the matching LiteLLM, Grafana, or SearXNG route.
+2. Traefik selects the matching LiteLLM, OpenSearch Dashboards, optional Grafana,
+   or SearXNG route.
 3. LiteLLM authenticates API requests with `LITELLM_MASTER_KEY`.
 4. Requests for `coding-router` are classified by the remote authenticated D3-mini
    Decisions endpoint. LiteLLM selects a configured coding tier and falls back to
@@ -119,13 +127,19 @@ blackbox `/health` probes.
 | `pg-data` | PostgreSQL | LiteLLM production/development state and spend logs |
 | `pgvector-data` | PostgreSQL + pgvector | Development shared knowledge chunks and embeddings |
 | Qdrant tmpfs | Qdrant | Ephemeral development semantic-cache entries, capped at 1 GiB |
-| `grafana-data` | Grafana | Users, sessions, and provisioned dashboard state |
+| `opensearch-data` | OpenSearch | Logs, metrics, usage copies, alert state, dashboards, troubleshooting notebooks, security index, audit log |
+| `opensearch-ca-private` | `opensearch-certs` only | Private CA key that signs the cluster certificates |
+| `opensearch-ca` | Dashboards, Data Prepper, bridge | Public CA certificate for verified TLS to OpenSearch |
+| `opensearch-node-certs` | OpenSearch | Node certificate and key |
+| `opensearch-admin-certs` | `opensearch-setup` | Security super-admin client certificate |
+| `alloy-data` / `alloy-loki-data` | Alloy collectors | Docker log read positions and queues |
+| `grafana-data` | Grafana (optional) | Users, sessions, and provisioned dashboard state |
 | `prometheus-data` | Prometheus | Metrics time series |
 | `prometheus-secrets` | Prometheus | Non-root-readable copy of the LiteLLM metrics credential |
-| `loki-data` | Loki | Project-scoped Docker log history |
+| `loki-data` | Loki (optional) | Project-scoped Docker log history |
 | `langfuse-postgres-data` | Langfuse PostgreSQL | Langfuse relational state |
-| `langfuse-clickhouse-data` | ClickHouse | Langfuse trace and analytics data |
-| `langfuse-clickhouse-logs` | ClickHouse | ClickHouse service logs |
+| `langfuse-clickhouse-data` | ClickHouse | Langfuse trace and analytics data plus bounded 7/30-day incident diagnostics |
+| `langfuse-clickhouse-logs` | ClickHouse | Warning-or-higher ClickHouse logs, rotated at 100 MB with three files per channel |
 | `langfuse-minio-data` | MinIO | Langfuse events and media objects |
 | `langfuse-redis-data` | Redis | Langfuse queues |
 | `bge-m3-vllm-cache` | vLLM | Downloaded BGE-M3 model artifacts |
@@ -141,6 +155,11 @@ The PostgreSQL default database is `litellm_prod`; `postgres-init` creates
 
 ## Observability Data Flow
 
+OpenSearch is the default observability store. Grafana OSS cannot restrict
+data sources or dashboards per user, while the OpenSearch security plugin
+provides internal users, roles, document/field-level security, read-only
+users, and Global/Private tenants without a commercial license.
+
 ### Metrics
 
 Prometheus scrapes:
@@ -149,26 +168,72 @@ Prometheus scrapes:
 - Traefik, PostgreSQL exporter, node exporter, and cAdvisor;
 - Blackbox `/health` probes for Presidio and SearXNG.
 
-Grafana uses the `prom` datasource for the LiteLLM stack dashboard. Do not
-remove exporters merely because a panel is currently empty: metric activity
-depends on workload and downloaded dashboards may rely on those jobs.
+`opensearch-bridge` evaluates `opensearch/tools/metrics.yml` against Prometheus
+every minute and stores the results in `litellm-metrics-*`:
+
+- **expressions** reproduce every Prometheus panel of the repository's Grafana
+  dashboards plus the core host, container, PostgreSQL, Traefik, probe, and
+  security panels, including histogram quantiles;
+- **raw** selectors mirror the LiteLLM, Traefik, PostgreSQL, blackbox,
+  scrape-health, image-security, and backup series unchanged.
+
+Every other series stays queryable through the `prometheus` direct-query data
+source registered in OpenSearch (Observability → Metrics, PPL). Do not remove
+exporters merely because a panel is currently empty.
+
+### Request traces
+
+LiteLLM's OpenTelemetry v2 integration exports request, guardrail, model-call,
+and database spans over OTLP/gRPC to Data Prepper (`data-prepper:21890`), which
+writes OpenSearch Trace Analytics indices (`otel-v1-apm-span-*` and
+`otel-v1-apm-service-map`). Langfuse keeps receiving its own copy through the
+`langfuse_otel` callback. Message content capture stays disabled, and only
+`litellm_operator` can read the span indices. The proxies do not depend on Data
+Prepper at startup; spans are dropped while it is unavailable.
+
+### Alerting
+
+The Grafana provisioning files under `grafana/alerting/` remain the single
+source of alert rules. The bridge evaluates each rule's PromQL condition every
+minute (`litellm-alert-state-*`), and `opensearch-setup` creates one OpenSearch
+Alerting monitor per rule that fires only after the rule's complete `for`
+duration, honoring `noDataState` and `execErrState`. Four additional monitors
+fire when alert evaluation, metrics, container logs, or LiteLLM spans stop
+arriving.
 
 ### Database telemetry
 
-Grafana queries the `litellm-pg` and `litellm-pg-dev` datasources for LiteLLM
-spend data. Failed unknown-model requests are recorded in
-`LiteLLM_SpendLogs` with `status = 'failure'`; they are not necessarily written
-to `LiteLLM_ErrorLogs`.
+The bridge copies non-content LiteLLM spend, provider-error, and audit rows into
+monthly `litellm-spend-*`, `litellm-provider-errors-*`, and `litellm-audit-*`
+indices and refreshes user, team, and key snapshots in `litellm-entities`,
+using the read-only `opensearch_ro` PostgreSQL role. Prompts, responses,
+request metadata, client IPs, key hashes, and audit before/after values are
+never copied. The optional Grafana profile still queries PostgreSQL directly
+through `litellm-pg` and `litellm-pg-dev`.
+
+Failed unknown-model requests are recorded in `LiteLLM_SpendLogs` with
+`status = 'failure'`; they are not necessarily written to `LiteLLM_ErrorLogs`.
 
 ### Container logs
 
-Grafana Alloy discovers Docker containers through the Docker API and sends only
-the `litellm-stack` Compose project to Loki. Alloy and Traefik reach Docker
-through dedicated POST-disabled socket proxies rather than direct socket mounts.
-Query logs in Grafana Explore:
+Grafana Alloy discovers Docker containers through the Docker API, keeps only the
+current Compose project, joins multi-line entries (stack traces, pretty-printed
+JSON), strips ANSI colours, redacts `q=`/`query=` URL parameters, and attaches a
+normalized `level`. It ships stdout/stderr over OTLP to Data Prepper, which sets
+`severityText`, parses Traefik's JSON access logs into `http.*` fields (client
+addresses and headers are never logged), and writes `litellm-logs-*`. The optional `alloy-loki` collector sends the
+same streams to Loki for Grafana. Both collectors reach Docker through the
+POST-disabled `alloy-docker-proxy`. Query logs in OpenSearch Dashboards
+(Discover, the **Container Logs** dashboard, or PPL), for example:
+
+```text
+log.attributes.compose_service:"litellm-prod" and body:error
+source = litellm-logs-* | where `log.attributes.stream` = 'stderr' | stats count() by `log.attributes.compose_service`
+```
+
+With the Grafana profile, Loki uses the same labels:
 
 ```logql
-{compose_project="litellm-stack"}
 {compose_project="litellm-stack", compose_service="litellm-prod"}
 ```
 
@@ -183,6 +248,12 @@ Runtime secrets are intentionally ignored by Git:
 - the certificate and private-key paths configured by `TRAEFIK_TLS_CERT_FILE`
   and `TRAEFIK_TLS_KEY_FILE`;
 - `litellm/secrets/litellm-master-key`.
+
+OpenSearch uses a private CA generated by the `opensearch-certs` one-shot
+service. Node and admin certificates are renewed automatically 30 days before
+expiry when the service runs; HTTP and transport TLS are always enabled and all
+clients verify the CA. Only the admin certificate holder (`opensearch-setup`)
+can change the security configuration outside the Dashboards security UI.
 
 The on-prem certificate delivery process owns the host-side TLS files. Keep the
 hostnames in the delivered certificate, `.env`, DNS, and local name resolution
@@ -203,7 +274,8 @@ Then verify:
 ```sh
 curl --fail https://llm.example.test/health/liveliness
 curl --fail https://llm-dev.example.test/health/liveliness
-curl --fail https://grafana.example.test/api/health
+curl --silent --output /dev/null --write-out '%{http_code}\n' \
+  https://opensearch.example.test/api/status   # expect 401 without credentials
 curl --fail 'https://search.example.test/search?q=LiteLLM&format=json'
 ```
 

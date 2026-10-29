@@ -1,6 +1,6 @@
 ---
 name: litellm-stack-maintenance
-description: Maintain, troubleshoot, validate, and safely upgrade this Docker Compose LiteLLM, Grafana, Prometheus, Loki, and Grafana Alloy stack.
+description: Maintain, troubleshoot, validate, and safely upgrade this Docker Compose LiteLLM, OpenSearch, Prometheus, Grafana Alloy, and optional Grafana/Loki stack.
 ---
 
 # LiteLLM Stack Maintenance
@@ -11,14 +11,17 @@ configuration, observability, TLS, runtime profiles, or dependency images.
 ## Guardrails
 
 1. Read [ARCHITECTURE.md](ARCHITECTURE.md) and the affected Compose,
-   service, and Grafana configuration before editing.
+   service, OpenSearch, and Grafana configuration before editing.
 2. Preserve the `prod` and `dev` profiles, their separate databases, and the
    `postgres-init` one-shot dependency unless the task explicitly retires one.
 3. Never commit `.env`, the Prometheus master-key file, or `mkcert` private
    material. Test archives must use placeholders, not live credentials.
-4. Keep Loki/Alloy collection limited to
-   `compose_project="litellm-stack"` on shared Docker hosts.
-5. Do not remove services, exporters, databases, datasources, or volumes just
+4. Keep Alloy collection (OpenSearch and Loki) limited to the stack's own
+   Compose project on shared Docker hosts.
+5. Keep OpenSearch as the default observability platform and Grafana, Loki,
+   and `alloy-loki` inside the optional `grafana` profile. Never disable
+   OpenSearch TLS, certificate verification, or the security plugin.
+6. Do not remove services, exporters, databases, datasources, or volumes just
    because they have no recent activity. Trace their consumers first.
 
 ## Change Workflow
@@ -30,15 +33,19 @@ Map the change across these surfaces:
 - `docker-compose.yml`;
 - `litellm/config.prod.yaml` and `litellm/config.dev.yaml`;
 - `litellm/prometheus.yml`;
-- Grafana datasources and dashboard JSON;
-- `loki/config.yml` and `alloy/config.alloy`;
+- `opensearch/` (cluster, security, Dashboards, Data Prepper, and the
+  `opensearch/tools` setup/bridge package, metric catalog, and saved objects);
+- Grafana datasources, dashboard JSON, and `grafana/alerting/` (the single
+  source of alert rules for both OpenSearch and Grafana);
+- `loki/config.yml`, `alloy/config.alloy`, and `alloy/loki.alloy`;
 - `.env.example`, `.gitignore`, and `README.md`.
 
 For every proposed removal, identify:
 
 - its direct consumer;
 - its persistent data volume or database;
-- its Prometheus job, Grafana datasource, dashboard, or Loki label dependency;
+- its Prometheus job, `metrics.yml` expression, OpenSearch saved object,
+  Grafana datasource, dashboard, or log label dependency;
 - the validation that proves it is safe.
 
 ### 2. Implement coherently
@@ -62,7 +69,8 @@ Do not probe `/` for Presidio: the health endpoint is `/health`.
 Run:
 
 ```sh
-docker compose --profile prod --profile dev config --quiet
+docker compose --profile prod --profile dev --profile grafana config --quiet
+python3 -m unittest discover -s scripts/tests
 jq empty grafana/dashboards/litellm-stack/litellm-stack.json
 jq empty grafana/dashboards/litellm-cost/litellm-cost.json
 ```
@@ -88,43 +96,46 @@ Verify public routes and active metrics targets:
 ```sh
 curl --fail https://llm.example.test/health/liveliness
 curl --fail https://llm-dev.example.test/health/liveliness
-curl --fail https://grafana.example.test/api/health
+curl --silent --output /dev/null --write-out '%{http_code}\n' \
+  https://opensearch.example.test/api/status   # expect 401
 docker compose exec -T prometheus wget -qO- \
   'http://localhost:9090/api/v1/targets?state=active'
 ```
 
 ### 5. Validate observability
 
-Check Grafana datasource health through its API:
+Run the OpenSearch checks of the regression suite:
 
 ```sh
-curl --fail --user "admin:${GRAFANA_ADMIN_PASSWORD}" \
-  https://grafana.example.test/api/datasources/uid/prom/health
-curl --fail --user "admin:${GRAFANA_ADMIN_PASSWORD}" \
-  https://grafana.example.test/api/datasources/uid/loki/health
+./scripts/verify-litellm-upgrade.py --only observability,opensearch,opensearch-logs
 ```
 
-For container logs, query Grafana Explore with:
+In OpenSearch Dashboards, the **Container Logs** dashboard or Discover query
+`log.attributes.compose_service:"litellm-prod"` shows a service's logs. With the
+optional `grafana` profile, also check Grafana data sources and query Loki:
 
 ```logql
 {compose_project="litellm-stack", compose_service="litellm-prod"}
 ```
 
-Do not interpret an empty panel or a quiet Loki stream as a broken pipeline
-without checking active targets, datasource health, and the workload state.
+Do not interpret an empty panel or a quiet log stream as a broken pipeline
+without checking active targets, the `[LiteLLM] ... not reaching OpenSearch`
+monitors, and the workload state.
 
 ## Upgrades
 
 1. Pin or change one image family at a time.
 2. Read release notes for config-schema, metric-name, and database-migration
    changes.
-3. Back up `pg-data`, `grafana-data`, `prometheus-data`, and `loki-data`
-   before a destructive upgrade.
+3. Back up `pg-data`, `opensearch-data` (snapshot), `prometheus-data`, and,
+   with the Grafana profile, `grafana-data` and `loki-data` before a
+   destructive upgrade. Upgrade OpenSearch and OpenSearch Dashboards together
+   to the same version.
 4. Upgrade in this order when dependencies require it:
-   PostgreSQL compatibility, LiteLLM, Prometheus/Loki/Alloy, Grafana,
-   Traefik/exporters.
+   PostgreSQL compatibility, LiteLLM, Prometheus/Alloy/Data Prepper,
+   OpenSearch and Dashboards, optional Loki/Grafana, Traefik/exporters.
 5. Re-run the static and runtime validation steps above.
-6. Open both Grafana dashboards in a browser. Confirm dashboard datasource
+6. Open the OpenSearch dashboards (and Grafana dashboards, if enabled) in a browser. Confirm dashboard datasource
    requests do not return errors; `No data` is acceptable only when the
    corresponding workload has produced no telemetry.
 
@@ -137,4 +148,8 @@ without checking active targets, datasource health, and the workload state.
 - Prometheus retains historical series after a target changes. Use active target
   health, not historical time series, to assess current configuration.
 - Grafana Alloy is the supported Docker log collector. Keep its discovery rules
-  scoped to the `litellm-stack` Compose project.
+  scoped to the stack's Compose project.
+- OpenSearch Dashboards index patterns carry explicit field lists. When a new
+  field must be filterable, add it to the index template in
+  `opensearch/tools/litellm_opensearch/setup.py` and re-run
+  `opensearch-setup` and `opensearch-dashboards-setup`.

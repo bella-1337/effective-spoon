@@ -7,3 +7,14 @@
 !scripts/run-image-security-scheduler.py
 !security/
 !security/exceptions.toml
+!grafana/
+!grafana/alerting/
+!grafana/alerting/*.yml
+!opensearch/
+!opensearch/tools/
+!opensearch/tools/Dockerfile
+!opensearch/tools/requirements.txt
+!opensearch/tools/generate-certs.sh
+!opensearch/tools/metrics.yml
+!opensearch/tools/litellm_opensearch/
+!opensearch/tools/litellm_opensearch/*.py

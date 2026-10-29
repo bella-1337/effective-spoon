@@ -296,7 +296,9 @@ def main() -> None:
                 backup_report = str(backup)
                 failed_stage = "application-stop"
                 pgvector_was_running = service_is_running("litellm-pgvector")
-                for service in ("litellm-prod", "litellm-dev", "litellm-pgvector"):
+                bridge_was_running = service_is_running("opensearch-bridge")
+                # The OpenSearch bridge reads LiteLLM tables and must not race the restore.
+                for service in ("litellm-prod", "litellm-dev", "litellm-pgvector", "opensearch-bridge"):
                     stop_if_running(service)
                 failed_stage = "database-startup"
                 compose(["up", "-d", "--wait", "postgres", "vector-postgres"])
@@ -336,6 +338,11 @@ def main() -> None:
                 print("Restarting litellm-pgvector...")
                 compose(["up", "-d", "--no-deps", "litellm-pgvector"])
                 wait_running("litellm-pgvector")
+            if mode == "restore-db" and bridge_was_running:
+                failed_stage = "opensearch-bridge-restart"
+                print("Restarting opensearch-bridge...")
+                compose(["up", "-d", "--no-deps", "opensearch-bridge"])
+                wait_running("opensearch-bridge")
             result = "SUCCESS"
     finally:
         try:

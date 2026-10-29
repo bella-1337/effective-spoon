@@ -32,7 +32,8 @@ as `30s`, `15m`, or `15d`.
 | `TRAEFIK_TLS_KEY_FILE` | Optional: `./traefik/certs/litellm-stack-key.pem` | Host file path; secret | Private key matching the delivered certificate. Restrict host permissions to the deployment account and Docker daemon. Never commit or copy it into images. The file is bind-mounted read-only as `/certs/tls.key`. |
 | `LITELLM_PROD_HOST` | Optional: `llm.example.test` | DNS hostname | Public Traefik hostname and advertised base URL for the production-profile LiteLLM proxy. It must be covered by the TLS certificate. Do not include a scheme or path. |
 | `LITELLM_DEV_HOST` | Optional: `llm-dev.example.test` | DNS hostname | Public Traefik hostname and advertised base URL for the development-profile LiteLLM proxy. It must be covered by the TLS certificate. |
-| `GRAFANA_HOST` | Optional: `grafana.example.test` | DNS hostname | Public Traefik hostname and Grafana root URL. Changing it can invalidate generated links and browser sessions. |
+| `OPENSEARCH_DASHBOARDS_HOST` | Optional: `opensearch.example.test` | DNS hostname | Public Traefik hostname of OpenSearch Dashboards, the default multi-user observability UI. It must be covered by the TLS certificate. Changing it invalidates browser sessions. |
+| `GRAFANA_HOST` | Optional: `grafana.example.test` | DNS hostname | Used only by the optional `grafana` profile: public Traefik hostname and Grafana root URL. Changing it can invalidate generated links and browser sessions. |
 | `SEARXNG_HOST` | Optional: `search.example.test` | DNS hostname | Public Traefik hostname used to construct the SearXNG base URL. |
 | `LANGFUSE_WEB_HOST` | Optional: `langfuse.example.test` | DNS hostname | Public Traefik hostname used by Langfuse web/API routing and `NEXTAUTH_URL`. |
 | `LANGFUSE_S3_HOST` | Optional: `langfuse-s3.example.test` | DNS hostname | Public Traefik hostname used for Langfuse signed media upload URLs. It must resolve to this stack and be covered by the TLS certificate. |
@@ -44,8 +45,10 @@ discovers recreated routed services automatically.
 
 ## Credentials and cryptographic material
 
-All secret values in this section are required. `GRAFANA_DATABASE_USER` has a
-fixed compatibility default. Recreate every consumer after a rotation. For
+All secret values in this section are required, except the Grafana values, which
+are required only when the optional `grafana` profile is started; the Grafana
+container refuses to start while any of them is empty. `GRAFANA_DATABASE_USER`
+has a fixed compatibility default. Recreate every consumer after a rotation. For
 production, inject values from a secrets manager rather than persisting them in a
 developer-managed `.env` file.
 
@@ -53,8 +56,9 @@ developer-managed `.env` file.
 | --- | --- | --- |
 | `PG_USER` | Sensitive; optional default `litellm`; PostgreSQL identifier | Owner used by both LiteLLM databases. The initialization SQL and existing volumes assume the configured identity. Do not change it after first initialization without a database migration. |
 | `PG_PASSWORD` | Secret; URL-safe random string | Password for `PG_USER`. It is embedded in PostgreSQL URLs, so use an unreserved value such as 32 or more random hexadecimal bytes. Rotate in PostgreSQL and all LiteLLM consumers together. |
-| `GRAFANA_DATABASE_USER` | Sensitive; default `grafana_ro` | Read-only role consumed by Grafana datasource provisioning. Keep `grafana_ro`; the initialization SQL creates that fixed least-privilege role. |
-| `GRAFANA_DATABASE_PASSWORD` | Secret; URL-safe random string | Password for Grafana's read-only LiteLLM database role. Rotate through `postgres-init` and recreate Grafana. |
+| `OPENSEARCH_DATABASE_PASSWORD` | Secret; URL-safe random string | Password for the read-only `opensearch_ro` LiteLLM database role used by `opensearch-bridge`. Rotate through `postgres-init` and recreate `opensearch-bridge`. |
+| `GRAFANA_DATABASE_USER` | Sensitive; default `grafana_ro`; `grafana` profile only | Read-only role consumed by Grafana datasource provisioning. Keep `grafana_ro`; the initialization SQL creates that fixed least-privilege role. |
+| `GRAFANA_DATABASE_PASSWORD` | Secret; URL-safe random string; `grafana` profile only | Password for Grafana's read-only LiteLLM database role. `postgres-init` creates `grafana_ro` only when this is set. Rotate through `postgres-init` and recreate Grafana. |
 | `PG_EXPORTER_PASSWORD` | Secret; URL-safe random string | Password for the `litellm_exporter` monitoring role. Rotate through `postgres-init` and recreate `postgres-exporter`. |
 | `PG_VECTOR_PASSWORD` | Secret; URL-safe random string | Password for the isolated pgvector owner. Used by migrations, LiteLLM development, and the pgvector connector. Coordinate database-side and consumer changes. |
 | `PG_VECTOR_EXPORTER_PASSWORD` | Secret; URL-safe random string | Password for the read-only `vector_exporter` monitoring role. Rotate through `pgvector-access-init` and recreate `pgvector-exporter`. |
@@ -62,8 +66,14 @@ developer-managed `.env` file.
 | `QDRANT_API_KEY` | Secret; at least 32 random bytes | API key protecting the development Qdrant service. Rotate Qdrant and LiteLLM development together. |
 | `LITELLM_MASTER_KEY` | Secret; `sk-` prefix recommended | Administrative and API authentication key for both LiteLLM profiles. It is also used by the internal pgvector connector. Rotate during a maintenance window and update clients. |
 | `OPENAI_API_KEY` | Secret; provider-issued token | Provider credential used by configured models. Scope it to the minimum required project and permissions, set provider-side spend limits, and rotate according to provider policy. |
-| `GRAFANA_ADMIN_PASSWORD` | Secret; strong random password | Initial Grafana administrator password. Grafana persists credentials in its volume, so changing this value does not reset an already initialized administrator; use Grafana's supported reset workflow. |
-| `GRAFANA_SECURITY_SECRET_KEY` | Secret; stable 32+ byte value | Encrypts Grafana datasource and alerting credentials. Back it up securely. Changing it can make existing encrypted values unreadable. |
+| `OPENSEARCH_ADMIN_PASSWORD` | Secret; 16+ URL-safe characters | Password of the OpenSearch `admin` user (security all-access) used to sign in to OpenSearch Dashboards and to import saved objects. `opensearch-setup` re-applies it on every start through the admin certificate, so rotating `.env` and re-running `docker compose up -d opensearch-setup opensearch-dashboards-setup` rotates it. |
+| `OPENSEARCH_DASHBOARDS_SERVER_PASSWORD` | Secret; 16+ URL-safe characters | Password of the internal `kibanaserver` identity that OpenSearch Dashboards uses for its own system calls. Rotate by re-running `opensearch-setup`, then recreate `opensearch-dashboards`. |
+| `OPENSEARCH_DASHBOARDS_COOKIE_PASSWORD` | Secret; 32+ characters | Encrypts OpenSearch Dashboards session cookies. Rotation signs every user out. |
+| `OPENSEARCH_INGEST_PASSWORD` | Secret; 16+ characters from `[A-Za-z0-9._~-]` | Password of the `data_prepper` user, which may only write `litellm-logs-*`. Data Prepper rejects other characters. Re-run `opensearch-setup` and recreate `data-prepper` together. |
+| `OPENSEARCH_BRIDGE_PASSWORD` | Secret; 16+ URL-safe characters | Password of the `litellm_bridge` user, which may only write the bridge's `litellm-*` indices. Re-run `opensearch-setup` and recreate `opensearch-bridge` together. |
+| `OPENSEARCH_DATASOURCES_MASTER_KEY` | Secret; exactly 32 characters | Encrypts credentials of OpenSearch SQL/PPL direct-query data sources (the registered Prometheus source). Keep stable; changing it makes stored data-source credentials unreadable. Generate with `openssl rand -hex 16`. |
+| `GRAFANA_ADMIN_PASSWORD` | Secret; strong random password; `grafana` profile only | Initial Grafana administrator password. Grafana persists credentials in its volume, so changing this value does not reset an already initialized administrator; use Grafana's supported reset workflow. |
+| `GRAFANA_SECURITY_SECRET_KEY` | Secret; stable 32+ byte value; `grafana` profile only | Encrypts Grafana datasource and alerting credentials. Back it up securely. Changing it can make existing encrypted values unreadable. |
 | `SEARXNG_SECRET` | Secret; 32+ random bytes | SearXNG signing secret. Rotation invalidates signed state and existing sessions. |
 | `LANGFUSE_POSTGRES_PASSWORD` | Secret; URL-safe random string | Password for Langfuse PostgreSQL. Rotate the database role and Langfuse web/worker configuration together. |
 | `LANGFUSE_CLICKHOUSE_PASSWORD` | Secret; URL-safe random string | Password for Langfuse ClickHouse trace storage. Rotate ClickHouse and both Langfuse application services together. |
@@ -102,12 +112,32 @@ printf 'sk-lf-%s\n' "$(openssl rand -hex 16)"
 | `LITELLM_FORWARDED_ALLOW_IPS` | `*`; comma-separated IPs or networks | Controls which forwarding proxies LiteLLM trusts. The default is acceptable only while LiteLLM is reachable exclusively through the isolated Compose networks. Set explicit Traefik proxy addresses or networks when deploying into a shared network. Never expose LiteLLM directly with wildcard trust. |
 | `OTEL_GENAI_CAPTURE_MESSAGE_CONTENT` | `no_content`; enum supported by the installed OpenTelemetry instrumentation | Controls whether prompt and response content is captured in telemetry. Keep `no_content` to avoid recording credentials, personal data, or proprietary prompts. |
 | `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS` | `.*`; regular expression | Excludes matching FastAPI URLs from automatic tracing. The default excludes all auto-instrumented routes because stack-owned callbacks provide controlled telemetry. Test regex changes to avoid sensitive or high-cardinality trace data. |
-| `GRAFANA_ALLOW_SIGN_UP` | `false`; boolean | Enables self-service Grafana registration. Keep disabled; provision users through administrator-controlled workflows. |
+| `GRAFANA_ALLOW_SIGN_UP` | `false`; boolean; `grafana` profile only | Enables self-service Grafana registration. Keep disabled; provision users through administrator-controlled workflows. |
 | `PROMETHEUS_RETENTION_TIME` | `15d`; Prometheus duration | Maximum age of Prometheus samples. Size retention can evict data earlier. Plan storage before increasing it. |
 | `PROMETHEUS_RETENTION_SIZE` | `10GB`; Prometheus size | Maximum Prometheus TSDB size. Keep headroom on the Docker volume filesystem; Prometheus treats this as an upper retention target, not a disk quota. |
 
 All variables in this section require recreation of their consuming service.
 Retention changes do not recover data already deleted.
+
+## OpenSearch observability
+
+| Variable | Default / format | Description and guidance |
+| --- | --- | --- |
+| `OPENSEARCH_JAVA_HEAP` | `1g`; JVM size | Heap for the single OpenSearch node (`-Xms` and `-Xmx`). Keep it at or below half of `OPENSEARCH_MEMORY_LIMIT`. |
+| `OPENSEARCH_MEMORY_LIMIT` | `3g`; Docker size | Container memory limit for OpenSearch. |
+| `DATA_PREPPER_JAVA_OPTS` | `-Xms256m -Xmx512m`; JVM options | Data Prepper JVM options. |
+| `DATA_PREPPER_MEMORY_LIMIT` | `1g`; Docker size | Container memory limit for Data Prepper. |
+| `OPENSEARCH_LOG_RETENTION_DAYS` | `7`; days | ISM deletes `litellm-logs-*` daily indices after this age (matches Loki). |
+| `OPENSEARCH_METRICS_RETENTION_DAYS` | `15`; days | ISM deletes `litellm-metrics-*` and `litellm-alert-state-*` after this age (matches Prometheus). |
+| `OPENSEARCH_USAGE_RETENTION_DAYS` | `180`; days | `opensearch-bridge` deletes spend, provider-error, and audit copies older than this (matches LiteLLM's spend-log cleanup). It is also the initial backfill window. |
+| `OPENSEARCH_TRACE_RETENTION_DAYS` | `15`; days | ISM rolls LiteLLM span indices (`otel-v1-apm-span-*`) over daily and deletes them after this age. |
+| `LITELLM_OTEL_TRACE_EXPORTER` | `otlp_grpc` | Where LiteLLM sends its OpenTelemetry spans besides Langfuse. `otlp_grpc` delivers them to Data Prepper and OpenSearch Trace Analytics. `console` prints every span as multi-line JSON to stdout (the previous behavior) and should be used only for short debugging sessions. |
+| `OPENSEARCH_AUDIT_RETENTION_DAYS` | `90`; days | ISM deletes monthly `security-auditlog-*` indices this long after creation, so up to one extra month is retained. |
+| `OPENSEARCH_BRIDGE_INTERVAL_SECONDS` | `60`; 15-600 | Prometheus evaluation and usage-sync interval. Alert monitors assume one evaluation per interval; re-run `opensearch-setup` after changing it. |
+| `OPENSEARCH_USAGE_OVERLAP_MINUTES` | `30`; minutes | Window re-read on every sync to pick up spend rows LiteLLM writes after a request finishes. Rows written later than this after their start time are not copied. |
+| `OPENSEARCH_CERT_VALIDITY_DAYS` | `397`; days | Validity of node and admin certificates issued by `opensearch-certs`. |
+| `OPENSEARCH_CERT_RENEW_BEFORE_DAYS` | `30`; days | `opensearch-certs` reissues leaf certificates inside this window. Restart the stack (or run `docker compose up -d opensearch-certs` and recreate `opensearch`) at least once per window. |
+| `OPENSEARCH_ALERT_CHANNEL_ID` | empty | ID of an OpenSearch Notifications channel (Slack, email, webhook, ...). When set, every provisioned monitor notifies it. Create the channel in Dashboards first, then re-run `opensearch-setup`. |
 
 ## Langfuse behavior and bootstrap metadata
 

@@ -16,7 +16,7 @@ groups:
             model:
               datasource: { type: prometheus, uid: prom }
               editorMode: code
-              expr: (up{job="litellm-prod"} == 0) and on() (max_over_time(up{job="litellm-prod"}[24h]) == 1)
+              expr: (up{job="litellm-prod"} == bool 0) and on() (max_over_time(up{job="litellm-prod"}[24h]) == 1)
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -42,7 +42,7 @@ groups:
             model:
               datasource: { type: prometheus, uid: prom }
               editorMode: code
-              expr: (up{job="postgres"} == 0) or absent(up{job="postgres"})
+              expr: (up{job="postgres"} == bool 0) or absent(up{job="postgres"})
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -108,4 +108,82 @@ groups:
           description: "The complete-backup timestamp is absent or older than 26 hours. Partial backups do not update this metric."
         labels:
           severity: critical
+          source: litellm-stack
+
+      - uid: langfuse-clickhouse-unavailable
+        title: Langfuse ClickHouse metrics are unavailable
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: (up{job="langfuse-clickhouse"} == bool 0) or absent(up{job="langfuse-clickhouse"})
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "Prometheus cannot scrape Langfuse ClickHouse"
+          description: "The always-on ClickHouse metrics endpoint has been unavailable for five minutes."
+        labels:
+          severity: critical
+          source: litellm-stack
+
+      - uid: langfuse-clickhouse-disk-low
+        title: Langfuse ClickHouse filesystem space is low
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 900, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: ClickHouseAsyncMetrics_FilesystemMainPathAvailableBytes{job="langfuse-clickhouse"} / ClickHouseAsyncMetrics_FilesystemMainPathTotalBytes{job="langfuse-clickhouse"} < bool 0.15
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: "Langfuse ClickHouse filesystem has less than 15% free space"
+          description: "ClickHouse has reported sustained filesystem pressure for 15 minutes."
+        labels:
+          severity: critical
+          source: litellm-stack
+
+      - uid: langfuse-clickhouse-log-storm
+        title: Langfuse ClickHouse retained logs are growing rapidly
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 900, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: rate(ClickHouseProfileEvents_AsyncLoggingTextLogTotalMessages{job="langfuse-clickhouse"}[5m]) > bool 5
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: "ClickHouse is retaining more than five log messages per second"
+          description: "Warning-or-higher ClickHouse diagnostics have remained above the bounded steady-state threshold for 15 minutes."
+        labels:
+          severity: warning
           source: litellm-stack

@@ -40,6 +40,8 @@ def load_compose_config(env_file: Path) -> dict[str, Any]:
             "demo",
             "--profile",
             "security",
+            "--profile",
+            "grafana",
             "config",
             "--format",
             "json",
@@ -93,6 +95,17 @@ def validate_contracts(config: dict[str, Any]) -> list[str]:
     ) != "1":
         failures.append("Alloy Docker discovery lacks read-only network metadata access")
 
+    for name in ("opensearch", "opensearch-dashboards", "opensearch-bridge", "data-prepper", "alloy"):
+        service = services.get(name)
+        if not isinstance(service, dict):
+            failures.append(f"Default observability service is missing: {name}")
+        elif service.get("profiles"):
+            failures.append(f"Default observability service must not require a profile: {name}")
+    for name in ("grafana", "loki", "alloy-loki"):
+        service = services.get(name)
+        if isinstance(service, dict) and service.get("profiles") != ["grafana"]:
+            failures.append(f"Optional Grafana service must stay in the grafana profile: {name}")
+
     xberg = services.get("xberg")
     if not isinstance(xberg, dict):
         failures.append("Compose configuration has no xberg service")
@@ -132,7 +145,7 @@ def validate_contracts(config: dict[str, Any]) -> list[str]:
         failures.append("Complete-backup freshness metric is not published")
 
     restore_text = REQUIRED_SCRIPTS["restore"].read_text(encoding="utf-8")
-    for required in ("_pre_restore_", "pg_terminate_backend", "pgvector-exporter"):
+    for required in ("_pre_restore_", "pg_terminate_backend", "pgvector-exporter", "opensearch-bridge"):
         if required not in restore_text:
             failures.append(f"Restore safety contract is missing: {required}")
 

@@ -1,0 +1,7 @@
+---
+# Users are provisioned by the opensearch-setup service through the Security
+# REST API with the private admin certificate, so no default or demo account
+# exists when the security index is first initialized.
+_meta:
+  type: "internalusers"
+  config_version: 2

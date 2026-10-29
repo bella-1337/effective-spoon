@@ -21,6 +21,7 @@ updates:
   - package-ecosystem: docker
     directories:
       - /.devcontainer
+      - /opensearch/tools
       - /pgvector
       - /security
     schedule:
@@ -29,6 +30,15 @@ updates:
     labels:
       - dependencies
       - containers
+
+  - package-ecosystem: pip
+    directory: /opensearch/tools
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
 
   - package-ecosystem: devcontainers
     directory: /

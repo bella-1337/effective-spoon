@@ -102,6 +102,7 @@ docker compose \
   --profile dev \
   --profile demo \
   --profile security \
+  --profile grafana \
   config --quiet
 
 echo "==> Validating game-day safety contracts"
