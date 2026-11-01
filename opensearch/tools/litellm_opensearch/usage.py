@@ -8,6 +8,7 @@ hashes, and audit before/after values never leave PostgreSQL.
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -57,6 +58,7 @@ SPEND = EventSource(
         ("status", "status"),
         ("cache_hit", "cache_hit"),
         ("request_tags", "request_tags"),
+        ("session_id", "session_id"),
     ),
 )
 PROVIDER_ERRORS = EventSource(
@@ -225,6 +227,14 @@ def event_document(source: EventSource, environment: str, row: dict[str, Any]) -
     document["@timestamp"] = timestamp.isoformat(timespec="milliseconds")
     document["environment"] = environment
     if source is SPEND:
+        session_id = document.pop("session_id", None)
+        if session_id:
+            salt = os.environ.get("OPENSEARCH_SESSION_ID_SALT", "")
+            if not salt:
+                raise RuntimeError("OPENSEARCH_SESSION_ID_SALT is required to pseudonymize session identifiers")
+            document["session_hash"] = hashlib.sha256(
+                f"{environment}|{session_id}|{salt}".encode()
+            ).hexdigest()
         document["key_owner"] = (
             row.get("key_owner_alias") or row.get("key_owner_id") or "unassigned"
         )

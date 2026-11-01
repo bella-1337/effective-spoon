@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import sys
 import unittest
@@ -11,6 +12,7 @@ import xml.etree.ElementTree as ET
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "opensearch" / "tools"))
@@ -290,6 +292,19 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(usage.event_document(usage.SPEND, "prod", dict(row))[1], identifier)
         self.assertNotEqual(usage.event_document(usage.SPEND, "dev", dict(row))[1], identifier)
 
+    def test_session_identifiers_are_pseudonymized_before_indexing(self) -> None:
+        row = {
+            "request_id": "r1",
+            "session_id": "private-session",
+            "__cursor_time": datetime(2026, 3, 4, 5, 6),
+            "__cursor_id": "r1",
+        }
+        with patch.dict(os.environ, {"OPENSEARCH_SESSION_ID_SALT": "test-only-salt"}):
+            _, _, document = usage.event_document(usage.SPEND, "prod", row)
+        self.assertNotIn("session_id", document)
+        self.assertNotIn("private-session", document.values())
+        self.assertRegex(document["session_hash"], r"^[0-9a-f]{64}$")
+
     def test_entity_usable_flag(self) -> None:
         now = datetime(2026, 1, 1, tzinfo=timezone.utc)
         rows = [
@@ -375,6 +390,10 @@ class SavedObjectTests(unittest.TestCase):
             if item["type"] == "visualization":
                 state = json.loads(attributes["visState"])
                 self.assertEqual(state["title"], attributes["title"])
+                if state["type"] == "vega":
+                    spec = json.loads(state["params"]["spec"])
+                    self.assertEqual(spec["$schema"], "https://vega.github.io/schema/vega/v5.json")
+                    self.assertFalse(state["params"]["enableExternalUrls"])
             if item["type"] in ("visualization", "search", "dashboard"):
                 json.loads(attributes["kibanaSavedObjectMeta"]["searchSourceJSON"])
             if item["type"] == "dashboard":

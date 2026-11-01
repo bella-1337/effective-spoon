@@ -542,6 +542,11 @@ CA created by `opensearch-certs`; only Traefik exposes OpenSearch Dashboards.
 
 Dashboards in the Global tenant (start at **LiteLLM Overview**):
 
+- **LiteLLM Management Summary** – executive usage, model spend, reliability,
+  user/team/key adoption, budget coverage, unassigned spend, administrative
+  changes, provider errors, and a directional ROI indication. Request-level,
+  distinct-session, realization, hourly-cost, and currency assumptions come
+  from `.env`; raw session identifiers are pseudonymized before OpenSearch.
 - **LiteLLM Stack (dev/prod)** – every panel of the Grafana stack dashboard plus
   tokens, provider latency, time to first token, proxy overhead, proxy status
   codes and exceptions, deployment state, guardrail errors, cache hit ratio,
@@ -695,8 +700,11 @@ Append a line filter when useful, for example
 currently running profile and services; use the label browser rather than
 assuming that every example value is present.
 
-Grafana provisions four dashboards in the **LiteLLM** folder:
+Grafana provisions five dashboards in the **LiteLLM** folder:
 
+- **LiteLLM Management Summary** for executive usage, cost, reliability,
+  governance, and directional ROI. It displays both successful-request and
+  distinct-successful-session contributions plus the active `.env` assumptions.
 - **LiteLLM Stack (dev/prod)** for request, latency, failure, spend, deployment,
   and guardrail metrics.
 - **LiteLLM Cost Attribution** for model, key, token, and request-level cost.
@@ -710,6 +718,39 @@ Grafana provisions four dashboards in the **LiteLLM** folder:
 Grafana sign-up and anonymous access remain disabled. Grafana OSS cannot
 restrict data sources per user, so keep Grafana access limited to operators and
 use OpenSearch Dashboards for everyone else.
+
+#### Management views across the stack
+
+Use the provisioned management summaries as the executive entry point, then
+drill into each product's native view. This avoids duplicating sensitive trace
+content or creating competing calculations:
+
+| Tool | Management use | Scope and limitation |
+| --- | --- | --- |
+| OpenSearch Dashboards | **LiteLLM Management Summary** in the Global tenant | Default multi-user summary with role-controlled usage, governance, reliability, and the environment-managed ROI scenario |
+| Grafana (`grafana` profile) | **LiteLLM Management Summary** in the **LiteLLM** folder | Operator-only summary with request/session contribution breakdown and direct read-only PostgreSQL queries |
+| LiteLLM Admin UI | Native Usage, Models, Teams, Users, Keys, and Budgets pages | System-of-record operational administration and entity-level drill-down; no separate provisioned dashboard is required |
+| Langfuse | Native project dashboard, usage, latency, score, and trace analytics | Administrator/operator trace-quality and adoption drill-down; it is not an authorization-safe per-user management portal in this OSS deployment |
+| Prometheus | Expression browser and source metrics for usage, reliability, and infrastructure | Diagnostic source of truth rather than a curated management dashboard; use Grafana or OpenSearch for reviewed summaries |
+| Loki | Explore container logs through Grafana | Operational drill-down only; it has no independent management dashboard UI |
+
+The ROI panels are **indications, not booked savings**. Configure
+`ROI_MINUTES_SAVED_PER_REQUEST`, `ROI_MINUTES_SAVED_PER_SESSION`,
+`ROI_VALUE_REALIZATION_FACTOR`, `ROI_LOADED_HOURLY_COST`, and `ROI_CURRENCY` in
+`.env`. The formula adds the successful-request and distinct-successful-session
+contributions. Set either minutes value to zero when both represent the same
+saved work, or the estimate will double count it. The default session value is
+zero until a local session-level measurement exists. The loaded hourly cost and
+LiteLLM model spend must be expressed in the same configured currency.
+
+The calculation subtracts direct model spend but does not include platform
+labor, hardware, licensing, change-management, review time, or the cost of
+incorrect output. Validate both minutes values and realization through sampled
+local workflows—particularly for regional labor costs—and compare the result
+with finance-approved costs before using it in a business case. Changes take
+effect after rerunning `postgres-init`, recreating `opensearch-bridge`, and
+rerunning `opensearch-dashboards-setup`; Grafana reads the applied values from
+the read-only `LiteLLM_ManagementROIConfig` table.
 
 ### Demonstration data and telemetry stores
 
