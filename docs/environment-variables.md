@@ -36,7 +36,6 @@ units such as `30s`, `15m`, or `15d`.
 | `LITELLM_DEV_HOST` | Optional: `llm-dev.example.test` | DNS hostname | Public Traefik hostname and advertised base URL for the development-profile LiteLLM proxy. It must be covered by the TLS certificate. |
 | `OPENSEARCH_DASHBOARDS_HOST` | Optional: `opensearch.example.test` | DNS hostname | Public Traefik hostname of OpenSearch Dashboards, the default multi-user observability UI. It must be covered by the TLS certificate. Changing it invalidates browser sessions. |
 | `GRAFANA_HOST` | Optional: `grafana.example.test` | DNS hostname | Used only by the optional `grafana` profile: public Traefik hostname and Grafana root URL. Changing it can invalidate generated links and browser sessions. |
-| `SEARXNG_HOST` | Optional: `search.example.test` | DNS hostname | Public Traefik hostname used to construct the SearXNG base URL. |
 | `LANGFUSE_WEB_HOST` | Optional: `langfuse.example.test` | DNS hostname | Used only by the optional `langfuse` profile: public Traefik hostname for Langfuse web/API routing and `NEXTAUTH_URL`. |
 | `LANGFUSE_S3_HOST` | Optional: `langfuse-s3.example.test` | DNS hostname | Used only by the optional `langfuse` profile for signed media upload URLs. It must resolve to this stack and be covered by the TLS certificate. |
 
@@ -48,12 +47,19 @@ discovers recreated routed services automatically.
 ## Credentials and cryptographic material
 
 All secret values in this section are required except the Grafana and Langfuse
-values in `.env.optional`, which are required only when their optional profiles
-are started. Their preflight checks refuse to start the profile while a required
-value is empty. `GRAFANA_DATABASE_USER` has a fixed compatibility default.
-Recreate every consumer after a rotation. For production, inject values from a
-secrets manager rather than persisting them in developer-managed environment
-files.
+values, which are required only when their optional profiles are started.
+Langfuse infrastructure values live in `.env.optional`; the public key, secret
+key, and user-ID salt remain in `.env` because core services consume them.
+Preflight checks refuse to start an optional profile while a required value is
+empty. `GRAFANA_DATABASE_USER` has a fixed compatibility default. Recreate every
+consumer after a rotation. For production, inject values from a secrets manager
+rather than persisting them in developer-managed environment files. Write that
+output to `.env` and `.env.optional` as private regular files, for example
+`install -m 600 /run/secrets/litellm.env .env`. Do not symlink them: the
+maintenance tooling (`scripts/maintenance.py`, backup, verify, upgrade, and
+rollback) refuses symlinked or non-regular environment files. This prevents a
+replaced link from redirecting which secrets are loaded and prevents silently
+validating placeholder values.
 
 | Variable | Classification / format | Description and rotation guidance |
 | --- | --- | --- |
@@ -86,12 +92,12 @@ files.
 | `LANGFUSE_NEXTAUTH_SECRET` | Secret; 32+ random bytes; `langfuse` profile only | Protects Langfuse web sessions. Rotation intentionally invalidates active sessions. |
 | `LANGFUSE_SALT` | Secret; stable 32+ byte value; `langfuse` profile only | Salt used by Langfuse credential encryption. Treat it as persistent key material; rotation may require an application-supported migration. |
 | `LANGFUSE_ENCRYPTION_KEY` | Secret; exactly 64 hexadecimal characters; `langfuse` profile only | 32-byte key used by Langfuse encryption. Generate with `openssl rand -hex 32`. Back it up securely; uncoordinated replacement can make encrypted data unreadable. |
-| `LANGFUSE_PUBLIC_KEY` | Sensitive; `pk-lf-...`; `langfuse` profile only | Public identifier for the pre-provisioned Langfuse project. Keep it paired with `LANGFUSE_SECRET_KEY`. |
-| `LANGFUSE_SECRET_KEY` | Secret; `sk-lf-...`; `langfuse` profile only | Secret key for the pre-provisioned Langfuse project and LiteLLM callbacks. Rotate in Langfuse and both LiteLLM profiles together. |
-| `LANGFUSE_USER_ID_SALT` | Secret; 32+ random bytes; `langfuse` profile only | HMAC salt used to pseudonymize LiteLLM principal identifiers before Langfuse attribution. Keep stable to preserve longitudinal attribution; rotation changes all derived identifiers. |
+| `LANGFUSE_PUBLIC_KEY` | Sensitive; `pk-lf-...`; `.env`, required for `langfuse` profile | Public identifier for the pre-provisioned Langfuse project. It remains in the core environment because both LiteLLM services consume it. Keep it paired with `LANGFUSE_SECRET_KEY`. |
+| `LANGFUSE_SECRET_KEY` | Secret; `sk-lf-...`; `.env`, required for `langfuse` profile | Secret key for the pre-provisioned Langfuse project and LiteLLM callbacks. It remains in the core environment so ordinary LiteLLM lifecycle commands preserve the integration. Rotate in Langfuse and both LiteLLM profiles together. |
+| `LANGFUSE_USER_ID_SALT` | Secret; 32+ random bytes; `.env`, required for `langfuse` profile | HMAC salt used by core LiteLLM attribution and as a migration fallback for the OpenSearch bridge. Keep stable to preserve longitudinal attribution; rotation changes all derived identifiers. |
 | `LANGFUSE_INIT_USER_EMAIL` | Sensitive; email address; `langfuse` profile only | Bootstrap Langfuse administrator email. Used during first initialization; later changes do not rename an existing account. |
 | `LANGFUSE_INIT_USER_NAME` | Sensitive; display name; `langfuse` profile only | Bootstrap Langfuse administrator display name. Used during first initialization. |
-| `LANGFUSE_INIT_USER_PASSWORD` | Secret; strong random password; `langfuse` profile only | Bootstrap Langfuse administrator password. Change it through Langfuse after first login and retain this value only if repeatable bootstrap is required. |
+| `LANGFUSE_INIT_USER_PASSWORD` | Secret; strong random password; `langfuse` profile only | Bootstrap Langfuse administrator password. Keep it in the secrets manager for the life of the deployment. Langfuse only uses it to create a missing user and never resets an existing user's password. Public sign-up is disabled and no SMTP is configured, so this stored credential is the recovery path. If you change the password in Langfuse, store the new password in the secrets manager immediately. |
 
 Recommended generation commands:
 
@@ -164,13 +170,38 @@ Retention changes do not recover data already deleted.
 | `LANGFUSE_INIT_PROJECT_ID` | `litellm`; stable slug | Identifier for the bootstrap Langfuse project. Keep aligned with the provisioned public and secret keys. |
 | `LANGFUSE_INIT_PROJECT_NAME` | `LiteLLM`; text | Display name for the bootstrap project. Primarily used on first initialization. |
 | `LANGFUSE_TRUSTED_PROXY_COUNT` | `1`; non-negative integer | Number of reverse proxies trusted when resolving client information. The bundled path has exactly one proxy, Traefik. Incorrectly high values can trust attacker-supplied forwarding headers. |
-| `LANGFUSE_DISABLE_SIGNUP_ONBOARDING` | `true`; boolean | Disables open signup/onboarding. Keep enabled for a private stack and create accounts administratively. |
+| `LANGFUSE_DISABLE_SIGNUP_ONBOARDING` | `true`; boolean | Skips the post-signup newsletter step so the browser makes no request to langfuse.com. It does **not** control registration: Compose pins `AUTH_DISABLE_SIGNUP=true` on `langfuse-web`, so public self-registration is always off. Users come from the headless `LANGFUSE_INIT_USER_*` bootstrap; per Langfuse, this also blocks invited users who do not yet have an account. |
 
 Bootstrap variables are not a general migration mechanism. After Langfuse has
 initialized its database, make supported identity or tenant changes through
 Langfuse and verify whether the bootstrap values should remain unchanged.
 Langfuse web, worker, PostgreSQL, and ClickHouse infrastructure remains on UTC
 because Langfuse does not support overriding its infrastructure timezone.
+
+### Langfuse operator accounts and lockout recovery
+
+Langfuse has public sign-up disabled (`AUTH_DISABLE_SIGNUP=true`), no SMTP, and
+no SSO provider. Self-service sign-up, invitation acceptance for new accounts,
+and "forgot password" therefore do not work. On every `langfuse-web` start,
+Langfuse creates the `LANGFUSE_INIT_USER_EMAIL` user only if it does not exist.
+It then makes that user an `OWNER` of `LANGFUSE_INIT_ORG_ID` and never changes
+an existing password. Use that behavior for both cases below:
+
+1. **Add an operator or recover a locked-out administrator.** In
+   `.env.optional`, set `LANGFUSE_INIT_USER_EMAIL` to an address that has no
+   Langfuse account yet, `LANGFUSE_INIT_USER_NAME` to the person's name, and
+   `LANGFUSE_INIT_USER_PASSWORD` to a new value generated with
+   `openssl rand -hex 32`. Store all three in the secrets manager, then run
+   `docker compose --env-file .env --env-file .env.optional --profile prod --profile langfuse up -d langfuse-web`.
+   The new account signs in as an organization owner and can grant project
+   access to existing accounts or remove a compromised or unrecoverable one.
+2. **Restore the original bootstrap values** afterward if they are still the
+   intended break-glass identity. Every account created this way stays an
+   owner until an owner removes it in **Organization settings → Members**.
+
+Never edit password hashes in `langfuse-postgres` directly. Never set
+`AUTH_DISABLE_SIGNUP=false` to onboard users: the repository contract rejects it,
+and it would let anyone who can reach the hostname create an account.
 
 ## Development model and data services
 

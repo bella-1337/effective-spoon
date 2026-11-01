@@ -16,6 +16,7 @@ from maintenance_common import (
     ROOT,
     SCRIPTS_DIR,
     compose,
+    env_file_is_present,
     fail,
     require_docker,
     run,
@@ -144,8 +145,8 @@ def doctor() -> None:
         fail("litellm/secrets/litellm-master-key must not be accessible to group or other users")
     print("PASS: Prometheus credential source exists with private permissions")
     env_file = ROOT / ".env"
-    if not env_file.is_file() or env_file.is_symlink():
-        fail(f"environment file is missing or unsafe: {env_file}")
+    if not env_file_is_present(env_file):
+        fail(f"environment file is missing: {env_file}; copy .env.example to .env and set its values")
     config = load_compose_config(env_file)
     failures = [
         *validate_compose_contracts(config),

@@ -68,8 +68,8 @@ Docker metadata access, image-security monitoring, and untrusted fetch egress.
 
 | Network | Members | Purpose |
 | --- | --- | --- |
-| `edge` | Traefik, OpenSearch Dashboards, optional Grafana and Langfuse web/MinIO, SearXNG, LiteLLM prod/dev | Services reachable through Traefik routes |
-| `internal` | Trusted application, data, and observability services | Databases, telemetry, Presidio, and service-to-service calls |
+| `edge` | Traefik, OpenSearch Dashboards, optional Grafana and Langfuse web/MinIO, LiteLLM prod/dev | Services reachable through Traefik routes |
+| `internal` | Trusted application, data, and observability services, including SearXNG | Databases, telemetry, Presidio, SearXNG (internal-only, reached through LiteLLM), and service-to-service calls |
 | `xberg-sandbox` | Xberg, its DNS and egress proxies, LiteLLM prod/dev | Internal-only MCP traffic; Xberg has no direct route to `internal` or the Internet |
 | `egress` | Xberg DNS and egress proxies | Internet route available only to the DNS relay and destination-filtering HTTP proxy |
 | `traefik-monitor` | Traefik and its Docker socket proxy | Read-only Docker routing metadata |
@@ -112,8 +112,9 @@ two LiteLLM databases on a fresh PostgreSQL volume. The optional
 ## Request and PII Flow
 
 1. A client connects to a configured hostname over HTTPS.
-2. Traefik selects the matching LiteLLM, OpenSearch Dashboards, optional Grafana
-   or Langfuse, or SearXNG route.
+2. Traefik selects the matching LiteLLM, OpenSearch Dashboards, or optional
+   Grafana or Langfuse route. SearXNG has no route; it is reachable only through
+   LiteLLM's authenticated `searxng-search` tool.
 3. LiteLLM authenticates API requests with `LITELLM_MASTER_KEY`.
 4. Requests for `coding-router` are classified by the remote authenticated D3-mini
    Decisions endpoint. LiteLLM selects a configured coding tier and falls back to
@@ -292,7 +293,8 @@ curl --fail https://llm.example.test/health/liveliness
 curl --fail https://llm-dev.example.test/health/liveliness
 curl --silent --output /dev/null --write-out '%{http_code}\n' \
   https://opensearch.example.test/api/status   # expect 401 without credentials
-curl --fail 'https://search.example.test/search?q=LiteLLM&format=json'
+curl --silent --output /dev/null --write-out '%{http_code}\n' \
+  -H 'Host: search.example.test' https://llm.example.test/   # expect 404: SearXNG is internal-only
 ```
 
 Check active Prometheus targets rather than historical series:

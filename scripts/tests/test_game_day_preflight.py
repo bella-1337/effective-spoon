@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import ModuleType
+from unittest.mock import patch
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
@@ -75,6 +77,7 @@ class GameDayPreflightTests(unittest.TestCase):
                 "langfuse-web": {
                     "profiles": ["langfuse"],
                     "depends_on": {"langfuse-preflight": {}},
+                    "environment": {"AUTH_DISABLE_SIGNUP": "true"},
                 },
                 "image-security-docker-proxy": {"profiles": ["security"]},
                 "image-security-monitor": {"profiles": ["security"]},
@@ -100,6 +103,7 @@ class GameDayPreflightTests(unittest.TestCase):
                         "xberg-sandbox": {"ipv4_address": "172.29.0.53"},
                     }
                 },
+                "searxng": {"networks": {"internal": {}}},
             }
         }
 
@@ -159,6 +163,92 @@ class GameDayPreflightTests(unittest.TestCase):
         self.assertTrue(any("missing: opensearch-bridge" in f for f in failures), failures)
         self.assertTrue(any("grafana profile: grafana" in f for f in failures), failures)
         self.assertTrue(any("langfuse profile: langfuse-web" in f for f in failures), failures)
+
+    def test_searxng_must_not_be_publicly_routed(self) -> None:
+        exposures = (
+            ("networks", {"edge": {}, "internal": {}}, "internal network only"),
+            ("labels", {"traefik.enable": "true"}, "Traefik route"),
+            ("labels", ["traefik.enable=true"], "Traefik route"),
+            ("ports", [{"target": 8080, "published": "8080"}], "host ports"),
+        )
+        for key, value, message in exposures:
+            with self.subTest(key=key, value=value):
+                config = self.valid_config()
+                config["services"]["searxng"][key] = value
+
+                failures = self.module.validate_contracts(config)
+
+                self.assertTrue(any(message in f for f in failures), failures)
+
+    def test_langfuse_public_signup_must_stay_disabled(self) -> None:
+        for environment in ({}, {"AUTH_DISABLE_SIGNUP": "false"}):
+            config = self.valid_config()
+            config["services"]["langfuse-web"]["environment"] = environment
+
+            failures = self.module.validate_contracts(config)
+
+            self.assertIn(
+                "langfuse-web must disable public self-registration", failures
+            )
+
+    def test_explicit_symlinked_environment_files_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            core = root / ".env"
+            optional = root / ".env.optional"
+            core_target = root / "core.env"
+            optional_target = root / "optional.env"
+            core_target.write_text("CORE=value\n", encoding="utf-8")
+            optional_target.write_text("OPTIONAL=value\n", encoding="utf-8")
+            core.symlink_to(core_target)
+            optional.write_text("OPTIONAL=value\n", encoding="utf-8")
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "game-day-preflight.py",
+                    "--env-file",
+                    str(core),
+                    "--optional-env-file",
+                    str(optional),
+                ],
+            ), patch.object(self.module, "load_compose_config") as load_config:
+                self.assertEqual(self.module.main(), 2)
+                load_config.assert_not_called()
+
+            core.unlink()
+            core.write_text("CORE=value\n", encoding="utf-8")
+            optional.unlink()
+            optional.symlink_to(optional_target)
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "game-day-preflight.py",
+                    "--env-file",
+                    str(core),
+                    "--optional-env-file",
+                    str(optional),
+                ],
+            ), patch.object(self.module, "load_compose_config") as load_config:
+                self.assertEqual(self.module.main(), 2)
+                load_config.assert_not_called()
+
+    def test_default_symlinked_optional_environment_file_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text("CORE=value\n", encoding="utf-8")
+            optional_target = root / "optional.env"
+            optional_target.write_text("OPTIONAL=value\n", encoding="utf-8")
+            (root / ".env.optional").symlink_to(optional_target)
+
+            with patch.object(self.module, "ROOT", root), patch.object(
+                sys, "argv", ["game-day-preflight.py"]
+            ), patch.object(self.module, "load_compose_config") as load_config:
+                self.assertEqual(self.module.main(), 2)
+                load_config.assert_not_called()
 
 
 if __name__ == "__main__":

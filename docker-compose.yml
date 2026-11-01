@@ -393,18 +393,14 @@ services:
     volumes:
       - ./searxng:/etc/searxng:rw
     environment:
-      SEARXNG_BASE_URL: https://${SEARXNG_HOST:-search.example.test}/
+      SEARXNG_BASE_URL: http://searxng:8080/
       SEARXNG_SECRET: ${SEARXNG_SECRET:?Set SEARXNG_SECRET in .env}
     cap_drop: [ALL]
     cap_add: [CHOWN, SETGID, SETUID]
-    networks: [edge, internal]
+    # Internal-only: reachable by LiteLLM's searxng-search tool and monitoring,
+    # never routed by Traefik. Outbound engine queries use the internal bridge.
+    networks: [internal]
     restart: unless-stopped
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.searxng.rule=Host(`${SEARXNG_HOST:-search.example.test}`)
-      - traefik.http.routers.searxng.entrypoints=websecure
-      - traefik.http.routers.searxng.tls=true
-      - traefik.http.services.searxng.loadbalancer.server.port=8080
 
   xberg:
     logging: *default-logging

@@ -185,9 +185,9 @@ services:
         test -n "$$LANGFUSE_NEXTAUTH_SECRET" || { echo "Set LANGFUSE_NEXTAUTH_SECRET in .env.optional to use the langfuse profile" >&2; exit 64; }
         test -n "$$LANGFUSE_SALT" || { echo "Set LANGFUSE_SALT in .env.optional to use the langfuse profile" >&2; exit 64; }
         printf '%s' "$$LANGFUSE_ENCRYPTION_KEY" | grep -Eq '^[[:xdigit:]]{64}$' || { echo "Set LANGFUSE_ENCRYPTION_KEY to exactly 64 hexadecimal characters to use the langfuse profile" >&2; exit 64; }
-        test -n "$$LANGFUSE_PUBLIC_KEY" || { echo "Set LANGFUSE_PUBLIC_KEY in .env.optional to use the langfuse profile" >&2; exit 64; }
-        test -n "$$LANGFUSE_SECRET_KEY" || { echo "Set LANGFUSE_SECRET_KEY in .env.optional to use the langfuse profile" >&2; exit 64; }
-        test -n "$$LANGFUSE_USER_ID_SALT" || { echo "Set LANGFUSE_USER_ID_SALT in .env.optional to use the langfuse profile" >&2; exit 64; }
+        test -n "$$LANGFUSE_PUBLIC_KEY" || { echo "Set LANGFUSE_PUBLIC_KEY in .env to use the langfuse profile" >&2; exit 64; }
+        test -n "$$LANGFUSE_SECRET_KEY" || { echo "Set LANGFUSE_SECRET_KEY in .env to use the langfuse profile" >&2; exit 64; }
+        test -n "$$LANGFUSE_USER_ID_SALT" || { echo "Set LANGFUSE_USER_ID_SALT in .env to use the langfuse profile" >&2; exit 64; }
         test -n "$$LANGFUSE_INIT_USER_EMAIL" || { echo "Set LANGFUSE_INIT_USER_EMAIL in .env.optional to use the langfuse profile" >&2; exit 64; }
         test -n "$$LANGFUSE_INIT_USER_NAME" || { echo "Set LANGFUSE_INIT_USER_NAME in .env.optional to use the langfuse profile" >&2; exit 64; }
         test -n "$$LANGFUSE_INIT_USER_PASSWORD" || { echo "Set LANGFUSE_INIT_USER_PASSWORD in .env.optional to use the langfuse profile" >&2; exit 64; }
@@ -396,6 +396,9 @@ services:
       LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
       LANGFUSE_TRUSTED_PROXY_COUNT: "${LANGFUSE_TRUSTED_PROXY_COUNT:-1}"
+      # Private stack: users come only from LANGFUSE_INIT_USER_* (see the
+      # operator account runbook in docs/environment-variables.md).
+      AUTH_DISABLE_SIGNUP: "true"
       LANGFUSE_DISABLE_SIGNUP_ONBOARDING: "${LANGFUSE_DISABLE_SIGNUP_ONBOARDING:-true}"
     depends_on:
       langfuse-preflight:

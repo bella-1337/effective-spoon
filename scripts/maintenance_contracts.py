@@ -10,7 +10,13 @@ import tomllib
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from maintenance_common import IMAGE_REF_RE, ROOT, compose_capture, compose_command
+from maintenance_common import (
+    IMAGE_REF_RE,
+    ROOT,
+    compose_capture,
+    compose_command,
+    env_file_is_present,
+)
 
 COMPOSE_PROFILES = ("prod", "dev", "demo", "security", "grafana", "langfuse")
 EXPECTED_ALERT_UIDS = {
@@ -47,9 +53,11 @@ def load_compose_config(
     resolved_optional_env = optional_env_file
     if resolved_optional_env is None:
         local_optional_env = ROOT / ".env.optional"
+        # Fall back to the example only when no local file exists; an unsafe
+        # local file must fail instead of validating placeholder values.
         resolved_optional_env = (
             local_optional_env
-            if local_optional_env.is_file() and not local_optional_env.is_symlink()
+            if env_file_is_present(local_optional_env)
             else ROOT / ".env.optional.example"
         )
     output = compose_capture(
@@ -168,6 +176,15 @@ def validate_compose_contracts(config: Mapping[str, Any]) -> list[str]:
                 f"{name} must treat healthy Langfuse as an optional dependency"
             )
 
+    langfuse_web = services.get("langfuse-web")
+    if isinstance(langfuse_web, dict):
+        web_environment = langfuse_web.get("environment", {})
+        if (
+            not isinstance(web_environment, dict)
+            or str(web_environment.get("AUTH_DISABLE_SIGNUP", "")).lower() != "true"
+        ):
+            failures.append("langfuse-web must disable public self-registration")
+
     for name in langfuse_services[1:]:
         service = services.get(name)
         if (
@@ -251,6 +268,23 @@ def validate_compose_contracts(config: Mapping[str, Any]) -> list[str]:
         ):
             failures.append("Xberg DNS relay does not use the reserved sandbox address")
 
+    searxng = services.get("searxng")
+    if not isinstance(searxng, dict):
+        failures.append("Compose configuration has no searxng service")
+    else:
+        if set(searxng.get("networks", {})) != {"internal"}:
+            failures.append("SearXNG must stay on the internal network only")
+        labels = searxng.get("labels", {})
+        label_keys = (
+            {str(label).partition("=")[0] for label in labels}
+            if isinstance(labels, list)
+            else set(labels) if isinstance(labels, dict) else set()
+        )
+        if any(key.startswith("traefik.") for key in label_keys):
+            failures.append("SearXNG must not have a Traefik route")
+        if searxng.get("ports"):
+            failures.append("SearXNG must not publish host ports")
+
     return failures
 
 
@@ -316,8 +350,24 @@ def alert_rule_uids(alert_directory: Path) -> set[str]:
     return uids
 
 
+def traefik_dynamic_config_failures(source: str) -> list[str]:
+    """Reject Traefik file-provider config that could route to SearXNG."""
+    uncommented = "\n".join(line.partition("#")[0] for line in source.splitlines())
+    if re.search(r"searxng", uncommented, re.IGNORECASE):
+        return ["Traefik dynamic configuration must not route to internal-only SearXNG"]
+    return []
+
+
 def validate_repository_contracts(root: Path = ROOT) -> list[str]:
     failures: list[str] = []
+
+    traefik_dynamic = root / "traefik" / "dynamic.yml"
+    if not traefik_dynamic.is_file() or traefik_dynamic.is_symlink():
+        failures.append("Traefik dynamic configuration is missing or unsafe")
+    else:
+        failures.extend(
+            traefik_dynamic_config_failures(traefik_dynamic.read_text(encoding="utf-8"))
+        )
 
     compose_file = root / "docker-compose.yml"
     optional_compose_file = root / "compose.optional.yml"
@@ -367,15 +417,33 @@ def validate_repository_contracts(root: Path = ROOT) -> list[str]:
 
         core_env_keys = env_keys(core_env_example)
         optional_env_keys = env_keys(optional_env_example)
+        core_langfuse_keys = {
+            "LANGFUSE_PUBLIC_KEY",
+            "LANGFUSE_SECRET_KEY",
+            "LANGFUSE_USER_ID_SALT",
+        }
         misplaced_optional_keys = {
             key
             for key in core_env_keys
             if key.startswith(("GRAFANA_", "LANGFUSE_", "IMAGE_SECURITY_"))
+            and key not in core_langfuse_keys
         }
         if misplaced_optional_keys:
             failures.append(
                 "Optional variables remain in .env.example: "
                 + ", ".join(sorted(misplaced_optional_keys))
+            )
+        missing_core_langfuse_keys = core_langfuse_keys - core_env_keys
+        if missing_core_langfuse_keys:
+            failures.append(
+                "Core-consumed Langfuse variables are missing from .env.example: "
+                + ", ".join(sorted(missing_core_langfuse_keys))
+            )
+        duplicated_core_langfuse_keys = core_langfuse_keys & optional_env_keys
+        if duplicated_core_langfuse_keys:
+            failures.append(
+                "Core-consumed Langfuse variables remain in .env.optional.example: "
+                + ", ".join(sorted(duplicated_core_langfuse_keys))
             )
         required_optional_keys = {
             "GRAFANA_ADMIN_PASSWORD",

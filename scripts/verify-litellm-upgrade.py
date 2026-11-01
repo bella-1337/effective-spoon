@@ -27,6 +27,7 @@ from maintenance_common import (
     ROOT,
     SCRIPTS_DIR,
     ScriptError,
+    capture,
     compose,
     compose_capture,
     container_http_request,
@@ -38,6 +39,7 @@ from maintenance_common import (
     run_python_script,
     service_is_running,
 )
+from maintenance_contracts import traefik_dynamic_config_failures
 
 ALL_CHECKS = (
     "compose-config", "compose-health", "network-exposure", "prod-auth", "dev-auth", "isolation",
@@ -89,10 +91,10 @@ class Suite:
         self.opensearch_dashboards_url = "https://" + env_or_dotenv(
             "OPENSEARCH_DASHBOARDS_HOST", "opensearch.example.test"
         )
-        self.searxng_host = env_or_dotenv("SEARXNG_HOST", "search.example.test")
+        self.searxng_legacy_host = "search.example.test"
         self.langfuse_host = env_or_dotenv("LANGFUSE_WEB_HOST", "langfuse.example.test")
         self.prod_url, self.dev_url = f"https://{self.prod_host}", f"https://{self.dev_host}"
-        self.grafana_url, self.searxng_url = f"https://{self.grafana_host}", f"https://{self.searxng_host}"
+        self.grafana_url = f"https://{self.grafana_host}"
         self.langfuse_url = f"https://{self.langfuse_host}"
         self.prod_running, self.dev_running = service_is_running("litellm-prod"), service_is_running("litellm-dev")
         self.nonce = ""
@@ -610,9 +612,45 @@ WHERE vector_store_id = 'sme-knowledge'
         headers = self.auth_headers()
         if not headers: self.fail_("searxng: could not read LITELLM_MASTER_KEY"); return 1
         bad = False
-        status, _ = self.request(f"{self.searxng_url}/")
-        if status == 200: self.pass_("searxng: public search page returned HTTP 200")
-        else: self.fail_(f"searxng: public search page returned HTTP {status} (expected 200)"); bad = True
+        container_id = compose_capture(["ps", "-q", "searxng"]).strip()
+        try:
+            inspected = json.loads(capture(["docker", "inspect", container_id]))[0]
+        except (json.JSONDecodeError, IndexError, ScriptError):
+            self.fail_("searxng: could not inspect the searxng container"); return 1
+        labels = inspected.get("Config", {}).get("Labels") or {}
+        networks = {
+            str(name).rpartition("_")[2]
+            for name in (inspected.get("NetworkSettings", {}).get("Networks") or {})
+        }
+        published = [
+            binding
+            for bindings in (inspected.get("NetworkSettings", {}).get("Ports") or {}).values()
+            for binding in (bindings or [])
+        ]
+        if any(str(key).startswith("traefik.") for key in labels) or "edge" in networks or published:
+            self.fail_("searxng: container is exposed (Traefik labels, edge network, or published port)"); bad = True
+        else:
+            self.pass_("searxng: container has no Traefik route, edge network, or published port")
+        # Inspect the file-provider config Traefik actually loaded, so routes to
+        # SearXNG under any hostname are caught, not just the legacy one.
+        dynamic = compose(["exec", "-T", "traefik", "cat", "/etc/traefik/dynamic.yml"], capture_output=True, check=False)
+        if dynamic.returncode:
+            self.fail_("searxng: could not read Traefik's loaded dynamic configuration"); bad = True
+        elif traefik_dynamic_config_failures(str(dynamic.stdout)):
+            self.fail_("searxng: Traefik dynamic configuration routes to SearXNG"); bad = True
+        else:
+            self.pass_("searxng: Traefik dynamic configuration has no SearXNG route")
+        # Probe through a gateway hostname that is actually deployed; Traefik
+        # selects routers by Host header, so this proves the legacy name is unrouted.
+        gateway = next((url for running, url in ((self.prod_running, self.prod_url), (self.dev_running, self.dev_url)) if running), None)
+        if gateway is None:
+            self.info("searxng: skipping the legacy-hostname probe because no LiteLLM gateway is running")
+        else:
+            status, _ = self.request(f"{gateway}/", headers={"Host": self.searxng_legacy_host})
+            if status == 404:
+                self.pass_(f"searxng: Traefik does not route {self.searxng_legacy_host} (HTTP 404)")
+            else:
+                self.fail_(f"searxng: Traefik returned HTTP {status} for {self.searxng_legacy_host} via {gateway} (expected 404)"); bad = True
         for name, running, url in (("prod", self.prod_running, self.prod_url), ("dev", self.dev_running, self.dev_url)):
             if not running: continue
             status, _ = self.request(f"{url}/v1/search/searxng-search", "POST", {"Content-Type": "application/json"}, {"query": "litellm upgrade verification", "max_results": 1})

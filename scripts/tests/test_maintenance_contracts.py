@@ -10,10 +10,49 @@ import sys
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
+import maintenance_common as common  # noqa: E402
 import maintenance_contracts as contracts  # noqa: E402
 
 
 class MaintenanceContractTests(unittest.TestCase):
+    def test_compose_render_rejects_unsafe_default_optional_environment(self) -> None:
+        for kind in ("symlink", "directory"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                optional = root / ".env.optional"
+                if kind == "symlink":
+                    target = root / "target.env"
+                    target.write_text("OPTIONAL=value\n", encoding="utf-8")
+                    optional.symlink_to(target)
+                else:
+                    optional.mkdir()
+
+                with patch.object(contracts, "ROOT", root), patch.object(
+                    contracts, "compose_capture"
+                ) as compose_capture:
+                    with self.assertRaisesRegex(
+                        common.ScriptError, "environment file is unsafe.*install -m 600"
+                    ):
+                        contracts.load_compose_config(root / ".env")
+
+                compose_capture.assert_not_called()
+
+    def test_compose_render_selects_default_optional_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for present, expected in ((False, ".env.optional.example"), (True, ".env.optional")):
+                if present:
+                    (root / ".env.optional").write_text("OPTIONAL=value\n", encoding="utf-8")
+                with self.subTest(present=present), patch.object(
+                    contracts, "ROOT", root
+                ), patch.object(
+                    contracts, "compose_capture", return_value='{"services": {}}'
+                ) as compose_capture:
+                    contracts.load_compose_config(root / ".env")
+
+                arguments = compose_capture.call_args.args[0]
+                self.assertEqual(arguments[3], root / expected)
+
     def test_compose_render_enables_every_profile_once(self) -> None:
         with patch.object(
             contracts,
@@ -105,6 +144,22 @@ class MaintenanceContractTests(unittest.TestCase):
 
     def test_current_repository_contracts_pass(self) -> None:
         self.assertEqual(contracts.validate_repository_contracts(), [])
+
+    def test_traefik_dynamic_config_must_not_route_to_searxng(self) -> None:
+        exposed = (
+            "http:\n  services:\n    search:\n      loadBalancer:\n"
+            "        servers:\n          - url: http://SearXNG:8080\n"
+        )
+        self.assertEqual(
+            contracts.traefik_dynamic_config_failures(exposed),
+            ["Traefik dynamic configuration must not route to internal-only SearXNG"],
+        )
+        self.assertEqual(
+            contracts.traefik_dynamic_config_failures(
+                "# searxng stays internal-only\ntls:\n  certificates: []\n"
+            ),
+            [],
+        )
 
     def test_repository_contracts_detect_disconnected_workflows(self) -> None:
         with patch.object(contracts.runpy, "run_path", return_value={}):

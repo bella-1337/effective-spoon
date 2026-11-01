@@ -11,7 +11,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from maintenance_common import ROOT, ScriptError
+from maintenance_common import ENV_FILE_REMEDY, ROOT, ScriptError
 from maintenance_contracts import (
     load_compose_config,
     validate_compose_contracts,
@@ -49,17 +49,25 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    env_file = args.env_file.expanduser().resolve()
-    if not env_file.is_file() or env_file.is_symlink():
-        print(f"ERROR: environment file is missing or unsafe: {env_file}", file=sys.stderr)
-        return 2
-    optional_env_file = args.optional_env_file.expanduser().resolve()
-    if not optional_env_file.is_file() or optional_env_file.is_symlink():
+    env_candidate = args.env_file.expanduser()
+    if not env_candidate.is_file() or env_candidate.is_symlink():
         print(
-            f"ERROR: optional environment file is missing or unsafe: {optional_env_file}",
+            f"ERROR: environment file is missing or unsafe: {env_candidate}; "
+            f"{ENV_FILE_REMEDY}",
             file=sys.stderr,
         )
         return 2
+    env_file = env_candidate.resolve()
+
+    optional_env_candidate = args.optional_env_file.expanduser()
+    if not optional_env_candidate.is_file() or optional_env_candidate.is_symlink():
+        print(
+            "ERROR: optional environment file is missing or unsafe: "
+            f"{optional_env_candidate}; {ENV_FILE_REMEDY}",
+            file=sys.stderr,
+        )
+        return 2
+    optional_env_file = optional_env_candidate.resolve()
 
     try:
         config = load_compose_config(env_file, optional_env_file)

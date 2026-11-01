@@ -118,7 +118,9 @@ chmod 600 .env.optional
 ```
 
 Replace every required placeholder, review the operational defaults, and
-validate the core result before startup:
+validate the core result before startup. Both files must be regular files:
+maintenance commands refuse symlinked environment files. If a secrets manager
+renders them, copy its output into place with `install -m 600 SOURCE .env`.
 
 ```sh
 docker compose config --quiet
@@ -279,7 +281,7 @@ mkdir -p traefik/certs
 mkcert \
   -cert-file traefik/certs/litellm-stack.pem \
   -key-file traefik/certs/litellm-stack-key.pem \
-  llm.example.test llm-dev.example.test opensearch.example.test search.example.test \
+  llm.example.test llm-dev.example.test opensearch.example.test \
   langfuse.example.test langfuse-s3.example.test grafana.example.test
 ```
 
@@ -297,7 +299,7 @@ deployment.
 For a stack running on this machine, add one line to `/etc/hosts`:
 
 ```text
-127.0.0.1 llm.example.test llm-dev.example.test opensearch.example.test search.example.test langfuse.example.test langfuse-s3.example.test grafana.example.test
+127.0.0.1 llm.example.test llm-dev.example.test opensearch.example.test langfuse.example.test langfuse-s3.example.test grafana.example.test
 ```
 
 On Windows, edit
@@ -415,7 +417,10 @@ docker compose --env-file .env --env-file .env.optional \
   --profile prod --profile langfuse up -d
 ```
 
-Set the `LANGFUSE_*` values in `.env.optional` first. The
+Set the Langfuse infrastructure values in `.env.optional` first. The three
+core-side integration values (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and
+`LANGFUSE_USER_ID_SALT`) remain in `.env` because LiteLLM and the OpenSearch
+bridge consume them during ordinary core lifecycle commands. The
 `langfuse-preflight` job rejects missing credentials before any Langfuse
 datastore starts. When the profile is absent, LiteLLM removes the Langfuse
 callback and attribution hook from its generated runtime config; OpenSearch
@@ -453,7 +458,9 @@ curl --silent --output /dev/null --write-out '%{http_code}\n' \
 # Optional langfuse profile only:
 curl --fail --show-error --silent \
   'https://langfuse.example.test/api/public/health?failIfDatabaseUnavailable=true'
-curl --fail --show-error --silent --output /dev/null https://search.example.test/
+# SearXNG is internal-only; Traefik must not route it (expect 404).
+curl --silent --output /dev/null --write-out '%{http_code}\n' \
+  -H 'Host: search.example.test' https://llm.example.test/
 ```
 
 For either profile, verify the remote D3 integration through LiteLLM rather than
@@ -490,7 +497,11 @@ profile also sends logs to Loki.
 With the optional `langfuse` profile, LiteLLM additionally loads its
 `langfuse_otel` integration. Open `https://langfuse.example.test`, sign in with
 the initial administrator account, and select the pre-provisioned **LiteLLM**
-project. Traces include model, provider, token, cost, timing, and error metadata.
+project. Public sign-up is disabled (`AUTH_DISABLE_SIGNUP=true`), so only the
+initial administrator account can sign in. Keep its credentials in the secrets
+manager, and follow the
+[Langfuse operator account runbook](docs/environment-variables.md#langfuse-operator-accounts-and-lockout-recovery)
+to add operators or recover access. Traces include model, provider, token, cost, timing, and error metadata.
 Prompt and response content is deliberately excluded by both
 `turn_off_message_logging: true` and
 `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=no_content`. Do not enable
@@ -820,9 +831,10 @@ Use each observability store for its intended telemetry:
 ## 10. Use SearXNG search through LiteLLM
 
 Both LiteLLM profiles expose the internal SearXNG service as the native
-`searxng-search` search tool. SearXNG stays on the internal Compose network for
-gateway requests; clients authenticate to LiteLLM rather than calling the
-internal service directly.
+`searxng-search` search tool. SearXNG is internal-only in every profile: it is
+attached only to the internal Compose network, has no Traefik route, and
+publishes no host port. Clients authenticate to LiteLLM, which is the only way
+to reach it; there is no public search UI.
 
 Test production search with:
 

@@ -43,6 +43,20 @@ def emit_error(message: str) -> None:
     print(f"ERROR: {message}", file=sys.stderr)
 
 
+ENV_FILE_REMEDY = (
+    "maintenance tooling reads only regular environment files, never symlinks; "
+    "write secrets-manager output to a private regular file instead, for example "
+    "'install -m 600 /run/secrets/litellm.env .env'"
+)
+
+
+def env_file_is_present(path: Path) -> bool:
+    """Return whether a regular env file exists; fail on symlinks and non-files."""
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        fail(f"environment file is unsafe: {path}; {ENV_FILE_REMEDY}")
+    return path.is_file()
+
+
 def utc_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -204,9 +218,16 @@ def compose_command(
         arg == "--env-file" or arg.startswith("--env-file=") for arg in string_args
     )
     if not has_explicit_env:
-        for env_file in (ROOT / ".env", ROOT / ".env.optional"):
-            if env_file.is_file() and not env_file.is_symlink():
-                command.extend(("--env-file", str(env_file)))
+        env_file = ROOT / ".env"
+        optional_env_file = ROOT / ".env.optional"
+        env_present = env_file_is_present(env_file)
+        optional_present = env_file_is_present(optional_env_file)
+        if optional_present and not env_present:
+            fail(".env.optional cannot be loaded without a regular .env file")
+        if env_present:
+            command.extend(("--env-file", str(env_file)))
+        if optional_present:
+            command.extend(("--env-file", str(optional_env_file)))
     command.extend(string_args)
     return command
 
