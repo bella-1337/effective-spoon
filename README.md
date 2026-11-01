@@ -474,6 +474,30 @@ project. The trusted pre-call hook replaces any caller-supplied `trace_user_id`
 with a stable HMAC pseudonym derived from the authenticated LiteLLM user ID (or
 the authenticated key identity when no user owns the key). It also strips
 caller-supplied `langfuse_*` headers and pseudonymizes a supplied `user` field.
+The same hook maps the common agent identifiers `session_id`, `conversation_id`,
+`thread_id`, and `run_id` from request metadata to Langfuse `session.id`.
+LiteLLM's standard `x-litellm-session-id`, `x-session-id`, and
+`x-<toolkit>-session-id` headers are also supported. Session identifiers are
+validated, removed from exported metadata, and replaced with stable
+principal-scoped HMAC identifiers, preventing two authenticated users or keys
+from merging traces by supplying the same identifier.
+
+For reliable multi-turn grouping, send one stable identifier on every request in
+the logical conversation. The portable OpenAI-compatible form is:
+
+```python
+client.chat.completions.create(
+    model="your-model",
+    messages=[{"role": "user", "content": "Hello"}],
+    extra_body={"metadata": {"session_id": conversation_id}},
+)
+```
+
+When a toolkit supplies no session identifier, the hook uses its propagated OTel
+trace ID. If neither exists, it creates a request-scoped fallback so the trace is
+still visible in Langfuse Sessions. A request-scoped fallback cannot infer or
+merge later turns; clients that need multi-turn sessions must send a stable
+identifier or propagate one OTel trace across those calls.
 The OTel v2 baggage allowlists are empty, so raw user IDs, key identities, and
 client IP metadata are not copied to child spans, and FastAPI server spans are
 excluded to prevent request URLs, query strings, user agents, or peer IPs from
@@ -1228,7 +1252,7 @@ statements are comments; review and apply them manually only when appropriate.
 
 ## 14. pgvector storage
 
-The stack deploys a separate PostgreSQL 16 database with pgvector 0.8.1. Its
+The stack deploys a separate PostgreSQL 16 database with pgvector 0.8.7. Its
 named `pgvector-data` volume starts with an empty `sme-knowledge` store. In the development profile, Xberg extraction indexing is disabled by default.
 When the operator explicitly sets `XBERG_AUTO_INDEX_ENABLED=true`, successful
 Xberg `extract` calls with trusted principal attribution are anonymized through
