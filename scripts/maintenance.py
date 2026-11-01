@@ -26,6 +26,7 @@ from maintenance_common import (
 )
 from maintenance_contracts import (
     load_compose_config,
+    rendered_supply_chain_failures,
     validate_compose_contracts,
     validate_repository_contracts,
 )
@@ -53,6 +54,11 @@ Commands:
   security-scan [--all | --services LIST] [--enforce] [--project NAME]
       Scan running image digests with pinned Trivy, correlate CISA KEV, retain
       private reports, and publish aggregate node-exporter textfile metrics.
+
+  sbom [--all | --services LIST] [--refresh] [--project NAME]
+      Generate private CycloneDX SBOMs and licence evidence for new running
+      image digests (registry and locally built), plus a stack-level SBOM that
+      links them. Existing digests are reused unless --refresh is given.
 
   security-schedule install|uninstall|status [OPTIONS]
       Manage the Linux systemd timer for the nightly scan. Installation and
@@ -97,7 +103,8 @@ SCRIPTS = (
     "restore-databases.py", "verify-pgvector.py",
     "check-litellm-upgrade-compatibility.py", "prepare-litellm-upgrade.py",
     "verify-litellm-upgrade.py", "rollback-litellm-upgrade.py",
-    "monitor-image-vulnerabilities.py", "install-image-security-schedule.py",
+    "monitor-image-vulnerabilities.py", "generate-image-sbom.py",
+    "install-image-security-schedule.py",
     "run-image-security-scheduler.py",
 )
 
@@ -157,6 +164,7 @@ def doctor() -> None:
     failures = [
         *validate_compose_contracts(config),
         *validate_repository_contracts(),
+        *rendered_supply_chain_failures(config),
     ]
     if failures:
         fail("game-day safety contracts failed:\n- " + "\n- ".join(failures))
@@ -228,6 +236,8 @@ def main() -> None:
         invoke("game-day-preflight.py", args)
     elif command == "security-scan":
         invoke("monitor-image-vulnerabilities.py", args)
+    elif command == "sbom":
+        invoke("generate-image-sbom.py", args)
     elif command == "security-schedule":
         invoke_with_current_python("install-image-security-schedule.py", args)
     elif command == "backup":

@@ -286,5 +286,125 @@ class MaintenanceContractTests(unittest.TestCase):
             outside, ["BRAND_ASSETS_DIR in .env.example must be a repository-relative directory"]
         )
 
+    def write_register_fixture(self, root: Path, rows: list[str], revisions: str) -> None:
+        (root / "docs").mkdir()
+        (root / "docs" / "third-party-licences.md").write_text(
+            "# Register\n\n## Runtime images\n\n| Image | Licence |\n| --- | --- |\n"
+            + "".join(f"| `{row}` | MIT |\n" for row in rows)
+            + "\n## Models\n\n"
+            + revisions,
+            encoding="utf-8",
+        )
+        for relative, base in (
+            ("pgvector/Dockerfile", "python:3.11@sha256:" + "a" * 64),
+            ("opensearch/tools/Dockerfile", "base:1"),
+            ("security/image-monitor.Dockerfile", "base:1 AS builder"),
+        ):
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"FROM {base}\n", encoding="utf-8")
+
+    def test_licence_register_must_match_images_and_model_pins(self) -> None:
+        revision = "5" * 40
+        services = {
+            "app": {"image": "example/app:1.0@sha256:" + "b" * 64},
+            "model": {"image": "vllm/vllm:1", "command": ["--revision", revision]},
+            "tools": {
+                "image": "local-tools:0.1.0",
+                "build": {
+                    "labels": {"org.opencontainers.image.revision": "c" * 40},
+                    "additional_contexts": {"upstream": "https://example.test/x.git#" + "c" * 40},
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_register_fixture(
+                root,
+                ["example/app:1.0", "vllm/vllm:1", "local-tools:0.1.0", "python:3.11", "base:1"],
+                f"`{revision}`\n",
+            )
+            self.assertEqual(contracts.licence_register_failures(services, root), [])
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_register_fixture(root, ["example/app:0.9", "vllm/vllm:1", "python:3.11", "base:1"], "")
+            services["tools"]["build"]["labels"]["org.opencontainers.image.revision"] = "d" * 40
+            failures = contracts.licence_register_failures(services, root)
+        self.assertEqual(
+            failures,
+            [
+                "Licence register has no row for image example/app:1.0",
+                "Licence register has no row for image local-tools:0.1.0",
+                "Licence register lists an image the stack no longer uses: example/app:0.9",
+                f"Licence register does not record pinned model revision {revision}",
+                "Build revision label of tools does not match its pinned upstream context",
+            ],
+        )
+
+    def test_licence_register_is_required(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(
+                contracts.licence_register_failures({}, Path(directory)),
+                ["Licence register is missing or unsafe: docs/third-party-licences.md"],
+            )
+
+
+    def test_own_images_require_consistent_oci_labels(self) -> None:
+        labels = {
+            f"org.opencontainers.image.{key}": value
+            for key, value in {
+                "vendor": "example.test",
+                "title": "tools",
+                "description": "Tools",
+                "version": "0.1.0",
+                "revision": "abc123",
+                "licenses": "LicenseRef-Proprietary",
+                "base.name": "base:1",
+                "created": "",
+                "source": "",
+                "url": "",
+            }.items()
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "tools.Dockerfile").write_text(
+                "FROM helper:2 AS helper\nFROM base:1@sha256:" + "a" * 64 + "\n",
+                encoding="utf-8",
+            )
+            config = {
+                "x-stack-domain": "example.test",
+                "services": {
+                    "tools": {
+                        "image": "registry.example.test/tools:0.1.0",
+                        "build": {"dockerfile": "tools.Dockerfile", "labels": dict(labels)},
+                    },
+                    "upstream": {"image": "postgres:16"},
+                },
+            }
+            self.assertEqual(contracts.own_image_label_failures(config, root), [])
+
+            build = config["services"]["tools"]["build"]
+            build["labels"]["org.opencontainers.image.vendor"] = "other.test"
+            build["labels"]["org.opencontainers.image.version"] = "0.2.0"
+            build["labels"]["org.opencontainers.image.base.name"] = "helper:2"
+            self.assertEqual(
+                contracts.own_image_label_failures(config, root),
+                [
+                    "Vendor label of tools must equal STACK_DOMAIN",
+                    "Version label of tools must equal its image tag",
+                    "Base-name label of tools must equal the final FROM image of its Dockerfile",
+                ],
+            )
+
+            del build["labels"]["org.opencontainers.image.revision"]
+            del build["labels"]["org.opencontainers.image.source"]
+            build["labels"]["org.opencontainers.image.title"] = " "
+            self.assertEqual(
+                contracts.own_image_label_failures(config, root),
+                ["Locally built image of tools lacks OCI labels: title, revision, source"],
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

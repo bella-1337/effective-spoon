@@ -80,6 +80,22 @@ class RunImageSecuritySchedulerTests(unittest.TestCase):
             text=True,
         )
 
+    def test_scheduled_jobs_generate_sboms_after_the_scan(self) -> None:
+        scanner = Path("/app/scripts/monitor-image-vulnerabilities.py")
+        generator = scanner.with_name("generate-image-sbom.py")
+        with patch.object(scheduler, "run_monitor", side_effect=[1, 0]) as run_monitor:
+            scheduler.run_scheduled_jobs(scanner, ["--all"], generator)
+        self.assertEqual(
+            [call.args for call in run_monitor.call_args_list],
+            [(scanner, ["--all"]), (generator, [])],
+        )
+
+    def test_scheduled_jobs_skip_disabled_sbom_generation(self) -> None:
+        scanner = Path("/app/scripts/monitor-image-vulnerabilities.py")
+        with patch.object(scheduler, "run_monitor", return_value=0) as run_monitor:
+            scheduler.run_scheduled_jobs(scanner, ["--all"], None)
+        run_monitor.assert_called_once_with(scanner, ["--all"])
+
 
 if __name__ == "__main__":
     unittest.main()

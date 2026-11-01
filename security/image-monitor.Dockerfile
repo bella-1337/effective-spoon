@@ -16,7 +16,7 @@ ENV DOCKER_CONFIG=/tmp/docker-config \
     XDG_DATA_HOME=/tmp/xdg-data
 
 WORKDIR /app
-COPY --chown=65532:65532 scripts/maintenance_common.py scripts/monitor-image-vulnerabilities.py scripts/run-image-security-scheduler.py /app/scripts/
+COPY --chown=65532:65532 scripts/maintenance_common.py scripts/monitor-image-vulnerabilities.py scripts/generate-image-sbom.py scripts/run-image-security-scheduler.py /app/scripts/
 COPY --chown=65532:65532 security/exceptions.toml /app/security/exceptions.toml
 
 USER 65532:65532

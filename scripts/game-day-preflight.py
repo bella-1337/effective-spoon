@@ -14,6 +14,7 @@ from pathlib import Path
 from maintenance_common import ENV_FILE_REMEDY, ROOT, ScriptError
 from maintenance_contracts import (
     load_compose_config,
+    rendered_supply_chain_failures,
     validate_compose_contracts,
     validate_repository_contracts,
 )
@@ -71,7 +72,10 @@ def main() -> int:
 
     try:
         config = load_compose_config(env_file, optional_env_file)
-        failures = validate_contracts(config)
+        failures = [
+            *validate_contracts(config),
+            *rendered_supply_chain_failures(config),
+        ]
     except (OSError, ValueError, ScriptError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

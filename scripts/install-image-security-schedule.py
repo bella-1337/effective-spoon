@@ -70,6 +70,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="image-security exception policy",
     )
+    parser.add_argument(
+        "--no-sbom",
+        action="store_true",
+        help="do not generate SBOMs for new image digests after each scan",
+    )
     return parser.parse_args()
 
 
@@ -207,10 +212,14 @@ def build_units(
     metrics_root: Path,
     policy: Path,
     project: str,
+    sbom: bool = True,
 ) -> tuple[str, str]:
     scanner = ROOT / "scripts" / "monitor-image-vulnerabilities.py"
     if not scanner.is_file() or scanner.is_symlink():
         fail("the image-security monitor script is missing or unsafe")
+    sbom_generator = ROOT / "scripts" / "generate-image-sbom.py"
+    if sbom and (not sbom_generator.is_file() or sbom_generator.is_symlink()):
+        fail("the image SBOM generator script is missing or unsafe")
     path_directories: list[str] = []
     for directory in (
         uv.parent,
@@ -243,9 +252,12 @@ def build_units(
         f"Environment={systemd_quote(f'{key}={value}')}"
         for key, value in environment.items()
     )
-    exec_start = " ".join(
-        systemd_quote(str(argument))
-        for argument in (uv, "run", "--script", scanner)
+    exec_start = "\nExecStart=".join(
+        " ".join(
+            systemd_quote(str(argument))
+            for argument in (uv, "run", "--script", script)
+        )
+        for script in ((scanner, sbom_generator) if sbom else (scanner,))
     )
     writable_paths = " ".join(
         systemd_quote(str(path))
@@ -310,6 +322,7 @@ def install(
     requested_report: Path | None,
     requested_metrics: Path | None,
     requested_policy: Path | None,
+    sbom: bool = True,
 ) -> None:
     require_linux()
     require_root()
@@ -359,6 +372,7 @@ def install(
         metrics_root=metrics_root,
         policy=policy,
         project=project,
+        sbom=sbom,
     )
     service_path, timer_path = unit_paths()
     atomic_write(service_path, service)
@@ -373,6 +387,7 @@ def install(
     print(f"Reports: {report_root}")
     print(f"Metrics: {metrics_root}")
     print(f"Exceptions: {policy}")
+    print(f"SBOM generation: {'enabled' if sbom else 'disabled'}")
     print(f"Units: {service_path}, {timer_path}")
 
 
@@ -417,6 +432,7 @@ def main() -> None:
             arguments.report_dir,
             arguments.metrics_dir,
             arguments.exceptions_file,
+            sbom=not arguments.no_sbom,
         )
     elif arguments.action == "uninstall":
         uninstall()
