@@ -251,6 +251,7 @@ can cause startup failures or corrupt semantic-cache expectations.
 | Variable | Default / format | Description and guidance |
 | --- | --- | --- |
 | `BGE_M3_MODEL` | `BAAI/bge-m3`; model identifier or approved local path | Model loaded by vLLM. Review model provenance, license, and remote-code requirements before changing it. |
+| `BGE_M3_REVISION` | `5617a9f61b028005a4858fdac845db406aefb181`; full 40-character Hugging Face commit SHA | Immutable model and tokenizer revision loaded by vLLM, so a cache rebuild cannot silently fetch different weights. Change it only together with `BGE_M3_MODEL` and the model entry in `docs/third-party-licences.md`, after reviewing the licence and file list of the new revision. |
 | `BGE_M3_SERVED_MODEL_NAME` | `bge-m3`; model alias | Name exposed by the internal OpenAI-compatible endpoint. Keep aligned with downstream model references. |
 | `BGE_M3_DTYPE` | `half`; vLLM dtype | Inference precision. Choose a dtype supported by the GPU and model. Lower precision reduces memory but can affect quality. |
 | `BGE_M3_MAX_MODEL_LEN` | `8192`; positive integer | Maximum token length accepted by the embedding server. Larger values increase memory pressure. |

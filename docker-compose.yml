@@ -268,6 +268,10 @@ services:
     command:
       - --model
       - ${BGE_M3_MODEL:-BAAI/bge-m3}
+      - --revision
+      - ${BGE_M3_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
+      - --tokenizer-revision
+      - ${BGE_M3_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
       - --served-model-name
       - ${BGE_M3_SERVED_MODEL_NAME:-bge-m3}
       - --runner
