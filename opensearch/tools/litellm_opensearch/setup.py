@@ -270,6 +270,7 @@ def index_templates(replicas: int) -> dict[str, dict[str, Any]]:
                             "team_alias", "team", "organization_id", "status", "request_tags", "key_alias",
                             "key_owner", "key_owner_id", "key_owner_alias", "provider_model",
                             "exception_type", "audit_id", "changed_by", "action", "object_type", "object_id",
+                            "session_hash",
                         ),
                     },
                 },

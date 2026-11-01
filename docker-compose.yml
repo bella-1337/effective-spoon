@@ -172,6 +172,11 @@ services:
       # Optional: only required when the grafana profile is used.
       GRAFANA_DATABASE_PASSWORD: ${GRAFANA_DATABASE_PASSWORD:-}
       PG_EXPORTER_PASSWORD: ${PG_EXPORTER_PASSWORD:?Set PG_EXPORTER_PASSWORD in .env}
+      ROI_MINUTES_SAVED_PER_REQUEST: "${ROI_MINUTES_SAVED_PER_REQUEST:-15}"
+      ROI_MINUTES_SAVED_PER_SESSION: "${ROI_MINUTES_SAVED_PER_SESSION:-0}"
+      ROI_LOADED_HOURLY_COST: "${ROI_LOADED_HOURLY_COST:-75}"
+      ROI_VALUE_REALIZATION_FACTOR: "${ROI_VALUE_REALIZATION_FACTOR:-0.25}"
+      ROI_CURRENCY: "${ROI_CURRENCY:-USD}"
     command:
       - /bin/sh
       - -ec
@@ -203,6 +208,47 @@ services:
           if [ "$${exists}" != "1" ]; then
             psql --dbname postgres --command "CREATE DATABASE \"$${db}\""
           fi
+          psql --dbname "$${db}" --set ON_ERROR_STOP=1 <<'SQL'
+        \getenv roi_request_minutes ROI_MINUTES_SAVED_PER_REQUEST
+        \getenv roi_session_minutes ROI_MINUTES_SAVED_PER_SESSION
+        \getenv roi_hourly_cost ROI_LOADED_HOURLY_COST
+        \getenv roi_realization ROI_VALUE_REALIZATION_FACTOR
+        \getenv roi_currency ROI_CURRENCY
+        CREATE TABLE IF NOT EXISTS "LiteLLM_ManagementROIConfig" (
+          singleton smallint PRIMARY KEY DEFAULT 1 CHECK (singleton = 1),
+          minutes_saved_per_request numeric NOT NULL CHECK (minutes_saved_per_request BETWEEN 0 AND 1440),
+          minutes_saved_per_session numeric NOT NULL CHECK (minutes_saved_per_session BETWEEN 0 AND 10080),
+          loaded_hourly_cost numeric NOT NULL CHECK (loaded_hourly_cost BETWEEN 0 AND 10000),
+          value_realization_factor numeric NOT NULL CHECK (value_realization_factor BETWEEN 0 AND 1),
+          currency varchar(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+          updated_at timestamptz NOT NULL DEFAULT NOW()
+        );
+        REVOKE ALL ON TABLE "LiteLLM_ManagementROIConfig" FROM PUBLIC;
+        INSERT INTO "LiteLLM_ManagementROIConfig" (
+          singleton,
+          minutes_saved_per_request,
+          minutes_saved_per_session,
+          loaded_hourly_cost,
+          value_realization_factor,
+          currency,
+          updated_at
+        ) VALUES (
+          1,
+          :'roi_request_minutes'::numeric,
+          :'roi_session_minutes'::numeric,
+          :'roi_hourly_cost'::numeric,
+          :'roi_realization'::numeric,
+          :'roi_currency',
+          NOW()
+        )
+        ON CONFLICT (singleton) DO UPDATE SET
+          minutes_saved_per_request = EXCLUDED.minutes_saved_per_request,
+          minutes_saved_per_session = EXCLUDED.minutes_saved_per_session,
+          loaded_hourly_cost = EXCLUDED.loaded_hourly_cost,
+          value_realization_factor = EXCLUDED.value_realization_factor,
+          currency = EXCLUDED.currency,
+          updated_at = EXCLUDED.updated_at;
+        SQL
           for reader in $${readers}; do
             psql --dbname "$${db}" --set ON_ERROR_STOP=1 --set database_name="$${db}" --set reader="$${reader}" <<'SQL'
         GRANT CONNECT ON DATABASE :"database_name" TO :"reader";
@@ -552,7 +598,8 @@ services:
     networks: [internal]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "/busybox/wget", "-q", "--spider", "http://localhost:3100/ready"]
+      # The distroless Loki image has no shell, wget, or curl.
+      test: ["CMD", "/usr/bin/loki", "-version"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -977,6 +1024,11 @@ services:
     environment:
       OPENSEARCH_DASHBOARDS_URL: http://opensearch-dashboards:5601
       OPENSEARCH_ADMIN_PASSWORD: ${OPENSEARCH_ADMIN_PASSWORD:?Set OPENSEARCH_ADMIN_PASSWORD in .env}
+      ROI_MINUTES_SAVED_PER_REQUEST: "${ROI_MINUTES_SAVED_PER_REQUEST:-15}"
+      ROI_MINUTES_SAVED_PER_SESSION: "${ROI_MINUTES_SAVED_PER_SESSION:-0}"
+      ROI_LOADED_HOURLY_COST: "${ROI_LOADED_HOURLY_COST:-75}"
+      ROI_VALUE_REALIZATION_FACTOR: "${ROI_VALUE_REALIZATION_FACTOR:-0.25}"
+      ROI_CURRENCY: "${ROI_CURRENCY:-USD}"
     read_only: true
     cap_drop: [ALL]
     security_opt:
@@ -1035,6 +1087,7 @@ services:
       OPENSEARCH_BRIDGE_INTERVAL_SECONDS: "${OPENSEARCH_BRIDGE_INTERVAL_SECONDS:-60}"
       OPENSEARCH_USAGE_RETENTION_DAYS: "${OPENSEARCH_USAGE_RETENTION_DAYS:-180}"
       OPENSEARCH_USAGE_OVERLAP_MINUTES: "${OPENSEARCH_USAGE_OVERLAP_MINUTES:-30}"
+      OPENSEARCH_SESSION_ID_SALT: ${LANGFUSE_USER_ID_SALT:?Set LANGFUSE_USER_ID_SALT in .env}
     volumes:
       - opensearch-ca:/certs/ca:ro
       - ./grafana/alerting:/app/alerting:ro

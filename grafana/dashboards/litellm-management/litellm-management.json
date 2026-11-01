@@ -1,0 +1,245 @@
+{
+  "uid": "litellm-management",
+  "title": "LiteLLM Management Summary",
+  "description": "Executive usage, cost, reliability, governance, and directional ROI indicators.",
+  "tags": ["litellm", "management", "governance", "roi", "postgres"],
+  "timezone": "utc",
+  "refresh": "5m",
+  "time": {"from": "now-30d", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PG",
+        "label": "LiteLLM database",
+        "type": "datasource",
+        "query": "postgres",
+        "regex": "/LiteLLM PG/",
+        "current": {"text": "LiteLLM PG (prod)", "value": "litellm-pg"}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Management interpretation",
+      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 0},
+      "options": {
+        "mode": "markdown",
+        "content": "### Management summary\nUsage and cost come from LiteLLM's system-of-record PostgreSQL data. **Indicative ROI is directional, not an accounting measure.** It adds the configured value per successful request and per distinct successful session, applies the realization factor and loaded hourly cost, then subtracts model spend. Assumptions come from `.env` and are shown below. Set either request or session minutes to zero when both would represent the same saved work."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Requests",
+      "gridPos": {"h": 4, "w": 3, "x": 0, "y": 4},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COUNT(*)::float AS \"Requests\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")", "format": "table"}]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Model spend",
+      "gridPos": {"h": 4, "w": 3, "x": 3, "y": 4},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(SUM(spend), 0)::float AS \"Spend\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD"}, "overrides": []}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Success rate",
+      "gridPos": {"h": 4, "w": 3, "x": 6, "y": 4},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(100.0 * COUNT(*) FILTER (WHERE COALESCE(status, 'success') = 'success') / NULLIF(COUNT(*), 0), 0)::float AS \"Success rate\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []}
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Active users",
+      "gridPos": {"h": 4, "w": 3, "x": 9, "y": 4},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COUNT(DISTINCT NULLIF(\"user\", ''))::float AS \"Active users\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")", "format": "table"}]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Estimated hours saved",
+      "description": "Request and distinct-session contributions from the environment-managed assumptions.",
+      "gridPos": {"h": 4, "w": 3, "x": 12, "y": 4},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "WITH totals AS (SELECT COUNT(*) FILTER (WHERE COALESCE(status, 'success') = 'success')::numeric AS requests, COUNT(DISTINCT NULLIF(session_id, '')) FILTER (WHERE COALESCE(status, 'success') = 'success')::numeric AS sessions FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")) SELECT ((totals.requests * config.minutes_saved_per_request + totals.sessions * config.minutes_saved_per_session) / 60.0 * config.value_realization_factor)::float AS \"Hours saved\" FROM totals CROSS JOIN \"LiteLLM_ManagementROIConfig\" config WHERE config.singleton = 1", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "h"}, "overrides": []}
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Estimated gross value",
+      "description": "Estimated hours saved multiplied by the environment-managed loaded hourly cost.",
+      "gridPos": {"h": 4, "w": 3, "x": 15, "y": 4},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "WITH totals AS (SELECT COUNT(*) FILTER (WHERE COALESCE(status, 'success') = 'success')::numeric AS requests, COUNT(DISTINCT NULLIF(session_id, '')) FILTER (WHERE COALESCE(status, 'success') = 'success')::numeric AS sessions FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")) SELECT ((totals.requests * config.minutes_saved_per_request + totals.sessions * config.minutes_saved_per_session) / 60.0 * config.value_realization_factor * config.loaded_hourly_cost)::float AS \"Gross value\" FROM totals CROSS JOIN \"LiteLLM_ManagementROIConfig\" config WHERE config.singleton = 1", "format": "table"}]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Estimated net value",
+      "description": "Estimated gross labor value less direct model spend.",
+      "gridPos": {"h": 4, "w": 3, "x": 18, "y": 4},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "WITH totals AS (SELECT COUNT(*) FILTER (WHERE COALESCE(status, 'success') = 'success')::numeric AS requests, COUNT(DISTINCT NULLIF(session_id, '')) FILTER (WHERE COALESCE(status, 'success') = 'success')::numeric AS sessions, COALESCE(SUM(spend), 0)::numeric AS spend FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")) SELECT ((totals.requests * config.minutes_saved_per_request + totals.sessions * config.minutes_saved_per_session) / 60.0 * config.value_realization_factor * config.loaded_hourly_cost - totals.spend)::float AS \"Net value\" FROM totals CROSS JOIN \"LiteLLM_ManagementROIConfig\" config WHERE config.singleton = 1", "format": "table"}]
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Indicative ROI",
+      "description": "(Estimated gross value - model spend) / model spend. Directional estimate only.",
+      "gridPos": {"h": 4, "w": 3, "x": 21, "y": 4},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "WITH totals AS (SELECT COUNT(*) FILTER (WHERE COALESCE(status, 'success') = 'success')::numeric AS requests, COUNT(DISTINCT NULLIF(session_id, '')) FILTER (WHERE COALESCE(status, 'success') = 'success')::numeric AS sessions, COALESCE(SUM(spend), 0)::numeric AS spend FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")) SELECT CASE WHEN totals.spend > 0 THEN 100.0 * ((totals.requests * config.minutes_saved_per_request + totals.sessions * config.minutes_saved_per_session) / 60.0 * config.value_realization_factor * config.loaded_hourly_cost - totals.spend) / totals.spend ELSE 0 END::float AS \"ROI\" FROM totals CROSS JOIN \"LiteLLM_ManagementROIConfig\" config WHERE config.singleton = 1", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "percent"}, "overrides": []}
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Key budget coverage",
+      "gridPos": {"h": 4, "w": 3, "x": 0, "y": 8},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(100.0 * COUNT(*) FILTER (WHERE max_budget IS NOT NULL AND max_budget > 0) / NULLIF(COUNT(*), 0), 0)::float AS \"Budget coverage\" FROM \"LiteLLM_VerificationToken\"", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []}
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Team budget coverage",
+      "gridPos": {"h": 4, "w": 3, "x": 3, "y": 8},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(100.0 * COUNT(*) FILTER (WHERE max_budget IS NOT NULL AND max_budget > 0) / NULLIF(COUNT(*), 0), 0)::float AS \"Budget coverage\" FROM \"LiteLLM_TeamTable\" WHERE COALESCE(blocked, false) = false", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []}
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Keys over budget",
+      "gridPos": {"h": 4, "w": 3, "x": 6, "y": 8},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COUNT(*)::float AS \"Over budget\" FROM \"LiteLLM_VerificationToken\" WHERE max_budget IS NOT NULL AND max_budget > 0 AND COALESCE(spend, 0) > max_budget", "format": "table"}]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Blocked or expired keys",
+      "gridPos": {"h": 4, "w": 3, "x": 9, "y": 8},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COUNT(*)::float AS \"Unavailable keys\" FROM \"LiteLLM_VerificationToken\" WHERE COALESCE(blocked, false) = true OR (expires IS NOT NULL AND expires <= NOW())", "format": "table"}]
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Unassigned spend",
+      "gridPos": {"h": 4, "w": 3, "x": 12, "y": 8},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(100.0 * SUM(spend) FILTER (WHERE team_id IS NULL OR team_id = '') / NULLIF(SUM(spend), 0), 0)::float AS \"Unassigned spend\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []}
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Cache hit ratio",
+      "gridPos": {"h": 4, "w": 3, "x": 15, "y": 8},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(100.0 * COUNT(*) FILTER (WHERE LOWER(COALESCE(cache_hit::text, 'false')) IN ('true', '1')) / NULLIF(COUNT(*), 0), 0)::float AS \"Cache hits\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")", "format": "table"}],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []}
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Provider errors",
+      "gridPos": {"h": 4, "w": 3, "x": 18, "y": 8},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COUNT(*)::float AS \"Provider errors\" FROM \"LiteLLM_ErrorLogs\" WHERE $__timeFilter(\"startTime\")", "format": "table"}]
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Administrative changes",
+      "gridPos": {"h": 4, "w": 3, "x": 21, "y": 8},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COUNT(*)::float AS \"Changes\" FROM \"LiteLLM_AuditLog\" WHERE $__timeFilter(updated_at)", "format": "table"}]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Request volume by outcome",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 12},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT $__timeGroupAlias(\"startTime\", '1d'), COALESCE(status, 'unknown') AS metric, COUNT(*)::float AS value FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") GROUP BY 1, 2 ORDER BY 1", "format": "time_series"}]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Daily spend vs estimated gross value",
+      "description": "The value series combines the environment-managed request and session assumptions.",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 12},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [
+        {"rawSql": "SELECT $__timeGroupAlias(\"startTime\", '1d'), 'Model spend' AS metric, SUM(spend)::float AS value FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") GROUP BY 1 ORDER BY 1", "format": "time_series"},
+        {"rawSql": "SELECT $__timeGroupAlias(logs.\"startTime\", '1d'), 'Estimated gross value' AS metric, ((COUNT(*) FILTER (WHERE COALESCE(logs.status, 'success') = 'success') * config.minutes_saved_per_request + COUNT(DISTINCT NULLIF(logs.session_id, '')) FILTER (WHERE COALESCE(logs.status, 'success') = 'success') * config.minutes_saved_per_session) / 60.0 * config.value_realization_factor * config.loaded_hourly_cost)::float AS value FROM \"LiteLLM_SpendLogs\" logs CROSS JOIN \"LiteLLM_ManagementROIConfig\" config WHERE $__timeFilter(logs.\"startTime\") AND config.singleton = 1 GROUP BY 1, config.minutes_saved_per_request, config.minutes_saved_per_session, config.value_realization_factor, config.loaded_hourly_cost ORDER BY 1", "format": "time_series"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD"}, "overrides": []}
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Spend by team",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 21},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT $__timeGroupAlias(logs.\"startTime\", '1d'), COALESCE(teams.team_alias, logs.team_id, 'unassigned') AS metric, SUM(logs.spend)::float AS value FROM \"LiteLLM_SpendLogs\" logs LEFT JOIN \"LiteLLM_TeamTable\" teams ON teams.team_id = logs.team_id WHERE $__timeFilter(logs.\"startTime\") GROUP BY 1, 2 ORDER BY 1", "format": "time_series"}],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD", "custom": {"stacking": {"mode": "normal"}}}, "overrides": []}
+    },
+    {
+      "id": 21,
+      "type": "barchart",
+      "title": "Requests and spend by model",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 21},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(model_group, model, 'unknown') AS \"Model\", COUNT(*)::float AS \"Requests\", SUM(spend)::float AS \"Spend\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") GROUP BY 1 ORDER BY \"Spend\" DESC LIMIT 15", "format": "table"}]
+    },
+    {
+      "id": 22,
+      "type": "table",
+      "title": "Budget governance",
+      "gridPos": {"h": 11, "w": 12, "x": 0, "y": 30},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT 'Team' AS \"Type\", COALESCE(team_alias, team_id, 'unnamed') AS \"Name\", COALESCE(spend, 0)::float AS \"Spend\", max_budget::float AS \"Budget\", CASE WHEN max_budget > 0 THEN (100.0 * COALESCE(spend, 0) / max_budget)::float END AS \"Utilization %\", COALESCE(blocked, false) AS \"Blocked\" FROM \"LiteLLM_TeamTable\" UNION ALL SELECT 'Key' AS \"Type\", COALESCE(key_alias, key_name, 'unnamed') AS \"Name\", COALESCE(spend, 0)::float AS \"Spend\", max_budget::float AS \"Budget\", CASE WHEN max_budget > 0 THEN (100.0 * COALESCE(spend, 0) / max_budget)::float END AS \"Utilization %\", COALESCE(blocked, false) AS \"Blocked\" FROM \"LiteLLM_VerificationToken\" ORDER BY \"Utilization %\" DESC NULLS LAST LIMIT 200", "format": "table"}]
+    },
+    {
+      "id": 23,
+      "type": "table",
+      "title": "Provider reliability by model",
+      "gridPos": {"h": 11, "w": 12, "x": 12, "y": 30},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT COALESCE(model_group, model, 'unknown') AS \"Model\", COUNT(*)::float AS \"Requests\", COUNT(*) FILTER (WHERE COALESCE(status, 'success') = 'success')::float AS \"Successful\", COALESCE(100.0 * COUNT(*) FILTER (WHERE COALESCE(status, 'success') = 'success') / NULLIF(COUNT(*), 0), 0)::float AS \"Success %\", SUM(spend)::float AS \"Spend\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") GROUP BY 1 ORDER BY \"Requests\" DESC LIMIT 100", "format": "table"}]
+    },
+    {
+      "id": 24,
+      "type": "table",
+      "title": "ROI contribution breakdown",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 41},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "WITH totals AS (SELECT COUNT(*) FILTER (WHERE COALESCE(status, 'success') = 'success')::numeric AS requests, COUNT(DISTINCT NULLIF(session_id, '')) FILTER (WHERE COALESCE(status, 'success') = 'success')::numeric AS sessions FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")) SELECT 'Successful requests' AS \"Basis\", totals.requests::float AS \"Count\", config.minutes_saved_per_request::float AS \"Minutes each\", (totals.requests * config.minutes_saved_per_request / 60.0 * config.value_realization_factor)::float AS \"Realized hours\" FROM totals CROSS JOIN \"LiteLLM_ManagementROIConfig\" config WHERE config.singleton = 1 UNION ALL SELECT 'Distinct successful sessions', totals.sessions::float, config.minutes_saved_per_session::float, (totals.sessions * config.minutes_saved_per_session / 60.0 * config.value_realization_factor)::float FROM totals CROSS JOIN \"LiteLLM_ManagementROIConfig\" config WHERE config.singleton = 1", "format": "table"}]
+    },
+    {
+      "id": 25,
+      "type": "table",
+      "title": "Active ROI assumptions from environment",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 41},
+      "datasource": {"type": "postgres", "uid": "${DS_PG}"},
+      "targets": [{"rawSql": "SELECT minutes_saved_per_request::float AS \"Minutes / request\", minutes_saved_per_session::float AS \"Minutes / session\", value_realization_factor::float AS \"Realization factor\", loaded_hourly_cost::float AS \"Loaded hourly cost\", currency AS \"Currency\", updated_at AS \"Applied at\" FROM \"LiteLLM_ManagementROIConfig\" WHERE singleton = 1", "format": "table"}]
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

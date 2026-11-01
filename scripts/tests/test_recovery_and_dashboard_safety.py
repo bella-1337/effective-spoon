@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import hashlib
+import json
 import os
 import sys
 import tempfile
@@ -157,6 +158,44 @@ class RestoreSafetyTests(unittest.TestCase):
 
 
 class DashboardSupplyChainTests(unittest.TestCase):
+    def test_loki_healthcheck_uses_a_binary_present_in_distroless_image(self) -> None:
+        compose = (SCRIPTS.parent / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn('test: ["CMD", "/usr/bin/loki", "-version"]', compose)
+        self.assertNotIn('test: ["CMD", "/busybox/wget"', compose)
+
+    def test_all_provisioned_dashboards_are_valid_json(self) -> None:
+        root = SCRIPTS.parent
+        dashboards = list((root / "grafana" / "dashboards").glob("*/*.json"))
+        self.assertGreaterEqual(len(dashboards), 5)
+        for path in dashboards:
+            document = json.loads(path.read_text(encoding="utf-8"))
+            self.assertTrue(document.get("uid"), path)
+            self.assertTrue(document.get("title"), path)
+            self.assertIsInstance(document.get("panels"), list, path)
+
+    def test_management_roi_uses_environment_managed_config(self) -> None:
+        path = (
+            SCRIPTS.parent
+            / "grafana"
+            / "dashboards"
+            / "litellm-management"
+            / "litellm-management.json"
+        )
+        document = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(document["title"], "LiteLLM Management Summary")
+        variables = {item["name"]: item for item in document["templating"]["list"]}
+        self.assertEqual(set(variables), {"DS_PG"})
+        sql = "\n".join(
+            target.get("rawSql", "")
+            for panel in document["panels"]
+            for target in panel.get("targets", [])
+        )
+        self.assertIn('"LiteLLM_ManagementROIConfig"', sql)
+        self.assertIn("minutes_saved_per_request", sql)
+        self.assertIn("minutes_saved_per_session", sql)
+        self.assertIn("COUNT(DISTINCT NULLIF(session_id, ''))", sql)
+        self.assertNotIn("${roi_", sql)
+
     def test_dashboard_sources_are_immutable_and_checksummed(self) -> None:
         module = load_script("fetch-dashboards.py")
         for url, _relative, checksum in module.DASHBOARDS:

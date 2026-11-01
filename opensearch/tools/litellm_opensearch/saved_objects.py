@@ -8,6 +8,8 @@ documents written by opensearch-bridge and Data Prepper.
 from __future__ import annotations
 
 import json
+import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,6 +45,28 @@ LEVEL = "severityText"
 ATTR = "span.attributes."
 
 Metric = tuple[str, "str | None", str]
+
+
+def _roi_number(name: str, default: float, *, maximum: float) -> float:
+    raw = os.environ.get(name, str(default))
+    try:
+        value = float(raw)
+    except ValueError as error:
+        raise ValueError(f"{name} must be numeric") from error
+    if not 0 <= value <= maximum:
+        raise ValueError(f"{name} must be between 0 and {maximum:g}")
+    return value
+
+
+def roi_config() -> tuple[float, float, float, float, str]:
+    request_minutes = _roi_number("ROI_MINUTES_SAVED_PER_REQUEST", 15, maximum=1440)
+    session_minutes = _roi_number("ROI_MINUTES_SAVED_PER_SESSION", 0, maximum=10080)
+    hourly_cost = _roi_number("ROI_LOADED_HOURLY_COST", 75, maximum=10000)
+    realization = _roi_number("ROI_VALUE_REALIZATION_FACTOR", 0.25, maximum=1)
+    currency = os.environ.get("ROI_CURRENCY", "USD")
+    if not re.fullmatch(r"[A-Z]{3}", currency):
+        raise ValueError("ROI_CURRENCY must be a three-letter uppercase ISO 4217 code")
+    return request_minutes, session_minutes, hourly_cost, realization, currency
 
 
 def expression_query(*names: str) -> str:
@@ -572,8 +596,20 @@ class Builder:
             height=height,
         )
 
+    def vega(self, object_id: str, title: str, spec: dict[str, Any], *, width: int = 48, height: int = 10) -> Panel:
+        return self.visualization(
+            object_id,
+            title,
+            "vega",
+            [],
+            {"spec": json.dumps(spec, indent=2), "enableExternalUrls": False},
+            width=width,
+            height=height,
+        )
+
 
 DASHBOARD_LINKS = (
+    ("litellm-dash-management", "LiteLLM Management Summary", "Executive usage, governance, reliability, and directional ROI"),
     ("litellm-dash-stack", "LiteLLM Stack (dev/prod)", "Requests, latency, failures, spend, deployments, guardrails, cache"),
     ("litellm-dash-cost", "LiteLLM Cost Attribution", "Spend, tokens, and expensive requests by model and key"),
     ("litellm-dash-admin", "LiteLLM Admin Overview", "Users, keys, teams, budgets, provider errors, audit changes"),
@@ -626,6 +662,378 @@ def _overview(b: Builder) -> None:
             b.latest("litellm-vis-overview-up", "Scrape targets up", "target_up", group="labels.job", width=48, height=10),
         ],
         time_from="now-1h",
+    )
+
+
+def _management(b: Builder) -> None:
+    request_minutes, session_minutes, hourly_cost, realization, currency = roi_config()
+    roi_spec = {
+        "$schema": "https://vega.github.io/schema/vega/v5.json",
+        "description": "Directional management value estimate from successful LiteLLM requests and direct model spend.",
+        "autosize": {"type": "fit", "contains": "padding"},
+        "padding": 10,
+        "data": [
+            {
+                "name": "summary",
+                "url": {
+                    "%context%": True,
+                    "%timefield%": "@timestamp",
+                    "index": "litellm-spend-*",
+                    "body": {
+                        "size": 0,
+                        "aggs": {
+                            "summary": {
+                                "filters": {"filters": [{"match_all": {}}]},
+                                "aggs": {
+                                    "successful": {
+                                        "filter": {"term": {"status": "success"}},
+                                        "aggs": {
+                                            "sessions": {
+                                                "cardinality": {
+                                                    "field": "session_hash",
+                                                    "precision_threshold": 40000,
+                                                }
+                                            }
+                                        },
+                                    },
+                                    "spend": {"sum": {"field": "spend"}},
+                                },
+                            }
+                        },
+                    },
+                },
+                "format": {"property": "aggregations.summary.buckets"},
+                "transform": [
+                    {
+                        "type": "formula",
+                        "as": "request_hours",
+                        "expr": f"datum.successful.doc_count * {request_minutes} / 60 * {realization}",
+                    },
+                    {
+                        "type": "formula",
+                        "as": "session_hours",
+                        "expr": f"datum.successful.sessions.value * {session_minutes} / 60 * {realization}",
+                    },
+                    {"type": "formula", "as": "hours", "expr": "datum.request_hours + datum.session_hours"},
+                    {"type": "formula", "as": "gross", "expr": f"datum.hours * {hourly_cost}"},
+                    {"type": "formula", "as": "net", "expr": "datum.gross - datum.spend.value"},
+                    {
+                        "type": "formula",
+                        "as": "roi",
+                        "expr": "datum.spend.value > 0 ? datum.net / datum.spend.value * 100 : 0",
+                    },
+                ],
+            }
+        ],
+        "scales": [{"name": "cards", "type": "band", "domain": ["hours", "gross", "net", "roi"], "range": "width", "padding": 0.08}],
+        "marks": [
+            {
+                "type": "rect",
+                "from": {"data": "summary"},
+                "encode": {
+                    "enter": {
+                        "x": {"signal": "scale('cards', 'hours')"},
+                        "width": {"signal": "bandwidth('cards')"},
+                        "y": {"value": 0},
+                        "height": {"signal": "height"},
+                        "fill": {"value": "#1f2937"},
+                        "cornerRadius": {"value": 6},
+                    }
+                },
+            },
+            {
+                "type": "rect",
+                "from": {"data": "summary"},
+                "encode": {
+                    "enter": {
+                        "x": {"signal": "scale('cards', 'gross')"},
+                        "width": {"signal": "bandwidth('cards')"},
+                        "y": {"value": 0},
+                        "height": {"signal": "height"},
+                        "fill": {"value": "#1f2937"},
+                        "cornerRadius": {"value": 6},
+                    }
+                },
+            },
+            {
+                "type": "rect",
+                "from": {"data": "summary"},
+                "encode": {
+                    "enter": {
+                        "x": {"signal": "scale('cards', 'net')"},
+                        "width": {"signal": "bandwidth('cards')"},
+                        "y": {"value": 0},
+                        "height": {"signal": "height"},
+                        "fill": {"value": "#1f2937"},
+                        "cornerRadius": {"value": 6},
+                    }
+                },
+            },
+            {
+                "type": "rect",
+                "from": {"data": "summary"},
+                "encode": {
+                    "enter": {
+                        "x": {"signal": "scale('cards', 'roi')"},
+                        "width": {"signal": "bandwidth('cards')"},
+                        "y": {"value": 0},
+                        "height": {"signal": "height"},
+                        "fill": {"value": "#1f2937"},
+                        "cornerRadius": {"value": 6},
+                    }
+                },
+            },
+            {
+                "type": "text",
+                "from": {"data": "summary"},
+                "encode": {
+                    "enter": {
+                        "x": {"signal": "scale('cards', 'hours') + bandwidth('cards') / 2"},
+                        "y": {"signal": "height * 0.68"},
+                        "align": {"value": "center"},
+                        "fill": {"value": "#f9fafb"},
+                        "fontSize": {"value": 25},
+                    },
+                    "update": {"text": {"signal": "format(datum.hours, ',.1f')"}},
+                },
+            },
+            {
+                "type": "text",
+                "from": {"data": "summary"},
+                "encode": {
+                    "enter": {
+                        "x": {"signal": "scale('cards', 'gross') + bandwidth('cards') / 2"},
+                        "y": {"signal": "height * 0.68"},
+                        "align": {"value": "center"},
+                        "fill": {"value": "#f9fafb"},
+                        "fontSize": {"value": 25},
+                    },
+                    "update": {"text": {"signal": f"'{currency} ' + format(datum.gross, ',.0f')"}},
+                },
+            },
+            {
+                "type": "text",
+                "from": {"data": "summary"},
+                "encode": {
+                    "enter": {
+                        "x": {"signal": "scale('cards', 'net') + bandwidth('cards') / 2"},
+                        "y": {"signal": "height * 0.68"},
+                        "align": {"value": "center"},
+                        "fill": {"value": "#f9fafb"},
+                        "fontSize": {"value": 25},
+                    },
+                    "update": {"text": {"signal": f"'{currency} ' + format(datum.net, ',.0f')"}},
+                },
+            },
+            {
+                "type": "text",
+                "from": {"data": "summary"},
+                "encode": {
+                    "enter": {
+                        "x": {"signal": "scale('cards', 'roi') + bandwidth('cards') / 2"},
+                        "y": {"signal": "height * 0.68"},
+                        "align": {"value": "center"},
+                        "fill": {"value": "#f9fafb"},
+                        "fontSize": {"value": 25},
+                    },
+                    "update": {"text": {"signal": "format(datum.roi, ',.0f') + '%'"}},
+                },
+            },
+            *[
+                {
+                    "type": "text",
+                    "from": {"data": "summary"},
+                    "encode": {
+                        "enter": {
+                            "x": {"signal": f"scale('cards', '{key}') + bandwidth('cards') / 2"},
+                            "y": {"signal": "height * 0.30"},
+                            "align": {"value": "center"},
+                            "fill": {"value": "#9ca3af"},
+                            "fontSize": {"value": 13},
+                            "text": {"value": label},
+                        }
+                    },
+                }
+                for key, label in (
+                    ("hours", "Estimated hours saved"),
+                    ("gross", "Estimated gross value"),
+                    ("net", "Estimated net value"),
+                    ("roi", "Indicative ROI"),
+                )
+            ],
+        ],
+    }
+    b.dashboard(
+        "litellm-dash-management",
+        "LiteLLM Management Summary",
+        "Executive usage, cost, reliability, governance, and directional ROI indicators",
+        [
+            b.markdown(
+                "litellm-vis-management-guidance",
+                "How to read this dashboard",
+                "### Management summary\n\n"
+                "Usage and spend are copied from LiteLLM's system-of-record PostgreSQL tables. "
+                f"**ROI is directional, not an accounting measure.** Current `.env` assumptions are "
+                f"{request_minutes:g} minutes per successful request plus {session_minutes:g} minutes per "
+                f"distinct successful session, a {realization:g} realization factor, and {currency} "
+                f"{hourly_cost:g} loaded hourly cost, then direct model spend is subtracted. Validate these "
+                "assumptions against local workflows before using the estimate in a business case. Set either "
+                "request or session minutes to zero when those measures would represent the same saved work.",
+                height=9,
+            ),
+            b.controls(
+                "litellm-vis-management-controls",
+                "Filters",
+                [(SPEND, "environment", "Environment"), (SPEND, "team", "Team"), (SPEND, "model_name", "Model")],
+            ),
+            b.stat("litellm-vis-management-requests", "Requests", SPEND, [("count", None, "Requests")], width=8),
+            b.stat(
+                "litellm-vis-management-success",
+                "Successful requests",
+                SPEND,
+                [("count", None, "Successful")],
+                query="status:success",
+                width=8,
+            ),
+            b.stat(
+                "litellm-vis-management-spend",
+                "Model spend",
+                SPEND,
+                [("sum", "spend", "Spend ($)")],
+                width=8,
+            ),
+            b.stat(
+                "litellm-vis-management-sessions",
+                "Distinct successful sessions",
+                SPEND,
+                [("cardinality", "session_hash", "Sessions")],
+                query="status:success and session_hash:*",
+                width=8,
+            ),
+            b.stat(
+                "litellm-vis-management-users",
+                "Provisioned users",
+                ENTITIES,
+                [("count", None, "Users")],
+                query="entity_type:user",
+                width=8,
+            ),
+            b.stat(
+                "litellm-vis-management-keys",
+                "Usable virtual keys",
+                ENTITIES,
+                [("count", None, "Keys")],
+                query="entity_type:key and usable:true",
+                width=8,
+            ),
+            b.stat(
+                "litellm-vis-management-teams",
+                "Active teams",
+                ENTITIES,
+                [("count", None, "Teams")],
+                query="entity_type:team and blocked:false",
+                width=8,
+            ),
+            b.vega("litellm-vis-management-roi", "Directional ROI indication", roi_spec),
+            b.stat(
+                "litellm-vis-management-budgeted-keys",
+                "Keys with budgets",
+                ENTITIES,
+                [("count", None, "Budgeted keys")],
+                query="entity_type:key and max_budget:*",
+                width=8,
+            ),
+            b.stat(
+                "litellm-vis-management-budgeted-teams",
+                "Teams with budgets",
+                ENTITIES,
+                [("count", None, "Budgeted teams")],
+                query="entity_type:team and max_budget:*",
+                width=8,
+            ),
+            b.stat(
+                "litellm-vis-management-unusable-keys",
+                "Blocked or expired keys",
+                ENTITIES,
+                [("count", None, "Unavailable keys")],
+                query="entity_type:key and usable:false",
+                width=8,
+            ),
+            b.stat(
+                "litellm-vis-management-unassigned",
+                "Unassigned spend",
+                SPEND,
+                [("sum", "spend", "Spend ($)")],
+                query='team:"unassigned"',
+                width=8,
+            ),
+            b.stat(
+                "litellm-vis-management-errors",
+                "Provider errors",
+                ERRORS,
+                [("count", None, "Errors")],
+                width=8,
+            ),
+            b.stat(
+                "litellm-vis-management-changes",
+                "Administrative changes",
+                AUDIT,
+                [("count", None, "Changes")],
+                width=8,
+            ),
+            b.xy(
+                "litellm-vis-management-volume",
+                "Daily request volume",
+                SPEND,
+                [("count", None, "Requests")],
+                split="status",
+                chart="histogram",
+                interval="1d",
+                stacked=True,
+            ),
+            b.xy(
+                "litellm-vis-management-value-trend",
+                "Daily model spend",
+                SPEND,
+                [("sum", "spend", "Spend ($)")],
+                split="environment",
+                interval="1d",
+                y_label="$",
+            ),
+            b.hbar(
+                "litellm-vis-management-team-spend",
+                "Spend by team",
+                SPEND,
+                ("sum", "spend", "Spend ($)"),
+                "team",
+                size=15,
+            ),
+            b.hbar(
+                "litellm-vis-management-model-spend",
+                "Spend by model",
+                SPEND,
+                ("sum", "spend", "Spend ($)"),
+                "model_name",
+                size=15,
+            ),
+            b.search(
+                "litellm-search-management-budgets",
+                "Budget governance",
+                ENTITIES,
+                ["environment", "entity_type", "name", "owner", "team", "spend", "max_budget", "blocked", "usable"],
+                query="entity_type:(team or key)",
+                sort=[["spend", "desc"]],
+            ),
+            b.search(
+                "litellm-search-management-audit",
+                "Recent administrative changes",
+                AUDIT,
+                ["environment", "changed_by", "action", "object_type", "object_id"],
+                sort=[["@timestamp", "desc"]],
+            ),
+        ],
+        time_from="now-30d",
+        refresh_ms=300000,
     )
 
 
@@ -1300,6 +1708,7 @@ def build_all() -> list[dict[str, Any]]:
     builder.index_patterns()
     for section in (
         _overview,
+        _management,
         _stack,
         _cost,
         _admin,

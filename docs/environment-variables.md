@@ -113,10 +113,18 @@ printf 'sk-lf-%s\n' "$(openssl rand -hex 16)"
 | `OTEL_GENAI_CAPTURE_MESSAGE_CONTENT` | `no_content`; enum supported by the installed OpenTelemetry instrumentation | Controls whether prompt and response content is captured in telemetry. Keep `no_content` to avoid recording credentials, personal data, or proprietary prompts. |
 | `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS` | `.*`; regular expression | Excludes matching FastAPI URLs from automatic tracing. The default excludes all auto-instrumented routes because stack-owned callbacks provide controlled telemetry. Test regex changes to avoid sensitive or high-cardinality trace data. |
 | `GRAFANA_ALLOW_SIGN_UP` | `false`; boolean; `grafana` profile only | Enables self-service Grafana registration. Keep disabled; provision users through administrator-controlled workflows. |
+| `ROI_MINUTES_SAVED_PER_REQUEST` | `15`; 0-1440 | Scenario minutes attributed to each successful request. Replace the default with locally measured evidence; set to `0` when session-level value captures the same work. |
+| `ROI_MINUTES_SAVED_PER_SESSION` | `0`; 0-10080 | Scenario minutes attributed once to each distinct successful `session_id`. The zero default prevents unsupported value and double counting until local session evidence exists. |
+| `ROI_LOADED_HOURLY_COST` | `75`; 0-10000 | Fully loaded hourly labor cost used by the scenario. Use a finance-approved regional value in the same currency as model spend. |
+| `ROI_VALUE_REALIZATION_FACTOR` | `0.25`; 0-1 | Portion of theoretical time savings expected to become usable value. Validate through local workflow sampling. |
+| `ROI_CURRENCY` | `USD`; three-letter uppercase ISO 4217 code | Display currency for the scenario. LiteLLM model spend and loaded hourly cost must use this same currency before net value is meaningful. |
 | `PROMETHEUS_RETENTION_TIME` | `15d`; Prometheus duration | Maximum age of Prometheus samples. Size retention can evict data earlier. Plan storage before increasing it. |
 | `PROMETHEUS_RETENTION_SIZE` | `10GB`; Prometheus size | Maximum Prometheus TSDB size. Keep headroom on the Docker volume filesystem; Prometheus treats this as an upper retention target, not a disk quota. |
 
 All variables in this section require recreation of their consuming service.
+ROI changes additionally require rerunning `postgres-init` and
+`opensearch-dashboards-setup`; recreate `opensearch-bridge` so new session
+pseudonyms are indexed.
 Retention changes do not recover data already deleted.
 
 ## OpenSearch observability
