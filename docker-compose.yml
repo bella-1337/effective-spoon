@@ -74,7 +74,7 @@ volumes:
 services:
   traefik:
     logging: *default-logging
-    image: traefik:v3@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0
+    image: traefik:v3.7.17@sha256:30ff62491aacdb862ceb8c9edcf2627da638d7deafdd4b6dab32fe34f8aa3e90
     command:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
@@ -121,7 +121,7 @@ services:
 
   traefik-docker-proxy:
     logging: *default-logging
-    image: ghcr.io/tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    image: ghcr.io/tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
     environment:
       CONTAINERS: "1"
       EVENTS: "1"
@@ -146,7 +146,7 @@ services:
 
   postgres:
     logging: *default-logging
-    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     environment:
       POSTGRES_DB: litellm_prod
       POSTGRES_USER: ${PG_USER:-litellm}
@@ -163,7 +163,7 @@ services:
 
   postgres-init:
     logging: *default-logging
-    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     environment:
       PGHOST: postgres
       PGUSER: ${PG_USER:-litellm}
@@ -220,7 +220,7 @@ services:
 
   vector-postgres:
     logging: *default-logging
-    image: pgvector/pgvector:0.8.1-pg16@sha256:33198da2828a14c30348d2ccb4750833d5ed9a44c88d840a0e523d7417120337
+    image: pgvector/pgvector:0.8.7-pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
     environment:
       POSTGRES_DB: vector_store
       POSTGRES_USER: vector
@@ -239,7 +239,7 @@ services:
   qdrant:
     logging: *default-logging
     profiles: [dev]
-    image: qdrant/qdrant:v1.19.2@sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad
+    image: qdrant/qdrant:v1.20.0@sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
     environment:
       QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
       QDRANT__TELEMETRY_DISABLED: "true"
@@ -311,7 +311,7 @@ services:
 
   pgvector-migrate:
     logging: *default-logging
-    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     environment:
       PGHOST: vector-postgres
       PGDATABASE: vector_store
@@ -334,7 +334,7 @@ services:
 
   pgvector-access-init:
     logging: *default-logging
-    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     environment:
       PGHOST: vector-postgres
       PGDATABASE: vector_store
@@ -361,7 +361,7 @@ services:
 
   presidio-analyzer:
     logging: *default-logging
-    image: mcr.microsoft.com/presidio-analyzer:latest@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
+    image: mcr.microsoft.com/presidio-analyzer:2.2.362@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
     environment:
       PRESIDIO_NLP_ENGINE: ${PRESIDIO_NLP_ENGINE:-spacy}
       PRESIDIO_SUPPORTED_LANGUAGES: ${PRESIDIO_SUPPORTED_LANGUAGES:-en}
@@ -383,7 +383,7 @@ services:
 
   presidio-anonymizer:
     logging: *default-logging
-    image: mcr.microsoft.com/presidio-anonymizer:latest@sha256:a10a12a2a613d13cf29d3ad3641e3258444dd8c90403dd644a0a114c472c2483
+    image: mcr.microsoft.com/presidio-anonymizer:2.2.362@sha256:a10a12a2a613d13cf29d3ad3641e3258444dd8c90403dd644a0a114c472c2483
     networks: [internal]
     restart: unless-stopped
     healthcheck:
@@ -395,7 +395,7 @@ services:
 
   searxng:
     logging: *default-logging
-    image: searxng/searxng:latest@sha256:76b0bf285aca014c7191fc4d9234c4bfb358624ac33d8883833d496c059ec072
+    image: searxng/searxng:2026.10.30-ffa88e3ba@sha256:f4aa660c54d062dedb268be84e821ea24e39f48c7a496af8dd02cc9eedb93847
     volumes:
       - ./searxng:/etc/searxng:rw
     environment:
@@ -415,7 +415,7 @@ services:
   xberg:
     logging: *default-logging
     profiles: [prod, dev]
-    image: ghcr.io/xberg-io/xberg:core@sha256:f0a66d39f7322c273bb4ba2b53f5ca00dee9f2f1b3ebbec26a283017e07a865b
+    image: ghcr.io/xberg-io/xberg:1.3.10-core@sha256:f0a66d39f7322c273bb4ba2b53f5ca00dee9f2f1b3ebbec26a283017e07a865b
     command:
       - mcp
       - --transport
@@ -501,7 +501,7 @@ services:
 
   prometheus:
     logging: *default-logging
-    image: prom/prometheus:latest@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -519,7 +519,7 @@ services:
 
   prometheus-secrets-init:
     logging: *default-logging
-    image: prom/prometheus:latest@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
     command:
@@ -542,7 +542,7 @@ services:
   loki:
     logging: *default-logging
     profiles: [grafana]
-    image: grafana/loki:3.5.12@sha256:c2a6860c2f94ecc98fffce7c10e6c8b350cf25e2ea3daa255dff27d7c6a4dffc
+    image: grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
     command: -config.file=/etc/loki/config.yml
     volumes:
       - ./loki/config.yml:/etc/loki/config.yml:ro
@@ -560,7 +560,7 @@ services:
 
   alloy:
     logging: *default-logging
-    image: grafana/alloy:v1.10.2@sha256:bcf27f18c4402869af112fb39e35e1db3804a404686f4caa20bdf77814219223
+    image: grafana/alloy:v1.21.3@sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
     user: "473:473"
     command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy/data"]
     environment:
@@ -579,7 +579,7 @@ services:
   alloy-loki:
     logging: *default-logging
     profiles: [grafana]
-    image: grafana/alloy:v1.10.2@sha256:bcf27f18c4402869af112fb39e35e1db3804a404686f4caa20bdf77814219223
+    image: grafana/alloy:v1.21.3@sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
     user: "473:473"
     command: ["run", "/etc/alloy/loki.alloy", "--storage.path=/var/lib/alloy/data"]
     environment:
@@ -597,7 +597,7 @@ services:
 
   alloy-docker-proxy:
     logging: *default-logging
-    image: ghcr.io/tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    image: ghcr.io/tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
     environment:
       CONTAINERS: "1"
       EVENTS: "1"
@@ -621,7 +621,7 @@ services:
 
   langfuse-postgres:
     logging: *default-logging
-    image: postgres:17@sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe
+    image: postgres:17.11@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
     environment:
       POSTGRES_DB: langfuse
       POSTGRES_USER: langfuse
@@ -640,7 +640,7 @@ services:
 
   langfuse-clickhouse:
     logging: *default-logging
-    image: clickhouse/clickhouse-server:25.12@sha256:8a790dd3468db22b1d4e7b18a176f378ff5ff6053b9c48dd4ea1fa71a24c5ba6
+    image: clickhouse/clickhouse-server:26.3.62.3@sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a
     user: "101:101"
     environment:
       CLICKHOUSE_DB: default
@@ -662,7 +662,7 @@ services:
 
   langfuse-clickhouse-observability-setup:
     logging: *default-logging
-    image: clickhouse/clickhouse-server:25.12@sha256:8a790dd3468db22b1d4e7b18a176f378ff5ff6053b9c48dd4ea1fa71a24c5ba6
+    image: clickhouse/clickhouse-server:26.3.62.3@sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
@@ -716,7 +716,7 @@ services:
 
   langfuse-redis:
     logging: *default-logging
-    image: redis:7.4.11@sha256:44960b3100c48159a66d28c18b0588c193492e25f7551d60e51dd464fc3eca5b
+    image: redis:7.4.12@sha256:b6b6e3dc0c0952737748e55d5d885272840c7e42ba41ab1d5489f693419882f5
     command:
       - redis-server
       - --requirepass
@@ -737,7 +737,7 @@ services:
 
   langfuse-worker:
     logging: *default-logging
-    image: docker.langfuse.com/langfuse/langfuse-worker:4@sha256:48f8af2c4b6bbf929380f301ade18cf99e7b31331fd26dfaf253ce670e5b39a2
+    image: docker.langfuse.com/langfuse/langfuse-worker:4.72.0@sha256:aa1724b989a00f1e4ca9930709202489c73deaaf2f1116bbd3d71c77edb8fedb
     environment:
       <<: *langfuse-environment
     depends_on:
@@ -762,7 +762,7 @@ services:
 
   langfuse-web:
     logging: *default-logging
-    image: docker.langfuse.com/langfuse/langfuse:4@sha256:e4cc4bfd0f77285d7454135e1bd14020abdd5c4217a2f0e824b8abcbf3e3cc0f
+    image: docker.langfuse.com/langfuse/langfuse:4.72.0@sha256:c311fd9db4b69f6514fdcb1b86a2a105d5a4ed51fbf0ded033ff2722459c804a
     environment:
       <<: *langfuse-environment
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?Set LANGFUSE_NEXTAUTH_SECRET in .env}
@@ -810,7 +810,7 @@ services:
   grafana:
     logging: *default-logging
     profiles: [grafana]
-    image: grafana/grafana:latest@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572
+    image: grafana/grafana:13.3.0@sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205
     entrypoint:
       - /bin/sh
       - -ec
@@ -1064,7 +1064,7 @@ services:
   litellm-prod:
     logging: *default-logging
     profiles: [prod]
-    image: ghcr.io/berriai/litellm:v1.106.3@sha256:74d0696a9f0afcc993c7659d246f0c542f003368298633e852228250779f1032
+    image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
     command:
       - --config=/app/config.yaml
       - --port=4000
@@ -1123,7 +1123,7 @@ services:
   litellm-demo-data-prod:
     logging: *default-logging
     profiles: [demo]
-    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     environment:
       PGHOST: postgres
       PGDATABASE: litellm_prod
@@ -1224,7 +1224,7 @@ services:
   litellm-demo-data-dev:
     logging: *default-logging
     profiles: [dev]
-    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     environment:
       PGHOST: postgres
       PGDATABASE: litellm_dev
@@ -1285,7 +1285,7 @@ services:
 
   postgres-exporter:
     logging: *default-logging
-    image: prometheuscommunity/postgres-exporter:latest@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
+    image: prometheuscommunity/postgres-exporter:v0.20.1@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
     environment:
       DATA_SOURCE_NAME: postgresql://litellm_exporter:${PG_EXPORTER_PASSWORD:?Set PG_EXPORTER_PASSWORD in .env}@postgres:5432/postgres?sslmode=disable
     depends_on:
@@ -1296,7 +1296,7 @@ services:
 
   pgvector-exporter:
     logging: *default-logging
-    image: prometheuscommunity/postgres-exporter:latest@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
+    image: prometheuscommunity/postgres-exporter:v0.20.1@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
     environment:
       DATA_SOURCE_NAME: postgresql://vector_exporter:${PG_VECTOR_EXPORTER_PASSWORD:?Set PG_VECTOR_EXPORTER_PASSWORD in .env}@vector-postgres:5432/vector_store?sslmode=disable
     depends_on:
@@ -1307,7 +1307,7 @@ services:
 
   node-exporter:
     logging: *default-logging
-    image: prom/node-exporter:latest@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+    image: prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
     pid: host
     command:
       - --path.rootfs=/host
@@ -1321,7 +1321,7 @@ services:
   image-security-docker-proxy:
     logging: *default-logging
     profiles: [security]
-    image: ghcr.io/tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    image: ghcr.io/tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
     environment:
       CONTAINERS: "1"
       IMAGES: "1"
@@ -1388,7 +1388,7 @@ services:
 
   cadvisor:
     logging: *default-logging
-    image: gcr.io/cadvisor/cadvisor:latest@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
+    image: gcr.io/cadvisor/cadvisor:v0.55.1@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
     privileged: true
     volumes:
       - /:/rootfs:ro
@@ -1400,6 +1400,6 @@ services:
 
   blackbox:
     logging: *default-logging
-    image: prom/blackbox-exporter:latest@sha256:e753ff9f3fc458d02cca5eddab5a77e1c175eee484a8925ac7d524f04366c2fc
+    image: prom/blackbox-exporter:v0.29.1@sha256:ea1c7aa3ef3f307cd03e85f34abb604478ccb90b567fc690da0cd9776da76b13
     networks: [internal]
     restart: unless-stopped

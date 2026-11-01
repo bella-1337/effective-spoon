@@ -506,7 +506,10 @@ headers = {
 result = asyncio.run(
     apply_hook(
         {
-            "metadata": {"trace_user_id": "caller-metadata"},
+            "metadata": {
+                "trace_user_id": "caller-metadata",
+                "session_id": "caller-session",
+            },
             "user": "caller-user",
             "proxy_server_request": {"headers": headers},
         },
@@ -517,6 +520,8 @@ assert result["metadata"]["trace_user_id"].startswith("litellm-user-")
 assert result["metadata"]["trace_user_id"] not in {"caller-metadata", "spoofed-user"}
 assert result["proxy_server_request"]["headers"] == {"x-request-id": "preserved"}
 assert result["user"].startswith("litellm-user-")
+assert result["metadata"]["session_id"].startswith("litellm-session-")
+assert result["metadata"]["session_id"] != "caller-session"
 export_v2_span("upgrade-check-completion", result, "completion")
 
 result = asyncio.run(
@@ -528,6 +533,7 @@ result = asyncio.run(
             },
             "litellm_metadata": {
                 "trace_user_id": "litellm-metadata-spoof",
+                "conversation_id": "agent-conversation",
                 "logging-field": "preserved",
             },
             "user": "caller-user",
@@ -539,6 +545,8 @@ result = asyncio.run(
 assert result["litellm_metadata"]["trace_user_id"].startswith("litellm-user-")
 assert result["litellm_metadata"]["trace_user_id"] != "litellm-metadata-spoof"
 assert result["litellm_metadata"]["logging-field"] == "preserved"
+assert result["litellm_metadata"]["session_id"].startswith("litellm-session-")
+assert "conversation_id" not in result["litellm_metadata"]
 assert "trace_user_id" not in result["metadata"]
 assert result["metadata"]["provider-field"] == "preserved"
 assert result["proxy_server_request"]["headers"] == {"x-request-id": "preserved"}
@@ -554,6 +562,7 @@ spans = [
 assert len(spans) == 2
 for attributes in spans:
     assert attributes["user.id"].startswith("litellm-user-")
+    assert attributes["session.id"].startswith("litellm-session-")
     assert attributes["user.id"] not in {
         "raw-user@example.test",
         "raw-end-user",
@@ -576,6 +585,8 @@ for attributes in spans:
     assert "raw-key-hash" not in serialized
     assert "raw-key-alias" not in serialized
     assert "192.0.2.1" not in serialized
+    assert "caller-session" not in serialized
+    assert "agent-conversation" not in serialized
 
 excluded_urls = get_excluded_urls("FASTAPI")
 assert excluded_urls.url_disabled("https://llm.example.test/key/info?key=raw-secret")
@@ -583,7 +594,7 @@ assert excluded_urls.url_disabled("https://llm.example.test/key/info?key=raw-sec
 
 
 def check_langfuse_attribution(image: str) -> bool:
-    """Run the original attribution/exporter contract in a sealed container."""
+    """Run the trusted attribution and session exporter contract in a sealed container."""
     name = f"litellm-upgrade-check-attribution-{os.getpid()}-{time.time_ns()}"
     try:
         result = run(
@@ -790,12 +801,12 @@ def main() -> None:
                 "anywhere in the candidate image's litellm package; it may silently ignore that setting or provider",
             )
         if check_langfuse_attribution(candidate):
-            report.pass_("Candidate image preserves trusted pseudonymous Langfuse attribution without exporting raw principal metadata")
+            report.pass_("Candidate image preserves trusted pseudonymous Langfuse user and session attribution without exporting raw identifiers")
         else:
             report.fail_(
-                "Candidate image preserves trusted pseudonymous Langfuse attribution without exporting raw principal metadata",
+                "Candidate image preserves trusted pseudonymous Langfuse user and session attribution without exporting raw identifiers",
                 "the attribution hook did not replace caller identity fields, strip langfuse_* headers and raw "
-                "principal metadata, or remain compatible with the candidate image's Langfuse OTel exporter",
+                "principal/session metadata, or remain compatible with the candidate image's Langfuse OTel exporter",
             )
         isolated = not any(
             item in prod_output
@@ -814,7 +825,7 @@ def main() -> None:
             "Candidate image loads litellm/config.dev.yaml without error",
             "Candidate image's own output confirms it recognizes the modular search tool and the guardrail/policy modules in both profiles",
             "Candidate image's installed package recognizes the provider, Langfuse OTel, and privacy/retention identifiers this repository depends on",
-            "Candidate image preserves trusted pseudonymous Langfuse attribution without exporting raw principal metadata",
+            "Candidate image preserves trusted pseudonymous Langfuse user and session attribution without exporting raw identifiers",
             "Production and development candidate-image validations ran in fully isolated containers without leaking one profile's models into the other",
         ):
             report.fail_(message, "skipped: candidate image is unavailable")
