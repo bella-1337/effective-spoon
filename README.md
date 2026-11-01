@@ -14,7 +14,8 @@ available only for a private workstation or trusted development network.
 
 ## Prerequisites
 
-- Docker Engine or Docker Desktop with Docker Compose v2
+- Docker Engine or Docker Desktop with Docker Compose v2.20.0 or newer
+  (required for the top-level `include` model)
 - Python 3.11 or newer for the local CI validation entrypoint
 - An NVIDIA GPU and NVIDIA Container Toolkit for the development profile's
   BGE-M3 vLLM service
@@ -47,8 +48,8 @@ daemon. The host and development container must use the same CPU architecture.
 
 On first creation, the container copies `.env.example` to the ignored `.env`
 when one does not already exist and creates the ignored runtime directories. It
-does not generate production credentials, provider keys, or TLS material.
-Replace placeholders before starting any service.
+does not create `.env.optional`, generate production credentials, provider keys,
+or TLS material. Replace placeholders before starting any service.
 
 When opening a linked Git worktree, the worktree's common Git directory must
 also be accessible inside the container. If the common directory is outside the
@@ -107,8 +108,17 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Replace every required placeholder, review the optional operational defaults,
-and validate the result before startup:
+Optional services live in `compose.optional.yml` and remain gated by Compose
+profiles. Only when enabling Grafana, Langfuse, or the image-security monitor,
+create their separate environment file:
+
+```sh
+cp .env.optional.example .env.optional
+chmod 600 .env.optional
+```
+
+Replace every required placeholder, review the operational defaults, and
+validate the core result before startup:
 
 ```sh
 docker compose config --quiet
@@ -118,10 +128,10 @@ See the [environment variable reference](docs/environment-variables.md) for the
 complete catalog, accepted formats, defaults, security classification, rotation
 guidance, change impact, and operational practices.
 
-Do not commit `.env`, provider keys, database passwords, rendered Compose
-configuration, or TLS private keys. The example `.test` names are reserved for
-testing. If you choose other names, use the same names in `.env`, the certificate
-command, and host resolution.
+Do not commit `.env`, `.env.optional`, provider keys, database passwords,
+rendered Compose configuration, or TLS private keys. The example `.test` names
+are reserved for testing. If you choose other names, use the same names in the
+applicable environment file, the certificate command, and host resolution.
 
 ### Automatic virtual-key rotation
 
@@ -351,8 +361,9 @@ Validate both Compose profiles without starting containers:
 docker compose --profile prod config --quiet
 docker compose --profile dev config --quiet
 docker compose --profile prod --profile demo config --quiet
-docker compose --profile prod --profile grafana config --quiet
-docker compose --profile prod --profile langfuse config --quiet
+docker compose --env-file .env --env-file .env.optional --profile prod --profile grafana config --quiet
+docker compose --env-file .env --env-file .env.optional --profile prod --profile langfuse config --quiet
+docker compose --env-file .env --env-file .env.optional --profile security config --quiet
 ```
 
 To inspect the fully interpolated model, use `docker compose config` carefully:
@@ -385,13 +396,14 @@ and imports the dashboards. Grafana is optional; add the `grafana` profile to
 any command to start Grafana, Loki, and the Loki collector as well:
 
 ```sh
-docker compose --profile prod --profile grafana up -d
+docker compose --env-file .env --env-file .env.optional \
+  --profile prod --profile grafana up -d
 ```
 
 The Grafana container refuses to start until `GRAFANA_ADMIN_PASSWORD`,
-`GRAFANA_SECURITY_SECRET_KEY`, and `GRAFANA_DATABASE_PASSWORD` are set; re-run
-`docker compose up -d postgres-init` after setting the database password so the
-`grafana_ro` role exists.
+`GRAFANA_SECURITY_SECRET_KEY`, and `GRAFANA_DATABASE_PASSWORD` are set in
+`.env.optional`. The profile's one-shot `grafana-db-init` service creates and
+updates the least-privilege `grafana_ro` database role.
 
 Langfuse is also optional. OpenSearch already receives standards-based LiteLLM
 traces, so Langfuse is not needed when it would only duplicate observability.
@@ -399,10 +411,11 @@ Enable it when you specifically want Langfuse's LLM trace UI, datasets, prompt
 management, or evaluations:
 
 ```sh
-docker compose --profile prod --profile langfuse up -d
+docker compose --env-file .env --env-file .env.optional \
+  --profile prod --profile langfuse up -d
 ```
 
-Set the `LANGFUSE_*` values in the optional section of `.env` first. The
+Set the `LANGFUSE_*` values in `.env.optional` first. The
 `langfuse-preflight` job rejects missing credentials before any Langfuse
 datastore starts. When the profile is absent, LiteLLM removes the Langfuse
 callback and attribution hook from its generated runtime config; OpenSearch
@@ -1520,7 +1533,8 @@ changing a rule:
 
 ```bash
 docker compose up -d --force-recreate node-exporter opensearch-setup opensearch-bridge
-docker compose --profile grafana up -d --force-recreate grafana   # optional profile
+docker compose --env-file .env --env-file .env.optional \
+  --profile grafana up -d --force-recreate grafana
 ```
 
 Provisioned rules alert on:
@@ -1561,7 +1575,7 @@ than a silent fallback:
 
 The optional `security` Compose profile runs the same scanner and policy inside
 the stack. It executes once when started and then daily at 02:45 in the host's
-timezone. Set the deployment account's Linux UID and GID in `.env` so the
+timezone. Set the deployment account's Linux UID and GID in `.env.optional` so the
 non-root monitor can write the three bind-mounted runtime directories:
 
 ```bash
@@ -1573,13 +1587,15 @@ Use `id -u` and `id -g` on the Linux deployment host rather than assuming those
 example values. Start only the security services:
 
 ```bash
-docker compose --profile security up -d --build image-security-monitor
-docker compose logs -f image-security-monitor
+docker compose --env-file .env --env-file .env.optional \
+  --profile security up -d --build image-security-monitor
+docker compose --env-file .env --env-file .env.optional \
+  logs -f image-security-monitor
 ```
 
 Change the daily time or disable the immediate startup scan with
 `IMAGE_SECURITY_SCHEDULE_HOUR`, `IMAGE_SECURITY_SCHEDULE_MINUTE`, and
-`IMAGE_SECURITY_RUN_ON_START` in `.env`. `COMPOSE_PROJECT_NAME` must match the
+`IMAGE_SECURITY_RUN_ON_START` in `.env.optional`. `COMPOSE_PROJECT_NAME` must match the
 project label on the containers being scanned; `.env.example` pins it to
 `litellm-stack` so it does not vary with the checkout directory.
 
@@ -1599,7 +1615,8 @@ isolated and pinned as configured.
 Stop and remove the in-stack scheduler with:
 
 ```bash
-docker compose --profile security rm -sf image-security-monitor image-security-docker-proxy
+docker compose --env-file .env --env-file .env.optional \
+  --profile security rm -sf image-security-monitor image-security-docker-proxy
 ```
 
 ### Install the nightly Linux host schedule

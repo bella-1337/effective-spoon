@@ -7,6 +7,7 @@ readonly ROOT
 cd "$ROOT"
 
 created_env=0
+created_optional_env=0
 created_secret=0
 
 cleanup() {
@@ -16,6 +17,9 @@ cleanup() {
   fi
   if ((created_env)); then
     rm -f -- .env
+  fi
+  if ((created_optional_env)); then
+    rm -f -- .env.optional
   fi
 }
 trap cleanup EXIT HUP INT TERM
@@ -38,6 +42,12 @@ if [[ ! -f .env ]]; then
   cp -- .env.example .env
   chmod 600 .env
   created_env=1
+fi
+
+if [[ ! -f .env.optional ]]; then
+  cp -- .env.optional.example .env.optional
+  chmod 600 .env.optional
+  created_optional_env=1
 fi
 
 if [[ ! -f litellm/secrets/litellm-master-key ]]; then
@@ -97,7 +107,9 @@ if failures:
 PY
 
 echo "==> Validating every Compose profile and game-day safety contracts"
-python3 scripts/game-day-preflight.py --env-file .env
+python3 scripts/game-day-preflight.py \
+  --env-file .env \
+  --optional-env-file .env.optional
 
 echo "==> Checking tracked changes for whitespace errors"
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then

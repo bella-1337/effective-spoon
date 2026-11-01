@@ -34,6 +34,16 @@ def parse_args() -> argparse.Namespace:
         default=ROOT / ".env",
         help="environment file used to render every Compose profile",
     )
+    parser.add_argument(
+        "--optional-env-file",
+        type=Path,
+        default=(
+            ROOT / ".env.optional"
+            if (ROOT / ".env.optional").is_file()
+            else ROOT / ".env.optional.example"
+        ),
+        help="optional-profile environment file used after the core environment",
+    )
     return parser.parse_args()
 
 
@@ -43,9 +53,16 @@ def main() -> int:
     if not env_file.is_file() or env_file.is_symlink():
         print(f"ERROR: environment file is missing or unsafe: {env_file}", file=sys.stderr)
         return 2
+    optional_env_file = args.optional_env_file.expanduser().resolve()
+    if not optional_env_file.is_file() or optional_env_file.is_symlink():
+        print(
+            f"ERROR: optional environment file is missing or unsafe: {optional_env_file}",
+            file=sys.stderr,
+        )
+        return 2
 
     try:
-        config = load_compose_config(env_file)
+        config = load_compose_config(env_file, optional_env_file)
         failures = validate_contracts(config)
     except (OSError, ValueError, ScriptError) as error:
         print(f"ERROR: {error}", file=sys.stderr)

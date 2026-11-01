@@ -52,7 +52,8 @@ backend is unavailable; OpenSearch tracing remains the default path.
 2. Stop only the Langfuse application tier:
 
    ```bash
-   docker compose --profile langfuse stop langfuse-web langfuse-worker
+   docker compose --env-file .env --env-file .env.optional \
+     --profile langfuse stop langfuse-web langfuse-worker
    ```
 
 3. Wait two normal request intervals, then repeat the same production
@@ -63,7 +64,8 @@ backend is unavailable; OpenSearch tracing remains the default path.
 5. Start Langfuse and wait for health:
 
    ```bash
-   docker compose --profile langfuse up -d --wait langfuse-web langfuse-worker
+   docker compose --env-file .env --env-file .env.optional \
+     --profile langfuse up -d --wait langfuse-web langfuse-worker
    ```
 
 6. Send one more completion and confirm new tracing resumes.

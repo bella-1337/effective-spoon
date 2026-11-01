@@ -1,36 +1,8 @@
-name: ${COMPOSE_PROJECT_NAME:-litellm-stack}
+include:
+  - path: compose.optional.yml
+    env_file: .env.optional.example
 
-x-langfuse-environment: &langfuse-environment
-  HOSTNAME: 0.0.0.0
-  TZ: UTC
-  NEXTAUTH_URL: https://${LANGFUSE_WEB_HOST:-langfuse.example.test}
-  DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASSWORD:-}@langfuse-postgres:5432/langfuse
-  SALT: ${LANGFUSE_SALT:-}
-  ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-}
-  TELEMETRY_ENABLED: "${LANGFUSE_TELEMETRY_ENABLED:-false}"
-  LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}"
-  CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
-  CLICKHOUSE_URL: http://langfuse-clickhouse:8123
-  CLICKHOUSE_USER: langfuse
-  CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-}
-  CLICKHOUSE_CLUSTER_ENABLED: "false"
-  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
-  LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
-  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: langfuse
-  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-}
-  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
-  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
-  LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
-  LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
-  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: langfuse
-  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-}
-  LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://langfuse-minio:9000
-  LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
-  LANGFUSE_S3_BATCH_EXPORT_ENABLED: "${LANGFUSE_S3_BATCH_EXPORT_ENABLED:-false}"
-  REDIS_HOST: langfuse-redis
-  REDIS_PORT: "6379"
-  REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:-}
-  REDIS_TLS_ENABLED: "${LANGFUSE_REDIS_TLS_ENABLED:-false}"
+name: ${COMPOSE_PROJECT_NAME:-litellm-stack}
 
 x-default-logging: &default-logging
   driver: json-file
@@ -39,12 +11,7 @@ x-default-logging: &default-logging
     max-file: "${LOG_MAX_FILE:-3}"
 
 networks:
-  edge: {}
-  internal: {}
-  security-monitor: {}
   traefik-monitor:
-    internal: true
-  alloy-monitor:
     internal: true
   xberg-sandbox:
     internal: true
@@ -56,22 +23,14 @@ networks:
 volumes:
   pg-data: {}
   pgvector-data: {}
-  grafana-data: {}
   prometheus-data: {}
   prometheus-secrets: {}
-  loki-data: {}
   alloy-data: {}
-  alloy-loki-data: {}
   opensearch-data: {}
   opensearch-ca-private: {}
   opensearch-ca: {}
   opensearch-node-certs: {}
   opensearch-admin-certs: {}
-  langfuse-postgres-data: {}
-  langfuse-clickhouse-data: {}
-  langfuse-clickhouse-logs: {}
-  langfuse-minio-data: {}
-  langfuse-redis-data: {}
   bge-m3-vllm-cache: {}
 
 services:
@@ -172,8 +131,6 @@ services:
       PGUSER: ${PG_USER:-litellm}
       PGPASSWORD: ${PG_PASSWORD:?Set PG_PASSWORD in .env}
       OPENSEARCH_DATABASE_PASSWORD: ${OPENSEARCH_DATABASE_PASSWORD:?Set OPENSEARCH_DATABASE_PASSWORD in .env}
-      # Optional: only required when the grafana profile is used.
-      GRAFANA_DATABASE_PASSWORD: ${GRAFANA_DATABASE_PASSWORD:-}
       PG_EXPORTER_PASSWORD: ${PG_EXPORTER_PASSWORD:?Set PG_EXPORTER_PASSWORD in .env}
       ROI_MINUTES_SAVED_PER_REQUEST: "${ROI_MINUTES_SAVED_PER_REQUEST:-15}"
       ROI_MINUTES_SAVED_PER_SESSION: "${ROI_MINUTES_SAVED_PER_SESSION:-0}"
@@ -196,16 +153,6 @@ services:
         GRANT pg_monitor TO litellm_exporter;
         GRANT CONNECT ON DATABASE postgres TO litellm_exporter;
         SQL
-        readers="opensearch_ro"
-        if [ -n "$${GRAFANA_DATABASE_PASSWORD}" ]; then
-          psql --dbname postgres --set ON_ERROR_STOP=1 <<'SQL'
-        \getenv grafana_password GRAFANA_DATABASE_PASSWORD
-        SELECT format('CREATE ROLE grafana_ro LOGIN PASSWORD %L', :'grafana_password')
-        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'grafana_ro') \gexec
-        SELECT format('ALTER ROLE grafana_ro PASSWORD %L', :'grafana_password') \gexec
-        SQL
-          readers="$${readers} grafana_ro"
-        fi
         for db in litellm_prod litellm_dev; do
           exists="$$(psql --dbname postgres --tuples-only --no-align --command "SELECT 1 FROM pg_database WHERE datname='$${db}'")"
           if [ "$${exists}" != "1" ]; then
@@ -252,14 +199,12 @@ services:
           currency = EXCLUDED.currency,
           updated_at = EXCLUDED.updated_at;
         SQL
-          for reader in $${readers}; do
-            psql --dbname "$${db}" --set ON_ERROR_STOP=1 --set database_name="$${db}" --set reader="$${reader}" <<'SQL'
-        GRANT CONNECT ON DATABASE :"database_name" TO :"reader";
-        GRANT USAGE ON SCHEMA public TO :"reader";
-        GRANT SELECT ON ALL TABLES IN SCHEMA public TO :"reader";
-        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO :"reader";
+          psql --dbname "$${db}" --set ON_ERROR_STOP=1 --set database_name="$${db}" <<'SQL'
+        GRANT CONNECT ON DATABASE :"database_name" TO opensearch_ro;
+        GRANT USAGE ON SCHEMA public TO opensearch_ro;
+        GRANT SELECT ON ALL TABLES IN SCHEMA public TO opensearch_ro;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO opensearch_ro;
         SQL
-          done
         done
     depends_on:
       postgres:
@@ -614,26 +559,6 @@ services:
     networks: [internal]
     restart: "no"
 
-  loki:
-    logging: *default-logging
-    profiles: [grafana]
-    image: grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
-    command: -config.file=/etc/loki/config.yml
-    volumes:
-      - ./loki/config.yml:/etc/loki/config.yml:ro
-      - loki-data:/loki
-    expose:
-      - "3100"
-    networks: [internal]
-    restart: unless-stopped
-    healthcheck:
-      # The distroless Loki image has no shell, wget, or curl.
-      test: ["CMD", "/usr/bin/loki", "-version"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 15s
-
   alloy:
     logging: *default-logging
     image: grafana/alloy:v1.21.3@sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
@@ -647,25 +572,6 @@ services:
     depends_on:
       data-prepper:
         condition: service_started
-      alloy-docker-proxy:
-        condition: service_healthy
-    networks: [internal, alloy-monitor]
-    restart: unless-stopped
-
-  alloy-loki:
-    logging: *default-logging
-    profiles: [grafana]
-    image: grafana/alloy:v1.21.3@sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
-    user: "473:473"
-    command: ["run", "/etc/alloy/loki.alloy", "--storage.path=/var/lib/alloy/data"]
-    environment:
-      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-litellm-stack}
-    volumes:
-      - ./alloy/loki.alloy:/etc/alloy/loki.alloy:ro
-      - alloy-loki-data:/var/lib/alloy/data
-    depends_on:
-      loki:
-        condition: service_healthy
       alloy-docker-proxy:
         condition: service_healthy
     networks: [internal, alloy-monitor]
@@ -694,301 +600,6 @@ services:
       timeout: 3s
       retries: 12
     restart: unless-stopped
-
-  langfuse-preflight:
-    logging: *default-logging
-    profiles: [langfuse]
-    image: postgres:17.11@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        test -n "$$LANGFUSE_POSTGRES_PASSWORD" || { echo "Set LANGFUSE_POSTGRES_PASSWORD in .env to use the langfuse profile" >&2; exit 64; }
-        test -n "$$LANGFUSE_CLICKHOUSE_PASSWORD" || { echo "Set LANGFUSE_CLICKHOUSE_PASSWORD in .env to use the langfuse profile" >&2; exit 64; }
-        test -n "$$LANGFUSE_REDIS_AUTH" || { echo "Set LANGFUSE_REDIS_AUTH in .env to use the langfuse profile" >&2; exit 64; }
-        test -n "$$LANGFUSE_MINIO_PASSWORD" || { echo "Set LANGFUSE_MINIO_PASSWORD in .env to use the langfuse profile" >&2; exit 64; }
-        test -n "$$LANGFUSE_NEXTAUTH_SECRET" || { echo "Set LANGFUSE_NEXTAUTH_SECRET in .env to use the langfuse profile" >&2; exit 64; }
-        test -n "$$LANGFUSE_SALT" || { echo "Set LANGFUSE_SALT in .env to use the langfuse profile" >&2; exit 64; }
-        printf '%s' "$$LANGFUSE_ENCRYPTION_KEY" | grep -Eq '^[[:xdigit:]]{64}$' || { echo "Set LANGFUSE_ENCRYPTION_KEY to exactly 64 hexadecimal characters to use the langfuse profile" >&2; exit 64; }
-        test -n "$$LANGFUSE_PUBLIC_KEY" || { echo "Set LANGFUSE_PUBLIC_KEY in .env to use the langfuse profile" >&2; exit 64; }
-        test -n "$$LANGFUSE_SECRET_KEY" || { echo "Set LANGFUSE_SECRET_KEY in .env to use the langfuse profile" >&2; exit 64; }
-        test -n "$$LANGFUSE_USER_ID_SALT" || { echo "Set LANGFUSE_USER_ID_SALT in .env to use the langfuse profile" >&2; exit 64; }
-        test -n "$$LANGFUSE_INIT_USER_EMAIL" || { echo "Set LANGFUSE_INIT_USER_EMAIL in .env to use the langfuse profile" >&2; exit 64; }
-        test -n "$$LANGFUSE_INIT_USER_NAME" || { echo "Set LANGFUSE_INIT_USER_NAME in .env to use the langfuse profile" >&2; exit 64; }
-        test -n "$$LANGFUSE_INIT_USER_PASSWORD" || { echo "Set LANGFUSE_INIT_USER_PASSWORD in .env to use the langfuse profile" >&2; exit 64; }
-    environment:
-      LANGFUSE_POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:-}
-      LANGFUSE_CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-}
-      LANGFUSE_REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:-}
-      LANGFUSE_MINIO_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:-}
-      LANGFUSE_NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-}
-      LANGFUSE_SALT: ${LANGFUSE_SALT:-}
-      LANGFUSE_ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-}
-      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
-      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
-      LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:-}
-      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
-      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
-      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
-    networks: [internal]
-    read_only: true
-    tmpfs:
-      - /tmp:mode=1777
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
-    restart: "no"
-
-  langfuse-postgres:
-    logging: *default-logging
-    profiles: [langfuse]
-    image: postgres:17.11@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
-    environment:
-      POSTGRES_DB: langfuse
-      POSTGRES_USER: langfuse
-      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:-}
-      TZ: UTC
-      PGTZ: UTC
-    volumes:
-      - langfuse-postgres-data:/var/lib/postgresql/data
-    networks: [internal]
-    depends_on:
-      langfuse-preflight:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  langfuse-clickhouse:
-    logging: *default-logging
-    profiles: [langfuse]
-    image: clickhouse/clickhouse-server:26.3.62.3@sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a
-    user: "101:101"
-    environment:
-      CLICKHOUSE_DB: default
-      CLICKHOUSE_USER: langfuse
-      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-}
-    volumes:
-      - ./langfuse/clickhouse/config.d/observability.xml:/etc/clickhouse-server/config.d/observability.xml:ro
-      - ./langfuse/clickhouse/users.d/observability.xml:/etc/clickhouse-server/users.d/observability.xml:ro
-      - langfuse-clickhouse-data:/var/lib/clickhouse
-      - langfuse-clickhouse-logs:/var/log/clickhouse-server
-    networks: [internal]
-    depends_on:
-      langfuse-preflight:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 5s
-
-  langfuse-clickhouse-observability-setup:
-    logging: *default-logging
-    profiles: [langfuse]
-    image: clickhouse/clickhouse-server:26.3.62.3@sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        exec clickhouse-client \
-          --host langfuse-clickhouse \
-          --user "$$CLICKHOUSE_USER" \
-          --password "$$CLICKHOUSE_PASSWORD" \
-          --multiquery \
-          --queries-file /cleanup/cleanup-system-logs.sql
-    environment:
-      CLICKHOUSE_USER: langfuse
-      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-}
-    volumes:
-      - ./langfuse/clickhouse/cleanup-system-logs.sql:/cleanup/cleanup-system-logs.sql:ro
-    depends_on:
-      langfuse-preflight:
-        condition: service_completed_successfully
-      langfuse-clickhouse:
-        condition: service_healthy
-    networks: [internal]
-    read_only: true
-    tmpfs:
-      - /tmp:mode=1777
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
-    restart: "no"
-
-  langfuse-minio:
-    logging: *default-logging
-    profiles: [langfuse]
-    image: cgr.dev/chainguard/minio:latest@sha256:c47b1779bfd12cdf5a4fcd3bd50671b8d66465fdae45271babc2fb467958b712
-    entrypoint: sh
-    command: -c 'mkdir -p /data/langfuse && exec minio server --address ":9000" --console-address ":9001" /data'
-    environment:
-      MINIO_ROOT_USER: langfuse
-      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:-}
-    volumes:
-      - langfuse-minio-data:/data
-    networks: [edge, internal]
-    depends_on:
-      langfuse-preflight:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 3s
-      timeout: 5s
-      retries: 10
-      start_period: 5s
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.langfuse-s3.rule=Host(`${LANGFUSE_S3_HOST:-langfuse-s3.example.test}`)
-      - traefik.http.routers.langfuse-s3.entrypoints=websecure
-      - traefik.http.routers.langfuse-s3.tls=true
-      - traefik.http.services.langfuse-s3.loadbalancer.server.port=9000
-
-  langfuse-redis:
-    logging: *default-logging
-    profiles: [langfuse]
-    image: redis:7.4.12@sha256:b6b6e3dc0c0952737748e55d5d885272840c7e42ba41ab1d5489f693419882f5
-    command:
-      - redis-server
-      - --requirepass
-      - ${LANGFUSE_REDIS_AUTH:-}
-      - --maxmemory-policy
-      - noeviction
-    environment:
-      REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:-}
-    volumes:
-      - langfuse-redis-data:/data
-    networks: [internal]
-    depends_on:
-      langfuse-preflight:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_AUTH redis-cli ping | grep -q PONG"]
-      interval: 3s
-      timeout: 5s
-      retries: 10
-
-  langfuse-worker:
-    logging: *default-logging
-    profiles: [langfuse]
-    image: docker.langfuse.com/langfuse/langfuse-worker:4.72.0@sha256:aa1724b989a00f1e4ca9930709202489c73deaaf2f1116bbd3d71c77edb8fedb
-    environment:
-      <<: *langfuse-environment
-    depends_on:
-      langfuse-preflight:
-        condition: service_completed_successfully
-      langfuse-postgres:
-        condition: service_healthy
-      langfuse-clickhouse:
-        condition: service_healthy
-      langfuse-clickhouse-observability-setup:
-        condition: service_completed_successfully
-      langfuse-minio:
-        condition: service_healthy
-      langfuse-redis:
-        condition: service_healthy
-    networks: [internal]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3030/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
-
-  langfuse-web:
-    logging: *default-logging
-    profiles: [langfuse]
-    image: docker.langfuse.com/langfuse/langfuse:4.72.0@sha256:c311fd9db4b69f6514fdcb1b86a2a105d5a4ed51fbf0ded033ff2722459c804a
-    environment:
-      <<: *langfuse-environment
-      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-}
-      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: https://${LANGFUSE_S3_HOST:-langfuse-s3.example.test}
-      LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://langfuse-minio:9000
-      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-litellm-stack}
-      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-LiteLLM Stack}
-      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-litellm}
-      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-LiteLLM}
-      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
-      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
-      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
-      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
-      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
-      LANGFUSE_TRUSTED_PROXY_COUNT: "${LANGFUSE_TRUSTED_PROXY_COUNT:-1}"
-      LANGFUSE_DISABLE_SIGNUP_ONBOARDING: "${LANGFUSE_DISABLE_SIGNUP_ONBOARDING:-true}"
-    depends_on:
-      langfuse-preflight:
-        condition: service_completed_successfully
-      langfuse-postgres:
-        condition: service_healthy
-      langfuse-clickhouse:
-        condition: service_healthy
-      langfuse-clickhouse-observability-setup:
-        condition: service_completed_successfully
-      langfuse-minio:
-        condition: service_healthy
-      langfuse-redis:
-        condition: service_healthy
-    networks: [edge, internal]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/api/public/health?failIfDatabaseUnavailable=true"]
-      interval: 10s
-      timeout: 5s
-      retries: 18
-      start_period: 30s
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.langfuse.rule=Host(`${LANGFUSE_WEB_HOST:-langfuse.example.test}`)
-      - traefik.http.routers.langfuse.entrypoints=websecure
-      - traefik.http.routers.langfuse.tls=true
-      - traefik.http.services.langfuse.loadbalancer.server.port=3000
-
-  # Optional: enable with --profile grafana. OpenSearch Dashboards is the
-  # default multi-user observability UI.
-  grafana:
-    logging: *default-logging
-    profiles: [grafana]
-    image: grafana/grafana:13.3.0@sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        # Grafana secrets are optional for the default stack but mandatory here.
-        test -n "$${GF_SECURITY_ADMIN_PASSWORD}" || { echo "Set GRAFANA_ADMIN_PASSWORD in .env to use the grafana profile" >&2; exit 64; }
-        test -n "$${GF_SECURITY_SECRET_KEY}" || { echo "Set GRAFANA_SECURITY_SECRET_KEY in .env to use the grafana profile" >&2; exit 64; }
-        test -n "$${GRAFANA_DATABASE_PASSWORD}" || { echo "Set GRAFANA_DATABASE_PASSWORD in .env to use the grafana profile" >&2; exit 64; }
-        exec /run.sh
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
-      GF_SECURITY_SECRET_KEY: ${GRAFANA_SECURITY_SECRET_KEY:-}
-      GF_SERVER_ROOT_URL: https://${GRAFANA_HOST:-grafana.example.test}
-      GF_USERS_ALLOW_SIGN_UP: "${GRAFANA_ALLOW_SIGN_UP:-false}"
-      GRAFANA_DATABASE_USER: ${GRAFANA_DATABASE_USER:-grafana_ro}
-      GRAFANA_DATABASE_PASSWORD: ${GRAFANA_DATABASE_PASSWORD:-}
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./grafana/alerting:/etc/grafana/provisioning/alerting:ro
-    depends_on:
-      postgres-init:
-        condition: service_completed_successfully
-      loki:
-        condition: service_healthy
-    networks: [edge, internal]
-    restart: unless-stopped
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.grafana.rule=Host(`${GRAFANA_HOST:-grafana.example.test}`)
-      - traefik.http.routers.grafana.entrypoints=websecure
-      - traefik.http.routers.grafana.tls=true
-      - traefik.http.services.grafana.loadbalancer.server.port=3000
 
   opensearch-certs:
     logging: *default-logging
@@ -1475,74 +1086,6 @@ services:
       - ./security-metrics:/textfile:ro
     networks: [internal]
     restart: unless-stopped
-
-  image-security-docker-proxy:
-    logging: *default-logging
-    profiles: [security]
-    image: ghcr.io/tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
-    environment:
-      CONTAINERS: "1"
-      IMAGES: "1"
-      POST: "0"
-      LOG_LEVEL: ${DOCKER_SOCKET_PROXY_LOG_LEVEL:-warning}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks: [security-monitor]
-    tmpfs:
-      - /run:mode=0755
-      - /tmp:mode=1777
-    security_opt:
-      - no-new-privileges:true
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:2375/_ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-    restart: unless-stopped
-
-  image-security-monitor:
-    logging: *default-logging
-    profiles: [security]
-    image: litellm-image-security-monitor:0.1.0
-    build:
-      context: .
-      dockerfile: security/image-monitor.Dockerfile
-    user: "${IMAGE_SECURITY_UID:-1000}:${IMAGE_SECURITY_GID:-1000}"
-    environment:
-      COMPOSE_PROJECT_NAME: "${COMPOSE_PROJECT_NAME:-litellm-stack}"
-      TZ: "${STACK_TIMEZONE:-Europe/Berlin}"
-      DOCKER_HOST: tcp://image-security-docker-proxy:2375
-      IMAGE_SECURITY_STATE_DIR: /data/state
-      IMAGE_SECURITY_REPORT_DIR: /data/reports
-      IMAGE_SECURITY_METRICS_DIR: /data/metrics
-      IMAGE_SECURITY_EXCEPTIONS_FILE: /app/security/exceptions.toml
-      IMAGE_SECURITY_TRIVY_EXECUTABLE: /usr/local/bin/trivy
-      IMAGE_SECURITY_SCHEDULE_HOUR: "${IMAGE_SECURITY_SCHEDULE_HOUR:-2}"
-      IMAGE_SECURITY_SCHEDULE_MINUTE: "${IMAGE_SECURITY_SCHEDULE_MINUTE:-45}"
-      IMAGE_SECURITY_RUN_ON_START: "${IMAGE_SECURITY_RUN_ON_START:-true}"
-    command: ["--all"]
-    volumes:
-      - ./security-state:/data/state
-      - ./security-reports:/data/reports
-      - ./security-metrics:/data/metrics
-      - ./security/exceptions.toml:/app/security/exceptions.toml:ro
-    depends_on:
-      image-security-docker-proxy:
-        condition: service_healthy
-    networks: [security-monitor]
-    read_only: true
-    tmpfs:
-      - /tmp:mode=1777,size=1g
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          cpus: "${IMAGE_SECURITY_CPU_LIMIT:-2}"
-          memory: ${IMAGE_SECURITY_MEMORY_LIMIT:-2500m}
-          pids: ${IMAGE_SECURITY_PIDS_LIMIT:-256}
-    restart: ${IMAGE_SECURITY_RESTART_POLICY:-on-failure:5}
 
   cadvisor:
     logging: *default-logging

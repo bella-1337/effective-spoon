@@ -30,7 +30,7 @@ configuration, observability, TLS, runtime profiles, or dependency images.
 
 Map the change across these surfaces:
 
-- `docker-compose.yml`;
+- `docker-compose.yml` and its included `compose.optional.yml`;
 - `litellm/config.prod.yaml` and `litellm/config.dev.yaml`;
 - `litellm/prometheus.yml`;
 - `opensearch/` (cluster, security, Dashboards, Data Prepper, and the
@@ -38,7 +38,7 @@ Map the change across these surfaces:
 - Grafana datasources, dashboard JSON, and `grafana/alerting/` (the single
   source of alert rules for both OpenSearch and Grafana);
 - `loki/config.yml`, `alloy/config.alloy`, and `alloy/loki.alloy`;
-- `.env.example`, `.gitignore`, and `README.md`.
+- `.env.example`, `.env.optional.example`, `.gitignore`, and `README.md`.
 
 For every proposed removal, identify:
 
@@ -69,7 +69,9 @@ Do not probe `/` for Presidio: the health endpoint is `/health`.
 Run:
 
 ```sh
-docker compose --profile prod --profile dev --profile grafana --profile langfuse config --quiet
+docker compose --env-file .env --env-file .env.optional \
+  --profile prod --profile dev --profile grafana --profile langfuse --profile security \
+  config --quiet
 python3 -m unittest discover -s scripts/tests
 jq empty grafana/dashboards/litellm-stack/litellm-stack.json
 jq empty grafana/dashboards/litellm-cost/litellm-cost.json

@@ -10,7 +10,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from maintenance_common import IMAGE_REF_RE, ROOT, compose_capture
+from maintenance_common import IMAGE_REF_RE, ROOT, compose_capture, compose_command
 
 COMPOSE_PROFILES = ("prod", "dev", "demo", "security", "grafana", "langfuse")
 EXPECTED_ALERT_UIDS = {
@@ -40,11 +40,24 @@ def compose_profile_arguments() -> list[str]:
     ]
 
 
-def load_compose_config(env_file: Path) -> dict[str, Any]:
+def load_compose_config(
+    env_file: Path,
+    optional_env_file: Path | None = None,
+) -> dict[str, Any]:
+    resolved_optional_env = optional_env_file
+    if resolved_optional_env is None:
+        local_optional_env = ROOT / ".env.optional"
+        resolved_optional_env = (
+            local_optional_env
+            if local_optional_env.is_file() and not local_optional_env.is_symlink()
+            else ROOT / ".env.optional.example"
+        )
     output = compose_capture(
         [
             "--env-file",
             env_file,
+            "--env-file",
+            resolved_optional_env,
             *compose_profile_arguments(),
             "config",
             "--format",
@@ -111,7 +124,7 @@ def validate_compose_contracts(config: Mapping[str, Any]) -> list[str]:
                 f"Default observability service must not require a profile: {name}"
             )
 
-    for name in ("grafana", "loki", "alloy-loki"):
+    for name in ("grafana-db-init", "grafana", "loki", "alloy-loki"):
         service = services.get(name)
         if not isinstance(service, dict):
             failures.append(f"Optional Grafana service is missing: {name}")
@@ -162,6 +175,15 @@ def validate_compose_contracts(config: Mapping[str, Any]) -> list[str]:
             and "langfuse-preflight" not in required_dependency_names(service)
         ):
             failures.append(f"{name} must depend on langfuse-preflight")
+
+    for name in ("image-security-docker-proxy", "image-security-monitor"):
+        service = services.get(name)
+        if not isinstance(service, dict):
+            failures.append(f"Optional image-security service is missing: {name}")
+        elif service.get("profiles") != ["security"]:
+            failures.append(
+                f"Optional image-security service must stay in the security profile: {name}"
+            )
 
     xberg = services.get("xberg")
     if not isinstance(xberg, dict):
@@ -297,6 +319,76 @@ def alert_rule_uids(alert_directory: Path) -> set[str]:
 def validate_repository_contracts(root: Path = ROOT) -> list[str]:
     failures: list[str] = []
 
+    compose_file = root / "docker-compose.yml"
+    optional_compose_file = root / "compose.optional.yml"
+    core_env_example = root / ".env.example"
+    optional_env_example = root / ".env.optional.example"
+    required_files = (compose_file, optional_compose_file, core_env_example, optional_env_example)
+    missing_files = [path.name for path in required_files if not path.is_file() or path.is_symlink()]
+    if missing_files:
+        failures.append(
+            "Required Compose split files are missing or unsafe: "
+            + ", ".join(sorted(missing_files))
+        )
+    else:
+        compose_source = compose_file.read_text(encoding="utf-8")
+        optional_compose_source = optional_compose_file.read_text(encoding="utf-8")
+        if (
+            "path: compose.optional.yml" not in compose_source
+            or "env_file: .env.optional.example" not in compose_source
+        ):
+            failures.append(
+                "Core Compose does not include the optional module with safe defaults"
+            )
+        optional_services = (
+            "grafana",
+            "loki",
+            "alloy-loki",
+            "langfuse-web",
+            "image-security-monitor",
+        )
+        for service in optional_services:
+            declaration = re.compile(rf"^  {re.escape(service)}:\s*$", re.MULTILINE)
+            if declaration.search(compose_source):
+                failures.append(
+                    f"Optional service remains in the core Compose file: {service}"
+                )
+            if not declaration.search(optional_compose_source):
+                failures.append(
+                    f"Optional service is missing from the optional Compose file: {service}"
+                )
+
+        def env_keys(path: Path) -> set[str]:
+            return {
+                line.partition("=")[0]
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if re.fullmatch(r"[A-Z][A-Z0-9_]*=.*", line)
+            }
+
+        core_env_keys = env_keys(core_env_example)
+        optional_env_keys = env_keys(optional_env_example)
+        misplaced_optional_keys = {
+            key
+            for key in core_env_keys
+            if key.startswith(("GRAFANA_", "LANGFUSE_", "IMAGE_SECURITY_"))
+        }
+        if misplaced_optional_keys:
+            failures.append(
+                "Optional variables remain in .env.example: "
+                + ", ".join(sorted(misplaced_optional_keys))
+            )
+        required_optional_keys = {
+            "GRAFANA_ADMIN_PASSWORD",
+            "LANGFUSE_POSTGRES_PASSWORD",
+            "IMAGE_SECURITY_UID",
+        }
+        missing_optional_keys = required_optional_keys - optional_env_keys
+        if missing_optional_keys:
+            failures.append(
+                "Required optional variables are missing from .env.optional.example: "
+                + ", ".join(sorted(missing_optional_keys))
+            )
+
     missing_alerts = EXPECTED_ALERT_UIDS - alert_rule_uids(
         root / "grafana" / "alerting"
     )
@@ -366,6 +458,7 @@ def validate_repository_contracts(root: Path = ROOT) -> list[str]:
     workflow_bindings = {
         "backup-databases.py": {
             "backup_freshness_metrics": backup_freshness_metrics,
+            "compose_command": compose_command,
         },
         "restore-databases.py": {
             "RESTORE_DATABASE_CLIENTS": RESTORE_DATABASE_CLIENTS,

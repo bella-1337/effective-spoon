@@ -39,7 +39,7 @@ Commands:
   status
       Show all Compose containers and their current state.
 
-  game-day-preflight [--env-file FILE]
+  game-day-preflight [--env-file FILE] [--optional-env-file FILE]
       Validate all Compose profiles and the static safety contracts required
       before executing the operations game-day drills.
 

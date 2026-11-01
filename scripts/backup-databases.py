@@ -18,6 +18,7 @@ from maintenance_common import (
     BACKUP_NAME_RE,
     ROOT,
     compose,
+    compose_command,
     compose_from_file,
     container_environment,
     fail,
@@ -78,12 +79,12 @@ def database_exists(service: str, database: str) -> int:
 
 def dump_database(service: str, database: str, destination: Path) -> None:
     print(f"Backing up {database} from {service}...")
-    dump = [
-        "docker", "compose", "exec", "-T", service, "pg_dump",
+    dump = compose_command([
+        "exec", "-T", service, "pg_dump",
         "--username", container_environment(service, "POSTGRES_USER"),
         "--dbname", database, "--format=custom", "--compress=9",
         "--lock-wait-timeout=30s", "--no-owner", "--no-privileges",
-    ]
+    ])
     run_to_file(dump, destination)
     result = compose_from_file(
         ["exec", "-T", service, "pg_restore", "--list"],

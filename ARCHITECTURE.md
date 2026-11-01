@@ -90,15 +90,24 @@ docker compose --profile dev up -d
 docker compose --profile prod --profile dev up -d
 ```
 
+The root `docker-compose.yml` includes `compose.optional.yml`, which owns
+Grafana/Loki, Langfuse, and image-security services and state. Profiles remain
+the runtime gate. The included module declares the three networks shared across
+the file boundary once, because Compose include resources cannot be redeclared
+by the parent. Optional services load operator values from `.env.optional` when
+commands pass it after `.env`.
+
 | Profile | Proxy | Database | Intended use |
 | --- | --- | --- | --- |
 | `prod` | `litellm-prod` | `litellm_prod` | Normal proxy configuration with Presidio PII guardrail |
 | `dev` | `litellm-dev` | `litellm_dev` | Debug-oriented proxy configuration |
 | `grafana` | `grafana`, `loki`, `alloy-loki` | read-only `grafana_ro` | Optional Grafana dashboards, Explore, and alert rules |
 | `langfuse` | Langfuse web/worker, PostgreSQL, ClickHouse, Redis, MinIO | Langfuse-specific stores | Optional LLM trace UI, datasets, prompt management, and evaluations |
+| `security` | Image scanner and read-only Docker socket proxy | Bind-mounted reports and state | Optional scheduled image inventory and vulnerability policy |
 
 `postgres-init` is a required one-shot service, not redundant: it creates the
-two LiteLLM databases on a fresh PostgreSQL volume.
+two LiteLLM databases on a fresh PostgreSQL volume. The optional
+`grafana-db-init` job separately creates Grafana's read-only role.
 
 ## Request and PII Flow
 
@@ -271,7 +280,8 @@ Before declaring a change complete:
 
 ```sh
 docker compose --profile prod --profile dev config --quiet
-docker compose --profile prod --profile langfuse config --quiet
+docker compose --env-file .env --env-file .env.optional \
+  --profile prod --profile langfuse config --quiet
 docker compose --profile prod --profile dev up -d --wait --wait-timeout 150
 ```
 

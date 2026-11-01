@@ -1,8 +1,10 @@
 # Environment variable reference
 
 This document is the operator reference for configuration accepted by the
-LiteLLM stack. Copy `.env.example` to `.env`, replace every required placeholder,
-and review every optional default before deployment.
+LiteLLM stack. Copy `.env.example` to `.env` for the core stack. When enabling
+Grafana, Langfuse, or the image-security monitor, also copy
+`.env.optional.example` to `.env.optional`. Replace every required placeholder
+and review every default before deployment.
 
 ## Conventions
 
@@ -14,10 +16,10 @@ and review every optional default before deployment.
 | Sensitive | Operationally sensitive value that is not an authentication secret. Restrict write access. |
 | Recreate | Run `docker compose up -d --force-recreate` for affected services after changing the value. |
 
-Values in `.env` are strings. Boolean values use `true` or `false` unless a
-component explicitly requires the documented spelling. Byte sizes use
-Docker/Prometheus units such as `512m`, `2g`, or `10GB`. Durations use units such
-as `30s`, `15m`, or `15d`.
+Values in `.env` and `.env.optional` are strings. Boolean values use `true` or
+`false` unless a component explicitly requires the documented spelling. Byte
+sizes use Docker/Prometheus units such as `512m`, `2g`, or `10GB`. Durations use
+units such as `30s`, `15m`, or `15d`.
 
 ## Stack identity, routing, and shared defaults
 
@@ -46,11 +48,12 @@ discovers recreated routed services automatically.
 ## Credentials and cryptographic material
 
 All secret values in this section are required except the Grafana and Langfuse
-values, which are required only when their optional profiles are started. Their
-preflight checks refuse to start the profile while a required value is empty.
-`GRAFANA_DATABASE_USER` has a fixed compatibility default. Recreate every
-consumer after a rotation. For production, inject values from a secrets manager
-rather than persisting them in a developer-managed `.env` file.
+values in `.env.optional`, which are required only when their optional profiles
+are started. Their preflight checks refuse to start the profile while a required
+value is empty. `GRAFANA_DATABASE_USER` has a fixed compatibility default.
+Recreate every consumer after a rotation. For production, inject values from a
+secrets manager rather than persisting them in developer-managed environment
+files.
 
 | Variable | Classification / format | Description and rotation guidance |
 | --- | --- | --- |
@@ -58,7 +61,7 @@ rather than persisting them in a developer-managed `.env` file.
 | `PG_PASSWORD` | Secret; URL-safe random string | Password for `PG_USER`. It is embedded in PostgreSQL URLs, so use an unreserved value such as 32 or more random hexadecimal bytes. Rotate in PostgreSQL and all LiteLLM consumers together. |
 | `OPENSEARCH_DATABASE_PASSWORD` | Secret; URL-safe random string | Password for the read-only `opensearch_ro` LiteLLM database role used by `opensearch-bridge`. Rotate through `postgres-init` and recreate `opensearch-bridge`. |
 | `GRAFANA_DATABASE_USER` | Sensitive; default `grafana_ro`; `grafana` profile only | Read-only role consumed by Grafana datasource provisioning. Keep `grafana_ro`; the initialization SQL creates that fixed least-privilege role. |
-| `GRAFANA_DATABASE_PASSWORD` | Secret; URL-safe random string; `grafana` profile only | Password for Grafana's read-only LiteLLM database role. `postgres-init` creates `grafana_ro` only when this is set. Rotate through `postgres-init` and recreate Grafana. |
+| `GRAFANA_DATABASE_PASSWORD` | Secret; URL-safe random string; `grafana` profile only | Password for Grafana's read-only LiteLLM database role. `grafana-db-init` creates or updates `grafana_ro`. Re-run that job and recreate Grafana when rotating the value. |
 | `PG_EXPORTER_PASSWORD` | Secret; URL-safe random string | Password for the `litellm_exporter` monitoring role. Rotate through `postgres-init` and recreate `postgres-exporter`. |
 | `PG_VECTOR_PASSWORD` | Secret; URL-safe random string | Password for the isolated pgvector owner. Used by migrations, LiteLLM development, and the pgvector connector. Coordinate database-side and consumer changes. |
 | `PG_VECTOR_EXPORTER_PASSWORD` | Secret; URL-safe random string | Password for the read-only `vector_exporter` monitoring role. Rotate through `pgvector-access-init` and recreate `pgvector-exporter`. |
@@ -220,6 +223,8 @@ can cause startup failures or corrupt semantic-cache expectations.
 
 ## Image-security monitor
 
+The Compose scheduler variables in this table live in `.env.optional`.
+
 | Variable | Default / format | Description and guidance |
 | --- | --- | --- |
 | `IMAGE_SECURITY_UID` | `1000`; Linux UID | Runtime UID for the monitor container. It must own or be able to write `security-state/`, `security-reports/`, and `security-metrics/`. |
@@ -234,8 +239,8 @@ can cause startup failures or corrupt semantic-cache expectations.
 
 The following variables configure direct host execution of the image-security
 scripts and system service installer. They are not Compose substitutions and are
-therefore not included in `.env.example`. Export them in the invoking shell or
-the generated service definition.
+therefore not included in either environment template. Export them in the
+invoking shell or the generated service definition.
 
 | Variable | Default | Description and guidance |
 | --- | --- | --- |
@@ -261,7 +266,7 @@ Export them in the shell, scheduler, or service that invokes the script.
 Standard operating-system variables such as `SUDO_USER`, `CAROOT`,
 `LOCALAPPDATA`, and `XDG_DATA_HOME` may be consulted by specific tools for
 platform integration. They are not stack configuration and should not be added
-to `.env`.
+to `.env` or `.env.optional`.
 
 ## Operating guidelines
 
@@ -276,9 +281,14 @@ to `.env`.
    secrets.
 6. Start only the intended profiles.
 
-Compose reads `.env` for interpolation but does not execute shell expressions.
-Generate values first and paste literal output. Do not use command substitutions
-such as `$(openssl rand ...)` in `.env`.
+For an optional profile, additionally run
+`cp .env.optional.example .env.optional`, set mode `0600`, populate that
+profile's values, and use
+`docker compose --env-file .env --env-file .env.optional ...`.
+
+Compose reads environment files for interpolation but does not execute shell
+expressions. Generate values first and paste literal output. Do not use command
+substitutions such as `$(openssl rand ...)` in either environment file.
 
 ### Precedence
 
@@ -290,13 +300,17 @@ overriding earlier files. Defaults declared in `docker-compose.yml` apply only
 when the selected inputs do not set a value. The `-p` command option has
 precedence over `COMPOSE_PROJECT_NAME`.
 
-Use one controlled source per environment. Avoid casually exporting variables in
-interactive shells because they can silently override reviewed `.env` values.
+Use one controlled source per environment. The committed optional Compose module
+uses `.env.optional.example` only for safe interpolation defaults; explicit
+`.env.optional` values take precedence when it is loaded after `.env`. Avoid
+casually exporting variables in interactive shells because they can silently
+override reviewed values.
 
 ### Change management
 
-- Treat `.env.example` and this document as the schema. Update both whenever an
-  operator-facing variable is added, renamed, or removed.
+- Treat `.env.example`, `.env.optional.example`, and this document as the schema.
+  Update the applicable template whenever an operator-facing variable is added,
+  renamed, or removed.
 - Review configuration changes through source control, but keep real secret
   values out of source control, issue trackers, logs, and rendered artifacts.
 - Test with `docker compose config --quiet` before every deployment.
@@ -322,10 +336,10 @@ interactive shells because they can silently override reviewed `.env` values.
   using the organization's incident process; deleting the current line is not
   sufficient.
 
-### Values intentionally kept out of `.env`
+### Values intentionally kept out of environment files
 
 Container image references and digests, network topology, internal service names,
 mount paths, least-privilege flags, and security options remain in
-`docker-compose.yml`. They are version-controlled integrity and architecture
-controls, not routine operator knobs. Change them through reviewed Compose
-changes rather than untracked environment overrides.
+`docker-compose.yml` or `compose.optional.yml`. They are version-controlled
+integrity and architecture controls, not routine operator knobs. Change them
+through reviewed Compose changes rather than untracked environment overrides.

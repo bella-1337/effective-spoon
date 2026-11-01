@@ -195,6 +195,22 @@ def require_docker(*, daemon: bool = False, compose_plugin: bool = True) -> None
             fail("docker compose is required")
 
 
+def compose_command(
+    args: Sequence[str | os.PathLike[str]],
+) -> list[str]:
+    command = ["docker", "compose"]
+    string_args = [str(arg) for arg in args]
+    has_explicit_env = any(
+        arg == "--env-file" or arg.startswith("--env-file=") for arg in string_args
+    )
+    if not has_explicit_env:
+        for env_file in (ROOT / ".env", ROOT / ".env.optional"):
+            if env_file.is_file() and not env_file.is_symlink():
+                command.extend(("--env-file", str(env_file)))
+    command.extend(string_args)
+    return command
+
+
 def compose(
     args: Sequence[str | os.PathLike[str]],
     *,
@@ -203,7 +219,7 @@ def compose(
     check: bool = True,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
-    return run(["docker", "compose", *args], input_data=input_data, capture=capture_output,
+    return run(compose_command(args), input_data=input_data, capture=capture_output,
                check=check, timeout=timeout)
 
 
@@ -220,7 +236,7 @@ def compose_from_file(
     *,
     check: bool = True,
 ) -> subprocess.CompletedProcess[bytes]:
-    return run_from_file(["docker", "compose", *args], source, check=check)
+    return run_from_file(compose_command(args), source, check=check)
 
 
 def service_is_running(service: str) -> bool:

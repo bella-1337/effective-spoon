@@ -20,7 +20,10 @@ class MaintenanceContractTests(unittest.TestCase):
             "compose_capture",
             return_value='{"services": {}}',
         ) as compose_capture:
-            config = contracts.load_compose_config(Path("/tmp/test.env"))
+            config = contracts.load_compose_config(
+                Path("/tmp/test.env"),
+                Path("/tmp/test.optional.env"),
+            )
 
         self.assertEqual(config, {"services": {}})
         arguments = compose_capture.call_args.args[0]
@@ -31,6 +34,15 @@ class MaintenanceContractTests(unittest.TestCase):
                 if argument == "--profile"
             ],
             list(contracts.COMPOSE_PROFILES),
+        )
+        self.assertEqual(
+            arguments[:4],
+            [
+                "--env-file",
+                Path("/tmp/test.env"),
+                "--env-file",
+                Path("/tmp/test.optional.env"),
+            ],
         )
         self.assertEqual(arguments[-3:], ["config", "--format", "json"])
 

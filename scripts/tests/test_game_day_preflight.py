@@ -43,6 +43,7 @@ class GameDayPreflightTests(unittest.TestCase):
                 "opensearch-dashboards": {},
                 "opensearch-bridge": {},
                 "data-prepper": {},
+                "grafana-db-init": {"profiles": ["grafana"]},
                 "grafana": {"profiles": ["grafana"]},
                 "loki": {"profiles": ["grafana"]},
                 "alloy-loki": {"profiles": ["grafana"]},
@@ -75,6 +76,8 @@ class GameDayPreflightTests(unittest.TestCase):
                     "profiles": ["langfuse"],
                     "depends_on": {"langfuse-preflight": {}},
                 },
+                "image-security-docker-proxy": {"profiles": ["security"]},
+                "image-security-monitor": {"profiles": ["security"]},
                 "xberg": {
                     "environment": {"NO_PROXY": "127.0.0.1,localhost"},
                     "dns": ["172.29.0.53"],

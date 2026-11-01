@@ -159,7 +159,7 @@ class RestoreSafetyTests(unittest.TestCase):
 
 class DashboardSupplyChainTests(unittest.TestCase):
     def test_loki_healthcheck_uses_a_binary_present_in_distroless_image(self) -> None:
-        compose = (SCRIPTS.parent / "docker-compose.yml").read_text(encoding="utf-8")
+        compose = (SCRIPTS.parent / "compose.optional.yml").read_text(encoding="utf-8")
         self.assertIn('test: ["CMD", "/usr/bin/loki", "-version"]', compose)
         self.assertNotIn('test: ["CMD", "/busybox/wget"', compose)
 
