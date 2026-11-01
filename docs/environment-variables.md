@@ -301,6 +301,9 @@ The Compose scheduler variables in this table live in `.env.optional`.
 | `IMAGE_SECURITY_SCHEDULE_HOUR` | `2`; integer `0-23` | Local-time hour for the daily scan in `STACK_TIMEZONE`. |
 | `IMAGE_SECURITY_SCHEDULE_MINUTE` | `45`; integer `0-59` | Local-time minute for the daily scan. |
 | `IMAGE_SECURITY_RUN_ON_START` | `true`; boolean | Runs one scan when the scheduler starts. Keep enabled to avoid waiting for the first scheduled result. |
+| `IMAGE_SECURITY_SBOM_ENABLED` | `true`; boolean | Generates CycloneDX SBOMs for new running image digests after each scheduled scan. Existing digests are not regenerated. |
+| `IMAGE_SECURITY_SBOM_LICENCE_SCAN` | `true`; boolean | Adds a one-time Trivy full licence scan per new digest as raw licence evidence. Disable only if the scan time for very large images is unacceptable; the curated register in `docs/third-party-licences.md` remains authoritative. |
+| `IMAGE_SECURITY_SBOM_RETENTION_DAYS` | `400`; non-negative integer | Retention for stack SBOM runs and image SBOMs no retained run references. The newest run is always kept; `0` disables pruning. Align with the audit retention period. |
 | `IMAGE_SECURITY_CPU_LIMIT` | `2`; positive decimal CPUs | CPU limit for image scanning. Scans are CPU intensive; reduce only if longer scan times are acceptable. |
 | `IMAGE_SECURITY_MEMORY_LIMIT` | `2500m`; Docker size | Memory limit for image scanning. Too small a value can terminate scans of large images. |
 | `IMAGE_SECURITY_PIDS_LIMIT` | `256`; positive integer | Maximum process count for the monitor container. Keep bounded as a defense-in-depth control. |
@@ -320,6 +323,8 @@ invoking shell or the generated service definition.
 | `IMAGE_SECURITY_TRIVY_EXECUTABLE` | Auto-detected | Optional absolute path to an executable Trivy binary. Do not point it to a user-writable or untrusted binary. |
 | `IMAGE_SECURITY_COMMAND_TIMEOUT_SECONDS` | `900` | Positive integer command timeout. Keep finite so stalled scans fail visibly. |
 | `IMAGE_SECURITY_RETENTION_DAYS` | `30` | Non-negative integer report retention. `0` removes completed reports immediately; ensure this satisfies audit requirements. |
+| `IMAGE_SECURITY_SBOM_LICENCE_SCAN`, `IMAGE_SECURITY_SBOM_RETENTION_DAYS` | As above | Also honoured by `./scripts/maintenance.py sbom`. `IMAGE_SECURITY_SBOM_ENABLED` applies only to scheduled runs; the systemd timer accepts `--no-sbom` instead. |
+| `STACK_REPOSITORY_REVISION` | Git `HEAD`, otherwise `unknown` | Optional repository revision recorded in the stack SBOM when the checkout has no Git metadata. |
 
 ## Maintenance scripts
 

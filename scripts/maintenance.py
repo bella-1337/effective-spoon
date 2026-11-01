@@ -55,6 +55,11 @@ Commands:
       Scan running image digests with pinned Trivy, correlate CISA KEV, retain
       private reports, and publish aggregate node-exporter textfile metrics.
 
+  sbom [--all | --services LIST] [--refresh] [--project NAME]
+      Generate private CycloneDX SBOMs and licence evidence for new running
+      image digests (registry and locally built), plus a stack-level SBOM that
+      links them. Existing digests are reused unless --refresh is given.
+
   security-schedule install|uninstall|status [OPTIONS]
       Manage the Linux systemd timer for the nightly scan. Installation and
       removal require root; the scanner itself runs as a non-root account.
@@ -98,7 +103,8 @@ SCRIPTS = (
     "restore-databases.py", "verify-pgvector.py",
     "check-litellm-upgrade-compatibility.py", "prepare-litellm-upgrade.py",
     "verify-litellm-upgrade.py", "rollback-litellm-upgrade.py",
-    "monitor-image-vulnerabilities.py", "install-image-security-schedule.py",
+    "monitor-image-vulnerabilities.py", "generate-image-sbom.py",
+    "install-image-security-schedule.py",
     "run-image-security-scheduler.py",
 )
 
@@ -230,6 +236,8 @@ def main() -> None:
         invoke("game-day-preflight.py", args)
     elif command == "security-scan":
         invoke("monitor-image-vulnerabilities.py", args)
+    elif command == "sbom":
+        invoke("generate-image-sbom.py", args)
     elif command == "security-schedule":
         invoke_with_current_python("install-image-security-schedule.py", args)
     elif command == "backup":

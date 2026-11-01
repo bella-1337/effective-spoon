@@ -1791,6 +1791,69 @@ missing metrics file, unavailable registry, failed Trivy database update, stale
 KEV feed, and a partial service-scan failure. Enable KEV/Critical notification
 routing only after these failure signals are proven.
 
+### Generate SBOMs and licence evidence
+
+The licence record for the stack is the curated
+[third-party licence register](docs/third-party-licences.md). The
+`doctor`/game-day contract check and `scripts/ci/validate.sh` fail when an image,
+build base image, auxiliary deployment image, or pinned model revision is not
+listed there, so every tag change must update the register in the same commit.
+
+Generated SBOMs provide the matching evidence of what actually ran. They are
+produced by the same pinned Trivy release from the image digests that are
+running, not from the Compose files, so profiles, overrides, and the host
+platform are reflected exactly:
+
+```bash
+./scripts/maintenance.py sbom
+./scripts/maintenance.py sbom --services litellm-prod,litellm-dev
+```
+
+- Registry images are resolved to their platform-specific digest and read
+  remotely. The three locally built images (`litellm-pgvector`,
+  `litellm-opensearch-tools`, `litellm-image-security-monitor`) are exported
+  with `docker image save` to a temporary archive below
+  `security-state/trivy-cache/sbom-input/` and keyed by their local image ID.
+  The archive is deleted after the scan. Reserve free disk space of about the
+  largest local image's size.
+- Each new digest produces one CycloneDX JSON SBOM and, unless
+  `IMAGE_SECURITY_SBOM_LICENCE_SCAN=false`, one raw Trivy full licence scan.
+  Evidence for an existing digest is reused; `--refresh` regenerates it.
+- Every run writes a stack-level CycloneDX SBOM under
+  `security-reports/sbom/runs/` that lists each running image with its services,
+  digest, platform, OCI labels, and a BOM-Link to its image SBOM, plus a
+  summary of licence categories. This file is the audit snapshot of the stack
+  on that date.
+- Each run prints one `REVIEW:` line per image with the number of licences
+  Trivy classifies as forbidden, restricted, reciprocal, or unknown, and names
+  the forbidden ones (for example AGPL or SSPL). Compare them with the register.
+  Debian and Ubuntu base images always report many GPL/LGPL and non-SPDX
+  package licences; these are expected and acceptable for internal use.
+- The command exits nonzero when any running service could not be covered.
+
+| Path | Mode | Contents |
+|---|---:|---|
+| `security-reports/sbom/images/` | `0700` | Per-image `*.cdx.json`, `*.licences.json`, and `*.meta.json`; files are `0600` |
+| `security-reports/sbom/runs/` | `0700` | One `stack-<UTC timestamp>.cdx.json` per run; files are `0600` |
+
+SBOMs reveal exact package versions and therefore remain private and are never
+committed. `IMAGE_SECURITY_SBOM_RETENTION_DAYS` (default 400) removes older
+stack runs and any image evidence that no retained run references; the newest
+run is always kept. The 30-day vulnerability-report retention does not touch
+the `sbom/` directory.
+
+Both schedulers generate SBOMs for new digests after each scan: the Compose
+`security` profile unless `IMAGE_SECURITY_SBOM_ENABLED=false`, and the systemd
+timer unless it was installed with `--no-sbom`. If the scan step of the timer
+fails, the SBOM step is skipped for that run and catches up on the next run.
+SBOM generation shares the scanner lock, so it never runs concurrently with a
+vulnerability scan.
+
+Model weights are not inside any image and therefore not in the SBOMs. They are
+pinned to immutable revisions (`BGE_M3_REVISION` for BGE-M3 and
+`D3_MODEL_REVISION` in `scripts/deploy-d3-mini.sh`) and recorded in the
+register.
+
 ## 17. Back up the databases
 
 Run the repository-owned backup script while `postgres` and `vector-postgres`

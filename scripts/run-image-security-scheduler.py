@@ -92,15 +92,42 @@ def run_monitor(scanner: Path, arguments: list[str]) -> int:
         ACTIVE_PROCESS = None
 
 
+def run_scheduled_jobs(
+    scanner: Path, scanner_arguments: list[str], sbom_generator: Path | None
+) -> None:
+    result = run_monitor(scanner, scanner_arguments)
+    if result:
+        print(
+            f"Image-security scan failed with exit code {result}",
+            file=sys.stderr,
+            flush=True,
+        )
+    if sbom_generator is None or STOP_EVENT.is_set():
+        return
+    result = run_monitor(sbom_generator, [])
+    if result:
+        print(
+            f"Image SBOM generation failed with exit code {result}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
 def main() -> None:
     hour = bounded_environment_integer("IMAGE_SECURITY_SCHEDULE_HOUR", 2, 23)
     minute = bounded_environment_integer("IMAGE_SECURITY_SCHEDULE_MINUTE", 45, 59)
     run_on_start = environment_boolean("IMAGE_SECURITY_RUN_ON_START", True)
+    sbom_enabled = environment_boolean("IMAGE_SECURITY_SBOM_ENABLED", True)
     scanner = Path(__file__).resolve().with_name(
         "monitor-image-vulnerabilities.py"
     )
     if not scanner.is_file() or scanner.is_symlink():
         fail(f"image-security monitor is missing or unsafe: {scanner}")
+    sbom_generator: Path | None = None
+    if sbom_enabled:
+        sbom_generator = scanner.with_name("generate-image-sbom.py")
+        if not sbom_generator.is_file() or sbom_generator.is_symlink():
+            fail(f"image SBOM generator is missing or unsafe: {sbom_generator}")
 
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, handle_signal)
@@ -108,13 +135,7 @@ def main() -> None:
     scanner_arguments = sys.argv[1:]
     timezone = local_timezone()
     if run_on_start:
-        result = run_monitor(scanner, scanner_arguments)
-        if result:
-            print(
-                f"Initial image-security scan failed with exit code {result}",
-                file=sys.stderr,
-                flush=True,
-            )
+        run_scheduled_jobs(scanner, scanner_arguments, sbom_generator)
 
     while not STOP_EVENT.is_set():
         now = datetime.now(timezone)
@@ -126,13 +147,7 @@ def main() -> None:
         )
         if STOP_EVENT.wait(delay):
             break
-        result = run_monitor(scanner, scanner_arguments)
-        if result:
-            print(
-                f"Image-security scan failed with exit code {result}",
-                file=sys.stderr,
-                flush=True,
-            )
+        run_scheduled_jobs(scanner, scanner_arguments, sbom_generator)
 
 
 if __name__ == "__main__":

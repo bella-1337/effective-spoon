@@ -57,6 +57,10 @@ class InstallImageSecurityScheduleTests(unittest.TestCase):
         self.assertNotIn('"', working_directory)
         self.assertTrue(working_directory.removeprefix("WorkingDirectory=").startswith("/"))
         self.assertIn('ExecStart="/usr/local/bin/uv" "run" "--script"', service)
+        exec_lines = [line for line in service.splitlines() if line.startswith("ExecStart=")]
+        self.assertEqual(len(exec_lines), 2)
+        self.assertTrue(exec_lines[0].endswith('monitor-image-vulnerabilities.py"'))
+        self.assertTrue(exec_lines[1].endswith('generate-image-sbom.py"'))
         self.assertNotIn("WantedBy=multi-user.target", service)
         self.assertIn("OnCalendar=*-*-* 03:30:00", timer)
         self.assertIn("Persistent=true", timer)
@@ -229,6 +233,28 @@ class InstallImageSecurityScheduleTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+
+    def test_build_units_can_disable_sbom_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            account = schedule.ServiceAccount(
+                name="scanner", group="scanner", uid=1234, gid=1234, home=root / "home"
+            )
+            service, _timer = schedule.build_units(
+                account=account,
+                uv=Path("/usr/local/bin/uv"),
+                docker=Path("/usr/bin/docker"),
+                hour=3,
+                minute=30,
+                state_root=root / "state",
+                report_root=root / "reports",
+                metrics_root=root / "metrics",
+                policy=root / "exceptions.toml",
+                project="test-project",
+                sbom=False,
+            )
+        self.assertEqual(service.count("ExecStart="), 1)
+        self.assertNotIn("generate-image-sbom.py", service)
 
 if __name__ == "__main__":
     unittest.main()
