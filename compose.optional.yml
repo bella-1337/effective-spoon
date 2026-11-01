@@ -7,7 +7,7 @@ x-default-logging: &default-logging
 x-langfuse-environment: &langfuse-environment
   HOSTNAME: 0.0.0.0
   TZ: UTC
-  NEXTAUTH_URL: https://${LANGFUSE_WEB_HOST:-langfuse.example.test}
+  NEXTAUTH_URL: https://${LANGFUSE_WEB_HOST:?Set LANGFUSE_WEB_HOST in .env.optional}
   DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASSWORD:-}@langfuse-postgres:5432/langfuse
   SALT: ${LANGFUSE_SALT:-}
   ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-}
@@ -148,7 +148,7 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
       GF_SECURITY_SECRET_KEY: ${GRAFANA_SECURITY_SECRET_KEY:-}
-      GF_SERVER_ROOT_URL: https://${GRAFANA_HOST:-grafana.example.test}
+      GF_SERVER_ROOT_URL: https://${GRAFANA_HOST:?Set GRAFANA_HOST in .env.optional}
       GF_USERS_ALLOW_SIGN_UP: "${GRAFANA_ALLOW_SIGN_UP:-false}"
       GRAFANA_DATABASE_USER: ${GRAFANA_DATABASE_USER:-grafana_ro}
       GRAFANA_DATABASE_PASSWORD: ${GRAFANA_DATABASE_PASSWORD:-}
@@ -166,7 +166,7 @@ services:
     restart: unless-stopped
     labels:
       - traefik.enable=true
-      - traefik.http.routers.grafana.rule=Host(`${GRAFANA_HOST:-grafana.example.test}`)
+      - traefik.http.routers.grafana.rule=Host(`${GRAFANA_HOST:?Set GRAFANA_HOST in .env.optional}`)
       - traefik.http.routers.grafana.entrypoints=websecure
       - traefik.http.routers.grafana.tls=true
       - traefik.http.services.grafana.loadbalancer.server.port=3000
@@ -319,7 +319,7 @@ services:
       start_period: 5s
     labels:
       - traefik.enable=true
-      - traefik.http.routers.langfuse-s3.rule=Host(`${LANGFUSE_S3_HOST:-langfuse-s3.example.test}`)
+      - traefik.http.routers.langfuse-s3.rule=Host(`${LANGFUSE_S3_HOST:?Set LANGFUSE_S3_HOST in .env.optional}`)
       - traefik.http.routers.langfuse-s3.entrypoints=websecure
       - traefik.http.routers.langfuse-s3.tls=true
       - traefik.http.services.langfuse-s3.loadbalancer.server.port=9000
@@ -384,7 +384,7 @@ services:
     environment:
       <<: *langfuse-environment
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-}
-      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: https://${LANGFUSE_S3_HOST:-langfuse-s3.example.test}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: https://${LANGFUSE_S3_HOST:?Set LANGFUSE_S3_HOST in .env.optional}
       LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://langfuse-minio:9000
       LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-litellm-stack}
       LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-LiteLLM Stack}
@@ -423,7 +423,7 @@ services:
       start_period: 30s
     labels:
       - traefik.enable=true
-      - traefik.http.routers.langfuse.rule=Host(`${LANGFUSE_WEB_HOST:-langfuse.example.test}`)
+      - traefik.http.routers.langfuse.rule=Host(`${LANGFUSE_WEB_HOST:?Set LANGFUSE_WEB_HOST in .env.optional}`)
       - traefik.http.routers.langfuse.entrypoints=websecure
       - traefik.http.routers.langfuse.tls=true
       - traefik.http.services.langfuse.loadbalancer.server.port=3000

@@ -171,5 +171,57 @@ class MaintenanceContractTests(unittest.TestCase):
         )
 
 
+    def test_public_hostnames_must_not_be_hard_coded(self) -> None:
+        env_examples = {
+            ".env.example": {
+                "STACK_DOMAIN": "example.test",
+                "LITELLM_PROD_HOST": "llm.${STACK_DOMAIN}",
+                "LITELLM_DEV_HOST": "llm-dev.example.test",
+                "OPENSEARCH_DASHBOARDS_HOST": "opensearch.${STACK_DOMAIN}",
+            },
+            ".env.optional.example": {
+                "GRAFANA_HOST": "grafana.${STACK_DOMAIN}",
+                "LANGFUSE_WEB_HOST": "langfuse.${STACK_DOMAIN}",
+            },
+        }
+        failures = contracts.public_hostname_source_failures(
+            {
+                "docker-compose.yml": "name: stack\n"
+                "x: Host(`${LITELLM_PROD_HOST:-llm.example.test}`)\n",
+                "compose.optional.yml": "y: ${GRAFANA_HOST:?Set GRAFANA_HOST in .env.optional}\n",
+            },
+            env_examples,
+        )
+
+        self.assertEqual(
+            failures,
+            [
+                "docker-compose.yml hard-codes a public hostname fallback: "
+                "${LITELLM_PROD_HOST:-llm.example.test}",
+                "docker-compose.yml does not require STACK_DOMAIN",
+                "LITELLM_DEV_HOST example must derive from ${STACK_DOMAIN}",
+                "LANGFUSE_S3_HOST must be defined in exactly one environment example",
+            ],
+        )
+
+    def test_rendered_traefik_hosts_must_be_dns_names(self) -> None:
+        services = {
+            "litellm-prod": {
+                "labels": {"traefik.http.routers.litellm-prod.rule": "Host(`llm.`)"}
+            },
+            "grafana": {
+                "labels": ["traefik.http.routers.grafana.rule=Host(`grafana.corp.internal`)"]
+            },
+        }
+
+        self.assertEqual(
+            contracts.public_hostname_failures(services),
+            [
+                "litellm-prod Traefik rule has an invalid public hostname 'llm.'; "
+                "set STACK_DOMAIN or the matching *_HOST variable"
+            ],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

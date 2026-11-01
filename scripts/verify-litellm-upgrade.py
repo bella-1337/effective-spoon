@@ -34,6 +34,7 @@ from maintenance_common import (
     container_environment,
     env_or_dotenv,
     fail,
+    public_host,
     require_docker,
     run_main,
     run_python_script,
@@ -85,14 +86,13 @@ def usage(stream: object = sys.stdout) -> None:
 
 class Suite:
     def __init__(self) -> None:
-        self.prod_host = env_or_dotenv("LITELLM_PROD_HOST", "llm.example.test")
-        self.dev_host = env_or_dotenv("LITELLM_DEV_HOST", "llm-dev.example.test")
-        self.grafana_host = env_or_dotenv("GRAFANA_HOST", "grafana.example.test")
-        self.opensearch_dashboards_url = "https://" + env_or_dotenv(
-            "OPENSEARCH_DASHBOARDS_HOST", "opensearch.example.test"
-        )
-        self.searxng_legacy_host = "search.example.test"
-        self.langfuse_host = env_or_dotenv("LANGFUSE_WEB_HOST", "langfuse.example.test")
+        self.prod_host = public_host("LITELLM_PROD_HOST")
+        self.dev_host = public_host("LITELLM_DEV_HOST")
+        self.grafana_host = public_host("GRAFANA_HOST")
+        self.opensearch_dashboards_url = "https://" + public_host("OPENSEARCH_DASHBOARDS_HOST")
+        # Former public SearXNG name; the probe proves Traefik no longer routes it.
+        self.searxng_legacy_host = "search." + public_host("STACK_DOMAIN")
+        self.langfuse_host = public_host("LANGFUSE_WEB_HOST")
         self.prod_url, self.dev_url = f"https://{self.prod_host}", f"https://{self.dev_host}"
         self.grafana_url = f"https://{self.grafana_host}"
         self.langfuse_url = f"https://{self.langfuse_host}"

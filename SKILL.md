@@ -96,10 +96,11 @@ docker compose --profile prod --profile dev up -d --wait --wait-timeout 150
 Verify public routes and active metrics targets:
 
 ```sh
-curl --fail https://llm.example.test/health/liveliness
-curl --fail https://llm-dev.example.test/health/liveliness
+eval "$(python3 scripts/maintenance.py stack-env)"  # hostnames from .env
+curl --fail "https://$LITELLM_PROD_HOST/health/liveliness"
+curl --fail "https://$LITELLM_DEV_HOST/health/liveliness"
 curl --silent --output /dev/null --write-out '%{http_code}\n' \
-  https://opensearch.example.test/api/status   # expect 401
+  "https://$OPENSEARCH_DASHBOARDS_HOST/api/status"   # expect 401
 docker compose exec -T prometheus wget -qO- \
   'http://localhost:9090/api/v1/targets?state=active'
 ```

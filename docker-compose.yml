@@ -4,6 +4,11 @@ include:
 
 name: ${COMPOSE_PROJECT_NAME:-litellm-stack}
 
+# Public hostnames are never hard-coded here: every *_HOST value comes from
+# .env / .env.optional and defaults there to <service>.${STACK_DOMAIN}.
+# Interpolating this extension field makes Compose refuse to render without it.
+x-stack-domain: ${STACK_DOMAIN:?Set STACK_DOMAIN in .env}
+
 x-default-logging: &default-logging
   driver: json-file
   options:
@@ -715,7 +720,7 @@ services:
       start_period: 60s
     labels:
       - traefik.enable=true
-      - traefik.http.routers.opensearch-dashboards.rule=Host(`${OPENSEARCH_DASHBOARDS_HOST:-opensearch.example.test}`)
+      - traefik.http.routers.opensearch-dashboards.rule=Host(`${OPENSEARCH_DASHBOARDS_HOST:?Set OPENSEARCH_DASHBOARDS_HOST in .env}`)
       - traefik.http.routers.opensearch-dashboards.entrypoints=websecure
       - traefik.http.routers.opensearch-dashboards.tls=true
       - traefik.http.services.opensearch-dashboards.loadbalancer.server.port=5601
@@ -855,7 +860,7 @@ services:
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:-}
       LANGFUSE_HOST: http://langfuse-web:3000
-      PROXY_BASE_URL: https://${LITELLM_PROD_HOST:-llm.example.test}
+      PROXY_BASE_URL: https://${LITELLM_PROD_HOST:?Set LITELLM_PROD_HOST in .env}
       FORWARDED_ALLOW_IPS: "${LITELLM_FORWARDED_ALLOW_IPS:-*}"
     depends_on:
       postgres-init:
@@ -877,7 +882,7 @@ services:
       start_period: 30s
     labels:
       - traefik.enable=true
-      - traefik.http.routers.litellm-prod.rule=Host(`${LITELLM_PROD_HOST:-llm.example.test}`)
+      - traefik.http.routers.litellm-prod.rule=Host(`${LITELLM_PROD_HOST:?Set LITELLM_PROD_HOST in .env}`)
       - traefik.http.routers.litellm-prod.entrypoints=websecure
       - traefik.http.routers.litellm-prod.tls=true
       - traefik.http.services.litellm-prod.loadbalancer.server.port=4000
@@ -953,7 +958,7 @@ services:
       XBERG_AUTO_INDEX_ENABLED: ${XBERG_AUTO_INDEX_ENABLED:-false}
       PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
       PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000
-      PROXY_BASE_URL: https://${LITELLM_DEV_HOST:-llm-dev.example.test}
+      PROXY_BASE_URL: https://${LITELLM_DEV_HOST:?Set LITELLM_DEV_HOST in .env}
       FORWARDED_ALLOW_IPS: "${LITELLM_FORWARDED_ALLOW_IPS:-*}"
     depends_on:
       postgres-init:
@@ -981,7 +986,7 @@ services:
       start_period: 30s
     labels:
       - traefik.enable=true
-      - traefik.http.routers.litellm-dev.rule=Host(`${LITELLM_DEV_HOST:-llm-dev.example.test}`)
+      - traefik.http.routers.litellm-dev.rule=Host(`${LITELLM_DEV_HOST:?Set LITELLM_DEV_HOST in .env}`)
       - traefik.http.routers.litellm-dev.entrypoints=websecure
       - traefik.http.routers.litellm-dev.tls=true
       - traefik.http.services.litellm-dev.loadbalancer.server.port=4000

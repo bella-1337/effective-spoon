@@ -8,6 +8,7 @@ import http.client
 import json
 import os
 import re
+import shlex
 import signal
 import shutil
 import ssl
@@ -456,19 +457,141 @@ def parse_key_values(path: Path, allowed: set[str], label: str) -> dict[str, str
     return values
 
 
-def env_or_dotenv(name: str, default: str) -> str:
-    """Read a simple KEY=value .env value only when the environment omits it."""
-    value = os.environ.get(name)
-    if value:
-        return value
-    dotenv = ROOT / ".env"
-    if dotenv.is_file() and not dotenv.is_symlink():
+PUBLIC_HOST_VARIABLES = (
+    "LITELLM_PROD_HOST",
+    "LITELLM_DEV_HOST",
+    "OPENSEARCH_DASHBOARDS_HOST",
+    "GRAFANA_HOST",
+    "LANGFUSE_WEB_HOST",
+    "LANGFUSE_S3_HOST",
+)
+HOSTNAME_RE = re.compile(
+    r"(?=.{1,253}\Z)(?:(?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)+(?!-)[A-Za-z0-9-]{1,63}(?<!-)"
+)
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_ENV_REFERENCE_RE = re.compile(
+    r"\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)(?P<op>:?[-?])?|(?P<bare>[A-Za-z_][A-Za-z0-9_]*))"
+)
+
+
+def _dotenv_files() -> tuple[Path, ...]:
+    """Return env files in Compose precedence order (highest first).
+
+    Later ``--env-file`` arguments override earlier ones, and the optional
+    module's ``include.env_file`` defaults have the lowest precedence.
+    """
+    return (ROOT / ".env.optional", ROOT / ".env", ROOT / ".env.optional.example")
+
+
+def _dotenv_raw_value(name: str) -> str | None:
+    for dotenv in _dotenv_files():
+        if not dotenv.is_file() or dotenv.is_symlink():
+            continue
         for line in dotenv.read_text(encoding="utf-8").splitlines():
             if line.startswith(f"{name}="):
                 value = line.partition("=")[2]
                 if value:
                     return value
-    return default
+    return None
+
+
+def _expand_env_value(value: str, seen: frozenset[str]) -> str:
+    """Expand a dotenv value the way Docker Compose does.
+
+    Single-quoted values are literal; otherwise ${VAR}, $VAR, nested
+    ${VAR:-default}/${VAR-default}, ${VAR:?error}/${VAR?error}, and $$ apply.
+    """
+    if len(value) >= 2 and value[0] == value[-1] == "'":
+        return value[1:-1]
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        value = value[1:-1]
+    return _interpolate(value, seen)
+
+
+def _interpolate(value: str, seen: frozenset[str]) -> str:
+    output: list[str] = []
+    index = 0
+    while index < len(value):
+        if value.startswith("$$", index):
+            output.append("$")
+            index += 2
+            continue
+        match = _ENV_REFERENCE_RE.match(value, index)
+        if not match:
+            output.append(value[index])
+            index += 1
+            continue
+        name = match.group("braced") or match.group("bare")
+        resolved = _resolve_env(name, seen) if name not in seen else None
+        index = match.end()
+        if match.group("bare"):
+            output.append(resolved or "")
+            continue
+        operator = match.group("op") or ""
+        argument_start, depth = index, 1
+        while index < len(value) and depth:
+            if value[index] == "{":
+                depth += 1
+            elif value[index] == "}":
+                depth -= 1
+            index += 1
+        if depth:
+            fail(f"unterminated variable reference in environment value: ${{{name}")
+        argument = value[argument_start : index - 1]
+        if not operator and argument:
+            fail(f"invalid variable reference in environment value: ${{{name}")
+        is_unset = resolved is None if operator in {"-", "?"} else not resolved
+        if operator.endswith("-") and is_unset:
+            output.append(_interpolate(argument, seen))
+        elif operator.endswith("?") and is_unset:
+            fail(argument or f"required variable {name} is missing a value")
+        else:
+            output.append(resolved or "")
+    return "".join(output)
+
+
+def _resolve_env(name: str, seen: frozenset[str] = frozenset()) -> str | None:
+    value = os.environ.get(name)
+    if value:
+        return value
+    raw = _dotenv_raw_value(name)
+    if raw is None:
+        return None
+    return _expand_env_value(raw, seen | {name})
+
+
+def env_or_dotenv(name: str, default: str) -> str:
+    """Resolve a value from the environment, then the Compose env files.
+
+    References such as ``llm.${STACK_DOMAIN}`` are expanded the same way Docker
+    Compose expands them, so scripts never need their own hard-coded values.
+    """
+    if not _ENV_NAME_RE.fullmatch(name):
+        fail(f"invalid environment variable name: {name}")
+    return _resolve_env(name) or default
+
+
+def public_host(name: str) -> str:
+    """Return a configured public hostname or fail with a clear remedy."""
+    value = env_or_dotenv(name, "")
+    if not HOSTNAME_RE.fullmatch(value):
+        shown = value or "<unset>"
+        fail(
+            f"{name}={shown} is not a DNS hostname; set STACK_DOMAIN in .env or "
+            f"{name} to a full hostname without scheme, port, or path"
+        )
+    return value
+
+
+def stack_env_exports() -> str:
+    """Render resolved STACK_DOMAIN and public hostnames as shell exports."""
+    lines = []
+    for name in ("STACK_DOMAIN", *PUBLIC_HOST_VARIABLES):
+        value = env_or_dotenv(name, "")
+        if name != "STACK_DOMAIN":
+            value = public_host(name)
+        lines.append(f"export {name}={shlex.quote(value)}")
+    return "\n".join(lines) + "\n"
 
 
 def http_request(
