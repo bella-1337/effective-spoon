@@ -32,17 +32,54 @@ units such as `30s`, `15m`, or `15d`.
 | `DOCKER_SOCKET_PROXY_LOG_LEVEL` | Optional: `warning` | `debug`, `info`, `warning`, `error`, or `critical` | Shared log level for the restricted Docker socket proxies. Avoid `debug` in routine production because it increases noise and may reveal operational metadata. |
 | `TRAEFIK_TLS_CERT_FILE` | Optional: `./traefik/certs/litellm-stack.pem` | Host file path | Certificate chain delivered to the on-prem host. The file is bind-mounted read-only as `/certs/tls.crt`. Use an absolute path when the certificate delivery agent writes outside the repository. Include intermediates in server-first order when required by the issuing CA. |
 | `TRAEFIK_TLS_KEY_FILE` | Optional: `./traefik/certs/litellm-stack-key.pem` | Host file path; secret | Private key matching the delivered certificate. Restrict host permissions to the deployment account and Docker daemon. Never commit or copy it into images. The file is bind-mounted read-only as `/certs/tls.key`. |
-| `LITELLM_PROD_HOST` | Optional: `llm.example.test` | DNS hostname | Public Traefik hostname and advertised base URL for the production-profile LiteLLM proxy. It must be covered by the TLS certificate. Do not include a scheme or path. |
-| `LITELLM_DEV_HOST` | Optional: `llm-dev.example.test` | DNS hostname | Public Traefik hostname and advertised base URL for the development-profile LiteLLM proxy. It must be covered by the TLS certificate. |
-| `OPENSEARCH_DASHBOARDS_HOST` | Optional: `opensearch.example.test` | DNS hostname | Public Traefik hostname of OpenSearch Dashboards, the default multi-user observability UI. It must be covered by the TLS certificate. Changing it invalidates browser sessions. |
-| `GRAFANA_HOST` | Optional: `grafana.example.test` | DNS hostname | Used only by the optional `grafana` profile: public Traefik hostname and Grafana root URL. Changing it can invalidate generated links and browser sessions. |
-| `LANGFUSE_WEB_HOST` | Optional: `langfuse.example.test` | DNS hostname | Used only by the optional `langfuse` profile: public Traefik hostname for Langfuse web/API routing and `NEXTAUTH_URL`. |
-| `LANGFUSE_S3_HOST` | Optional: `langfuse-s3.example.test` | DNS hostname | Used only by the optional `langfuse` profile for signed media upload URLs. It must resolve to this stack and be covered by the TLS certificate. |
+| `STACK_DOMAIN` | Required; example: `example.test` | DNS domain | Base domain of the deployment. Every public `*_HOST` example value is `<service>.${STACK_DOMAIN}`, so a new environment normally changes only this value. Docker Compose and the maintenance scripts expand the reference identically; Compose refuses to render without it. Use a domain you control and can issue certificates for; `.test` is reserved for local testing. Print every resolved hostname with `python3 scripts/maintenance.py stack-env`. |
+| `LITELLM_PROD_HOST` | Required; example: `llm.${STACK_DOMAIN}` | DNS hostname or `${STACK_DOMAIN}` reference | Public Traefik hostname and advertised base URL for the production-profile LiteLLM proxy. It must be covered by the TLS certificate. Do not include a scheme or path. |
+| `LITELLM_DEV_HOST` | Required; example: `llm-dev.${STACK_DOMAIN}` | DNS hostname or `${STACK_DOMAIN}` reference | Public Traefik hostname and advertised base URL for the development-profile LiteLLM proxy. It must be covered by the TLS certificate. |
+| `OPENSEARCH_DASHBOARDS_HOST` | Required; example: `opensearch.${STACK_DOMAIN}` | DNS hostname or `${STACK_DOMAIN}` reference | Public Traefik hostname of OpenSearch Dashboards, the default multi-user observability UI. It must be covered by the TLS certificate. Changing it invalidates browser sessions. |
+| `GRAFANA_HOST` | Optional: `grafana.${STACK_DOMAIN}` | DNS hostname or `${STACK_DOMAIN}` reference | Used only by the optional `grafana` profile: public Traefik hostname and Grafana root URL. Changing it can invalidate generated links and browser sessions. |
+| `LANGFUSE_WEB_HOST` | Optional: `langfuse.${STACK_DOMAIN}` | DNS hostname or `${STACK_DOMAIN}` reference | Used only by the optional `langfuse` profile: public Traefik hostname for Langfuse web/API routing and `NEXTAUTH_URL`. |
+| `LANGFUSE_S3_HOST` | Optional: `langfuse-s3.${STACK_DOMAIN}` | DNS hostname or `${STACK_DOMAIN}` reference | Used only by the optional `langfuse` profile for signed media upload URLs. It must resolve to this stack and be covered by the TLS certificate. |
+
+Public hostnames have no hard-coded fallback in the Compose files or scripts.
+Keep the `${STACK_DOMAIN}` reference to follow the naming convention, or replace
+an individual value with a full hostname (no scheme, port, or path) when a
+service needs a name outside that domain. The optional-profile hostnames are
+read from `.env.optional` and default to the `.env.optional.example` values, so
+they also follow `STACK_DOMAIN` unless overridden. `game-day-preflight` fails
+when a rendered Traefik `Host()` rule is not a valid DNS hostname, for example
+`llm.` from an empty `STACK_DOMAIN`.
 
 Changing a hostname requires recreation of every service that consumes that
 hostname, plus coordinated updates to DNS or local host resolution, TLS
 certificates, firewall policy, and clients. Traefik watches Docker labels and
 discovers recreated routed services automatically.
+
+## Corporate branding
+
+These are LiteLLM's own branding settings, passed through unchanged; the stack
+adds no UI customisation of its own. See [`branding/README.md`](../branding/README.md)
+for the asset contract. Recreate `litellm-prod` and `litellm-dev` after a change.
+
+| Variable | Requirement / default | Format | Description and guidance |
+| --- | --- | --- | --- |
+| `BRAND_COMPANY_NAME` | Optional: `Foo-Bar` in the example | Text | Referenced only inside `.env` to compose the text values below; it is not passed to any container. |
+| `BRAND_ASSETS_DIR` | Optional: `./branding/foo-bar` | Host directory path | Mounted read-only at `/app/branding` in both LiteLLM containers. Keep only public brand images here. |
+| `UI_LOGO_PATH` | Optional: `/app/branding/logo.png` | File under `/app/branding/` or `https://` URL | Admin UI sidebar logo. LiteLLM serves local PNG, JPEG, GIF, WEBP, or ICO files and redirects browsers to URLs; use a URL for SVG. Unsupported files fall back to the LiteLLM logo. |
+| `UI_LOGO_PATH_DARK` | Optional: `/app/branding/logo-dark.png` | Same as `UI_LOGO_PATH` | Admin UI logo in dark mode. LiteLLM falls back to `UI_LOGO_PATH`. |
+| `LITELLM_FAVICON_URL` | Optional: `/app/branding/favicon.png` | Same as `UI_LOGO_PATH` | Admin UI browser-tab icon. |
+| `DOCS_TITLE`, `DOCS_DESCRIPTION` | Optional; LiteLLM Enterprise | Text | Title and Markdown description of the Swagger API docs. Ignored without an Enterprise licence. |
+| `EMAIL_LOGO_URL` | Optional; LiteLLM Enterprise | `https://` URL | Logo in invitation and key emails. Use a PNG or JPEG that recipients' mail clients can fetch. |
+| `EMAIL_SUPPORT_CONTACT` | Optional; LiteLLM Enterprise | Email address | Support contact shown in emails. |
+| `EMAIL_SIGNATURE` | Optional; LiteLLM Enterprise | HTML | Email footer. Unset keeps LiteLLM's footer. |
+| `EMAIL_SUBJECT_INVITATION`, `EMAIL_SUBJECT_KEY_CREATED`, `EMAIL_SUBJECT_KEY_ROTATED` | Optional; LiteLLM Enterprise | Text with `{event_message}` | Email subject templates. |
+
+Compose passes the Enterprise variables only when they are present in `.env`.
+Delete a line rather than leaving it empty: LiteLLM treats an empty value as
+configured and would, for example, show an empty API docs title. The page title,
+login heading, colours, and fonts have no LiteLLM setting and stay unchanged.
+`game-day-preflight` checks that the logo and favicon values are `https://` URLs
+or files in the read-only `/app/branding` mount, and that the example files are
+image formats LiteLLM can serve.
 
 ## Credentials and cryptographic material
 
@@ -229,7 +266,7 @@ can cause startup failures or corrupt semantic-cache expectations.
 | `QDRANT_STORAGE_SIZE` | `1g`; Docker tmpfs size | Volatile Qdrant storage limit. The bundled development cache is intentionally non-persistent; all contents disappear on recreation. |
 | `QDRANT_CPU_LIMIT` | `1`; positive decimal CPUs | CPU limit for Qdrant. |
 | `QDRANT_MEMORY_LIMIT` | `2g`; Docker size | Memory limit for Qdrant. Keep enough headroom for indexes and query peaks. |
-| `D3_DECISION_API_BASE` | Required; HTTPS base URL | Operator-controlled remote D3-mini endpoint, without `/v1/systemone`. LiteLLM appends the path. Allowlist this destination in network policy and use a certificate trusted by the LiteLLM host. |
+| `D3_DECISION_API_BASE` | Required; HTTPS base URL; example: `https://d3-mini.${STACK_DOMAIN}:8443` | Operator-controlled remote D3-mini endpoint, without `/v1/systemone`. LiteLLM appends the path. Allowlist this destination in network policy and use a certificate trusted by the LiteLLM host. |
 | `D3_DECISION_API_KEY` | Required secret, at least 32 random characters | Bearer credential shared only by LiteLLM and the remote D3 listener. Rotate it independently of LiteLLM client keys. |
 | `D3_DECISION_CA_BUNDLE` | Required host path to a PEM bundle | CA bundle mounted into both LiteLLM containers. It must include the CA that issued the D3 certificate **and** the normal public roots needed by completion providers; setting `SSL_CERT_FILE` to a private CA alone would break those providers. |
 

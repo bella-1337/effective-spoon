@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from maintenance_common import (
+    HOSTNAME_RE,
     IMAGE_REF_RE,
+    PUBLIC_HOST_VARIABLES,
     ROOT,
     compose_capture,
     compose_command,
@@ -36,6 +38,18 @@ RESTORE_DATABASE_CLIENTS = (
 )
 ACTIVE_ROLLBACK_OVERRIDE = ROOT / "docker-compose.override.yml"
 ACTIVE_ROLLBACK_MARKER = "x-litellm-stack-active-rollback: true"
+TRAEFIK_HOST_RULE_RE = re.compile(r"Host\(`([^`]*)`\)")
+# A public hostname fallback such as ${LITELLM_PROD_HOST:-llm.example.test}
+# would silently route a misconfigured deployment to a placeholder domain.
+HARDCODED_HOST_FALLBACK_RE = re.compile(r"\$\{[A-Z0-9_]*HOST:?-[^}$]*\.[^}$]*\}")
+STACK_DOMAIN_REFERENCE = "${STACK_DOMAIN}"
+# LiteLLM serves a local logo or favicon only when its file header is one of these
+# raster formats (litellm.proxy.common_utils.static_asset_utils); other values
+# must be http(s) URLs, which LiteLLM redirects the browser to.
+BRAND_RASTER_SIGNATURES = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF8", b"RIFF", b"\x00\x00\x01\x00")
+BRAND_IMAGE_VARIABLES = ("UI_LOGO_PATH", "UI_LOGO_PATH_DARK", "LITELLM_FAVICON_URL")
+BRAND_CONTAINER_DIR = "/app/branding/"
+UNSAFE_SVG_RE = re.compile(r"<script|\son[a-z]+\s*=|javascript:|<foreignObject", re.IGNORECASE)
 
 
 def compose_profile_arguments() -> list[str]:
@@ -285,6 +299,112 @@ def validate_compose_contracts(config: Mapping[str, Any]) -> list[str]:
         if searxng.get("ports"):
             failures.append("SearXNG must not publish host ports")
 
+    failures.extend(public_hostname_failures(services))
+    failures.extend(branding_failures(services))
+    return failures
+
+
+def branding_failures(services: Mapping[str, Any]) -> list[str]:
+    """Check that both gateways use LiteLLM's native, read-only branding inputs."""
+    failures: list[str] = []
+    for name in ("litellm-prod", "litellm-dev"):
+        service = services.get(name)
+        if not isinstance(service, dict):
+            continue
+        environment = service.get("environment", {})
+        environment = environment if isinstance(environment, dict) else {}
+        mounts = {
+            str(volume.get("target")): volume
+            for volume in service.get("volumes", [])
+            if isinstance(volume, dict)
+        }
+        branding_mount = mounts.get(BRAND_CONTAINER_DIR.rstrip("/"))
+        if not branding_mount or branding_mount.get("read_only") is not True:
+            failures.append(f"{name} must mount the brand asset directory read-only at /app/branding")
+        for variable in BRAND_IMAGE_VARIABLES:
+            value = str(environment.get(variable) or "")
+            if value.startswith("https://") or value.startswith(BRAND_CONTAINER_DIR):
+                continue
+            failures.append(
+                f"{name} {variable} must be an https:// URL or a file under {BRAND_CONTAINER_DIR}"
+            )
+    return failures
+
+
+def public_hostname_failures(services: Mapping[str, Any]) -> list[str]:
+    """Reject Traefik routers whose rendered Host() is not a DNS hostname."""
+    failures: list[str] = []
+    for name, service in sorted(services.items()):
+        labels = service.get("labels", {}) if isinstance(service, dict) else {}
+        if isinstance(labels, list):
+            labels = dict(str(label).partition("=")[::2] for label in labels)
+        if not isinstance(labels, dict):
+            continue
+        for key, rule in sorted(labels.items()):
+            if not (str(key).startswith("traefik.http.routers.") and str(key).endswith(".rule")):
+                continue
+            for host in TRAEFIK_HOST_RULE_RE.findall(str(rule)):
+                if not HOSTNAME_RE.fullmatch(host):
+                    failures.append(
+                        f"{name} Traefik rule has an invalid public hostname {host!r}; "
+                        "set STACK_DOMAIN or the matching *_HOST variable"
+                    )
+    return failures
+
+
+def brand_asset_failures(root: Path, env_examples: Mapping[str, str]) -> list[str]:
+    """Require the example brand files LiteLLM serves to be supported raster images."""
+    assets_dir = env_examples.get("BRAND_ASSETS_DIR", "")
+    if not assets_dir or assets_dir.startswith("/") or ".." in Path(assets_dir).parts:
+        return ["BRAND_ASSETS_DIR in .env.example must be a repository-relative directory"]
+    directory = root / assets_dir
+    failures: list[str] = []
+    for variable in BRAND_IMAGE_VARIABLES:
+        value = env_examples.get(variable, "")
+        if not value.startswith(BRAND_CONTAINER_DIR):
+            continue
+        path = directory / value.removeprefix(BRAND_CONTAINER_DIR)
+        if not path.is_file() or path.is_symlink():
+            failures.append(f"{variable} example file is missing: {assets_dir}/{path.name}")
+        elif not path.read_bytes()[:8].startswith(BRAND_RASTER_SIGNATURES):
+            failures.append(
+                f"{variable} example file is not a PNG, JPEG, GIF, WEBP, or ICO image "
+                f"that LiteLLM can serve: {assets_dir}/{path.name}"
+            )
+    for svg in sorted(directory.rglob("*.svg")):
+        if UNSAFE_SVG_RE.search(svg.read_text(encoding="utf-8")):
+            failures.append(f"Brand SVG contains scriptable content: {svg.relative_to(root)}")
+    return failures
+
+
+def public_hostname_source_failures(
+    compose_sources: Mapping[str, str],
+    env_examples: Mapping[str, Mapping[str, str]],
+) -> list[str]:
+    """Keep public hostnames configurable from STACK_DOMAIN, never hard-coded."""
+    failures: list[str] = []
+    for name, source in sorted(compose_sources.items()):
+        for fallback in sorted(set(HARDCODED_HOST_FALLBACK_RE.findall(source))):
+            failures.append(f"{name} hard-codes a public hostname fallback: {fallback}")
+    core_source = compose_sources.get("docker-compose.yml", "")
+    if not re.search(r"^x-stack-domain: \$\{STACK_DOMAIN:\?", core_source, re.MULTILINE):
+        failures.append("docker-compose.yml does not require STACK_DOMAIN")
+    if not env_examples.get(".env.example", {}).get("STACK_DOMAIN"):
+        failures.append("STACK_DOMAIN is missing from .env.example")
+    for variable in PUBLIC_HOST_VARIABLES:
+        values = [
+            values[variable]
+            for values in env_examples.values()
+            if variable in values
+        ]
+        if len(values) != 1:
+            failures.append(
+                f"{variable} must be defined in exactly one environment example"
+            )
+        elif STACK_DOMAIN_REFERENCE not in values[0]:
+            failures.append(
+                f"{variable} example must derive from {STACK_DOMAIN_REFERENCE}"
+            )
     return failures
 
 
@@ -417,6 +537,30 @@ def validate_repository_contracts(root: Path = ROOT) -> list[str]:
 
         core_env_keys = env_keys(core_env_example)
         optional_env_keys = env_keys(optional_env_example)
+
+        def env_values(path: Path) -> dict[str, str]:
+            return {
+                key: value
+                for key, _, value in (
+                    line.partition("=")
+                    for line in path.read_text(encoding="utf-8").splitlines()
+                    if re.fullmatch(r"[A-Z][A-Z0-9_]*=.*", line)
+                )
+            }
+
+        failures.extend(brand_asset_failures(root, env_values(core_env_example)))
+        failures.extend(
+            public_hostname_source_failures(
+                {
+                    compose_file.name: compose_source,
+                    optional_compose_file.name: optional_compose_source,
+                },
+                {
+                    core_env_example.name: env_values(core_env_example),
+                    optional_env_example.name: env_values(optional_env_example),
+                },
+            )
+        )
         core_langfuse_keys = {
             "LANGFUSE_PUBLIC_KEY",
             "LANGFUSE_SECRET_KEY",

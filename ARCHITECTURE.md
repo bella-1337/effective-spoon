@@ -289,12 +289,13 @@ docker compose --profile prod --profile dev up -d --wait --wait-timeout 150
 Then verify:
 
 ```sh
-curl --fail https://llm.example.test/health/liveliness
-curl --fail https://llm-dev.example.test/health/liveliness
+eval "$(python3 scripts/maintenance.py stack-env)"  # hostnames from .env
+curl --fail "https://$LITELLM_PROD_HOST/health/liveliness"
+curl --fail "https://$LITELLM_DEV_HOST/health/liveliness"
 curl --silent --output /dev/null --write-out '%{http_code}\n' \
-  https://opensearch.example.test/api/status   # expect 401 without credentials
+  "https://$OPENSEARCH_DASHBOARDS_HOST/api/status"   # expect 401 without credentials
 curl --silent --output /dev/null --write-out '%{http_code}\n' \
-  -H 'Host: search.example.test' https://llm.example.test/   # expect 404: SearXNG is internal-only
+  -H "Host: search.$STACK_DOMAIN" "https://$LITELLM_PROD_HOST/"   # expect 404: SearXNG is internal-only
 ```
 
 Check active Prometheus targets rather than historical series:

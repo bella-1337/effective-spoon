@@ -17,9 +17,9 @@ from maintenance_common import (
     compose,
     compose_capture,
     container_http_request,
-    env_or_dotenv,
     fail,
     http_request,
+    public_host,
     run_main,
 )
 
@@ -67,8 +67,8 @@ def main() -> None:
         return
     if len(sys.argv) > 1:
         fail("verify-pgvector accepts no command-line arguments", 2)
-    prod_host = env_or_dotenv("LITELLM_PROD_HOST", "llm.example.test")
-    dev_host = env_or_dotenv("LITELLM_DEV_HOST", "llm-dev.example.test")
+    prod_host = public_host("LITELLM_PROD_HOST")
+    dev_host = public_host("LITELLM_DEV_HOST")
     extension = scalar("SELECT extversion FROM pg_extension WHERE extname = 'vector';")
     initial = scalar(f"SELECT COUNT(*) FROM embeddings WHERE vector_store_id = '{STORE_ID}';")
     if not extension:

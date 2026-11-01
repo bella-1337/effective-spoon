@@ -17,9 +17,9 @@ import truststore
 from maintenance_common import (
     compose_capture,
     container_http_request,
-    env_or_dotenv,
     fail,
     http_request,
+    public_host,
     run_main,
 )
 
@@ -97,7 +97,7 @@ def main() -> None:
         f"Return exactly semantic-cache-{nonce} and no additional text.",
         f"Return exactly semantic-cache-{nonce} with no additional text.",
     )
-    dev_host = env_or_dotenv("LITELLM_DEV_HOST", "llm-dev.example.test")
+    dev_host = public_host("LITELLM_DEV_HOST")
     responses: list[dict[str, object]] = []
     for prompt in prompts:
         payload = json.dumps(

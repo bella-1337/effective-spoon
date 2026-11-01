@@ -132,8 +132,54 @@ guidance, change impact, and operational practices.
 
 Do not commit `.env`, `.env.optional`, provider keys, database passwords,
 rendered Compose configuration, or TLS private keys. The example `.test` names
-are reserved for testing. If you choose other names, use the same names in the
-applicable environment file, the certificate command, and host resolution.
+are reserved for testing.
+
+### Public hostnames and `STACK_DOMAIN`
+
+No public hostname is hard-coded in the Compose files, scripts, or commands in
+this document. Set the deployment's base domain once in `.env`:
+
+```dotenv
+STACK_DOMAIN=ai.corp.example
+```
+
+Every public `*_HOST` variable in `.env` and `.env.optional` defaults to
+`<service>.${STACK_DOMAIN}` (for example `LITELLM_PROD_HOST=llm.${STACK_DOMAIN}`).
+Docker Compose and the maintenance scripts expand that reference identically.
+To use a hostname outside the convention, replace only that variable's value
+with a full hostname. Compose refuses to render when `STACK_DOMAIN` or a
+required hostname is empty, and `game-day-preflight` rejects malformed rendered
+hostnames.
+
+The commands below use shell variables instead of literal hostnames. Load the
+resolved values into the current shell first (Python 3.11+, no other
+dependencies):
+
+```sh
+eval "$(python3 scripts/maintenance.py stack-env)"
+echo "$LITELLM_PROD_HOST"
+```
+
+Use the same names in the certificate request and host resolution.
+
+### Corporate branding
+
+The LiteLLM Admin UI logo, dark-mode logo, and favicon use LiteLLM's native
+`UI_LOGO_PATH`, `UI_LOGO_PATH_DARK`, and `LITELLM_FAVICON_URL` settings. The
+example `.env` points them at the placeholder Foo-Bar images in
+[`branding/foo-bar`](branding/foo-bar), mounted read-only into both gateways.
+Replace the images, or point the variables at `https://` URLs, then recreate
+the gateways:
+
+```sh
+docker compose --profile prod up -d --force-recreate litellm-prod
+```
+
+API-docs and email branding (`DOCS_*`, `EMAIL_*`) also use LiteLLM's own
+variables but take effect only with a LiteLLM Enterprise licence. LiteLLM offers
+no setting for the page title, login heading, colours, or fonts, so this stack
+does not change them. See [`branding/README.md`](branding/README.md) and the
+[environment variable reference](docs/environment-variables.md#corporate-branding).
 
 ### Automatic virtual-key rotation
 
@@ -179,12 +225,12 @@ litellm_settings:
 Pass these variables to each LiteLLM service from the ignored local `.env`:
 
 ```dotenv
-SMTP_HOST=smtp.example.com
+SMTP_HOST=<smtp-host>
 SMTP_TLS=True
 SMTP_PORT=587
 SMTP_USERNAME=<smtp-user>
 SMTP_PASSWORD=<smtp-password>
-SMTP_SENDER_EMAIL=ai-notifications@example.com
+SMTP_SENDER_EMAIL=<sender-address>
 
 # Recommended: do not place live API keys in email.
 EMAIL_INCLUDE_API_KEY=false
@@ -278,15 +324,17 @@ run:
 ```sh
 mkcert -install
 mkdir -p traefik/certs
+eval "$(python3 scripts/maintenance.py stack-env)"
 mkcert \
   -cert-file traefik/certs/litellm-stack.pem \
   -key-file traefik/certs/litellm-stack-key.pem \
-  llm.example.test llm-dev.example.test opensearch.example.test \
-  langfuse.example.test langfuse-s3.example.test grafana.example.test
+  "$LITELLM_PROD_HOST" "$LITELLM_DEV_HOST" "$OPENSEARCH_DASHBOARDS_HOST" \
+  "$LANGFUSE_WEB_HOST" "$LANGFUSE_S3_HOST" "$GRAFANA_HOST"
 ```
 
-If `.env` uses different hostnames, substitute all names in the final command.
-`grafana.example.test` is needed only for the optional `grafana` profile.
+The names come from `.env` and `.env.optional`, so the certificate always
+matches the configured routes. `GRAFANA_HOST` is needed only for the optional
+`grafana` profile, and the two Langfuse names only for the `langfuse` profile.
 
 `mkcert` creates a locally trusted CA and a private key. Its certificates are
 for local/private use only: browsers on other devices will not trust them
@@ -296,22 +344,28 @@ deployment.
 
 ## 3. Resolve the hostnames
 
-For a stack running on this machine, add one line to `/etc/hosts`:
+For a stack running on this machine, generate the `/etc/hosts` line from the
+configured names and append it:
 
-```text
-127.0.0.1 llm.example.test llm-dev.example.test opensearch.example.test langfuse.example.test langfuse-s3.example.test grafana.example.test
+```sh
+eval "$(python3 scripts/maintenance.py stack-env)"
+printf '127.0.0.1 %s %s %s %s %s %s\n' \
+  "$LITELLM_PROD_HOST" "$LITELLM_DEV_HOST" "$OPENSEARCH_DASHBOARDS_HOST" \
+  "$LANGFUSE_WEB_HOST" "$LANGFUSE_S3_HOST" "$GRAFANA_HOST" \
+  | sudo tee -a /etc/hosts
 ```
 
 On Windows, edit
-`C:\Windows\System32\drivers\etc\hosts` as Administrator. For a remote Docker
-host, use that host's reachable private IP instead of `127.0.0.1`. Keep the
-names identical to `.env` and the certificate SANs.
+`C:\Windows\System32\drivers\etc\hosts` as Administrator and add the same names
+(print them with the `printf` command above). For a remote Docker host, use
+that host's reachable private IP instead of `127.0.0.1`. Keep the names
+identical to `.env` and the certificate SANs.
 
 Check resolution before starting:
 
 ```sh
-getent hosts llm.example.test 2>/dev/null || \
-  dscacheutil -q host -a name llm.example.test
+getent hosts "$LITELLM_PROD_HOST" 2>/dev/null || \
+  dscacheutil -q host -a name "$LITELLM_PROD_HOST"
 ```
 
 ## 4. Fetch Grafana dashboards (optional `grafana` profile only)
@@ -448,26 +502,27 @@ docker compose --profile prod logs --tail=100
 ```
 
 Replace `prod` with `dev` when that is the selected profile. Then verify the
-HTTPS routes (substitute your configured hosts):
+HTTPS routes using the configured hostnames:
 
 ```sh
-curl --fail --show-error --silent https://llm.example.test/health/liveliness
+eval "$(python3 scripts/maintenance.py stack-env)"
+curl --fail --show-error --silent "https://$LITELLM_PROD_HOST/health/liveliness"
 # OpenSearch Dashboards requires authentication; 401 proves the route is up.
 curl --silent --output /dev/null --write-out '%{http_code}\n' \
-  https://opensearch.example.test/api/status
+  "https://$OPENSEARCH_DASHBOARDS_HOST/api/status"
 # Optional langfuse profile only:
 curl --fail --show-error --silent \
-  'https://langfuse.example.test/api/public/health?failIfDatabaseUnavailable=true'
+  "https://$LANGFUSE_WEB_HOST/api/public/health?failIfDatabaseUnavailable=true"
 # SearXNG is internal-only; Traefik must not route it (expect 404).
 curl --silent --output /dev/null --write-out '%{http_code}\n' \
-  -H 'Host: search.example.test' https://llm.example.test/
+  -H "Host: search.$STACK_DOMAIN" "https://$LITELLM_PROD_HOST/"
 ```
 
 For either profile, verify the remote D3 integration through LiteLLM rather than
 calling the classifier host directly:
 
 ```sh
-curl --fail --silent https://llm-dev.example.test/v1/systemone \
+curl --fail --silent "https://$LITELLM_DEV_HOST/v1/systemone" \
   -H "Authorization: ******" \
   -H "Content-Type: application/json" \
   -d '{"model":"d3-mini","state":"Fix a local typo.","questions":{"tier":{"type":"choice","instructions":"Choose coding effort.","criteria":{"SIMPLE":"Local change","MEDIUM":"Bounded multi-step change","COMPLEX":"Cross-module change","REASONING":"High-risk reasoning"}}}}'
@@ -479,11 +534,11 @@ at the `mkcert` root certificate:
 ```sh
 curl --cacert "$(mkcert -CAROOT)/rootCA.pem" \
   --fail --show-error --silent \
-  https://llm.example.test/health/liveliness
+  "https://$LITELLM_PROD_HOST/health/liveliness"
 ```
 
 Do not use `curl -k` as a permanent workaround; it disables certificate
-verification. Open `https://opensearch.example.test`, sign in as `admin` with
+verification. Open `https://$OPENSEARCH_DASHBOARDS_HOST`, sign in as `admin` with
 `OPENSEARCH_ADMIN_PASSWORD` from `.env`, choose the **Global** tenant, and open
 **Dashboards → LiteLLM Overview**.
 
@@ -495,7 +550,7 @@ Compose service through the same default platform. The optional `grafana`
 profile also sends logs to Loki.
 
 With the optional `langfuse` profile, LiteLLM additionally loads its
-`langfuse_otel` integration. Open `https://langfuse.example.test`, sign in with
+`langfuse_otel` integration. Open `https://$LANGFUSE_WEB_HOST`, sign in with
 the initial administrator account, and select the pre-provisioned **LiteLLM**
 project. Public sign-up is disabled (`AUTH_DISABLE_SIGNUP=true`), so only the
 initial administrator account can sign in. Keep its credentials in the secrets
@@ -840,18 +895,18 @@ Test production search with:
 
 ```sh
 curl --fail --show-error --silent \
-  https://llm.example.test/v1/search/searxng-search \
+  "https://$LITELLM_PROD_HOST/v1/search/searxng-search" \
   -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" \
   -H "Content-Type: application/json" \
   -d '{"query":"LiteLLM SearXNG integration","max_results":5}'
 ```
 
-Use `https://llm-dev.example.test` to test the development profile. SearXNG
+Use `https://$LITELLM_DEV_HOST` to test the development profile. SearXNG
 returns a fixed page of results, so `max_results` may not reduce the number of
 results returned by the upstream service.
 
 The beta LiteLLM Chat UI is enabled only for the development profile at
-`https://llm-dev.example.test/ui/chat`. Production keeps the Chat UI disabled.
+`https://$LITELLM_DEV_HOST/ui/chat`. Production keeps the Chat UI disabled.
 Users must sign in and can only select models allowed by their LiteLLM access
 policy. The native `searxng-search` endpoint is available through both gateways;
 it is separate from the Chat UI's MCP tool picker.
@@ -868,7 +923,7 @@ List the available tools:
 
 ```sh
 curl --fail --show-error --silent \
-  "https://llm.example.test/mcp-rest/tools/list?server_id=xberg" \
+  "https://$LITELLM_PROD_HOST/mcp-rest/tools/list?server_id=xberg" \
   -H "x-litellm-api-key: ******"
 ```
 
@@ -876,7 +931,7 @@ Extract the official Xberg Docker guide through LiteLLM:
 
 ```sh
 curl --fail --show-error --silent \
-  https://llm.example.test/mcp-rest/tools/call \
+  "https://$LITELLM_PROD_HOST/mcp-rest/tools/call" \
   -H "x-litellm-api-key: ******" \
   -H "Content-Type: application/json" \
   -d '{
@@ -891,7 +946,7 @@ curl --fail --show-error --silent \
   }'
 ```
 
-Use `https://llm-dev.example.test` for the development profile. Xberg accepts
+Use `https://$LITELLM_DEV_HOST` for the development profile. Xberg accepts
 remote URLs and therefore acts as a server-side fetcher. Grant MCP access only
 to trusted keys and teams. Xberg has no direct route to the Internet or the
 stack's `internal` network: outbound HTTP and HTTPS must pass through the Squid
@@ -920,7 +975,7 @@ operator-provided TLS certificate/key, and a random API key of at least 32
 characters:
 
 ```sh
-export D3_SERVER_NAME=d3-mini.example.test
+export D3_SERVER_NAME="d3-mini.${STACK_DOMAIN:?set to the STACK_DOMAIN value from .env}"
 export D3_API_KEY="$(openssl rand -hex 32)"
 export D3_TLS_CERT_FILE=/secure/path/d3-mini.crt
 export D3_TLS_KEY_FILE=/secure/path/d3-mini.key
@@ -946,7 +1001,7 @@ docker compose --profile dev up -d
 Call the router through the normal LiteLLM hostname and credential:
 
 ```sh
-curl --fail --silent https://llm-dev.example.test/v1/chat/completions \
+curl --fail --silent "https://$LITELLM_DEV_HOST/v1/chat/completions" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -986,7 +1041,7 @@ Set `QDRANT_API_KEY` to a separate random secret. Opt in only for single-turn,
 non-sensitive requests and send a stable authenticated end-user identifier:
 
 ```sh
-curl --fail --silent https://llm-dev.example.test/v1/chat/completions \
+curl --fail --silent "https://$LITELLM_DEV_HOST/v1/chat/completions" \
   -H "Authorization: ******" \
   -H "x-litellm-customer-id: example-user-123" \
   -H "Content-Type: application/json" \
@@ -1148,12 +1203,12 @@ Check both profiles after shared-module changes. Resolve the live policy and
 send representative positive and negative examples:
 
 ```sh
-curl --fail --silent https://llm.example.test/policies/resolve \
+curl --fail --silent "https://$LITELLM_PROD_HOST/policies/resolve" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini"}'
 
-curl --fail --silent https://llm-dev.example.test/v1/chat/completions \
+curl --fail --silent "https://$LITELLM_DEV_HOST/v1/chat/completions" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1196,10 +1251,10 @@ Policy attachments are required: defining a policy without attaching it does not
 apply its guardrails. Check the live configuration with:
 
 ```sh
-curl --fail --silent https://llm.example.test/policies/list \
+curl --fail --silent "https://$LITELLM_PROD_HOST/policies/list" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY"
 
-curl --fail --silent https://llm.example.test/policies/resolve \
+curl --fail --silent "https://$LITELLM_PROD_HOST/policies/resolve" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini"}'

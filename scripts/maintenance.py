@@ -22,6 +22,7 @@ from maintenance_common import (
     run,
     run_main,
     run_python_script,
+    stack_env_exports,
 )
 from maintenance_contracts import (
     load_compose_config,
@@ -39,6 +40,11 @@ Commands:
 
   status
       Show all Compose containers and their current state.
+
+  stack-env
+      Print STACK_DOMAIN and every public *_HOST resolved from .env and
+      .env.optional as shell exports, for example:
+      eval "$(./scripts/maintenance.py stack-env)"
 
   game-day-preflight [--env-file FILE] [--optional-env-file FILE]
       Validate all Compose profiles and the static safety contracts required
@@ -214,6 +220,10 @@ def main() -> None:
             usage_error("status accepts no additional arguments")
         require_docker()
         compose(["ps", "--all"])
+    elif command == "stack-env":
+        if args:
+            usage_error("stack-env accepts no additional arguments")
+        sys.stdout.write(stack_env_exports())
     elif command == "game-day-preflight":
         invoke("game-day-preflight.py", args)
     elif command == "security-scan":
