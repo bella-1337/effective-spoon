@@ -38,7 +38,8 @@ Map the change across these surfaces:
 - Grafana datasources, dashboard JSON, and `grafana/alerting/` (the single
   source of alert rules for both OpenSearch and Grafana);
 - `loki/config.yml`, `alloy/config.alloy`, and `alloy/loki.alloy`;
-- `.env.example`, `.env.optional.example`, `.gitignore`, and `README.md`.
+- `.env.example`, `.env.optional.example`, `.gitignore`, `README.md`, and the
+  guides under `docs/`.
 
 For every proposed removal, identify:
 

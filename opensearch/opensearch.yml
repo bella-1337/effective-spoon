@@ -1,6 +1,6 @@
 ---
 # Single-node OpenSearch for the LiteLLM stack. TLS material is created by the
-# opensearch-certs one-shot service; see README section "OpenSearch".
+# opensearch-certs one-shot service; see docs/observability.md, section "OpenSearch".
 cluster.name: litellm-stack
 node.name: opensearch
 network.host: 0.0.0.0
