@@ -324,7 +324,8 @@ invoking shell or the generated service definition.
 | `IMAGE_SECURITY_COMMAND_TIMEOUT_SECONDS` | `900` | Positive integer command timeout. Keep finite so stalled scans fail visibly. |
 | `IMAGE_SECURITY_RETENTION_DAYS` | `30` | Non-negative integer report retention. `0` removes completed reports immediately; ensure this satisfies audit requirements. |
 | `IMAGE_SECURITY_SBOM_LICENCE_SCAN`, `IMAGE_SECURITY_SBOM_RETENTION_DAYS` | As above | Also honoured by `./scripts/maintenance.py sbom`. `IMAGE_SECURITY_SBOM_ENABLED` applies only to scheduled runs; the systemd timer accepts `--no-sbom` instead. |
-| `STACK_REPOSITORY_REVISION` | Git `HEAD`, otherwise `unknown` | Optional repository revision recorded in the stack SBOM when the checkout has no Git metadata. |
+| `STACK_REPOSITORY_REVISION` | Git `HEAD` for SBOMs; `unknown` for image labels | Repository commit recorded in the stack SBOM when the checkout has no Git metadata, and in the `org.opencontainers.image.revision` label of images this repository builds. Export it, for example `export STACK_REPOSITORY_REVISION="$(git rev-parse HEAD)"`, before `docker compose build`. |
+| `STACK_REPOSITORY_URL` | Empty | Optional URL of this repository, recorded in the `org.opencontainers.image.source` and `org.opencontainers.image.url` labels of images this repository builds. Export it before `docker compose build`; leave it empty rather than pointing to a URL the organisation does not control. |
 
 ## Maintenance scripts
 

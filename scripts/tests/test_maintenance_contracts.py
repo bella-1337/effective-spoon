@@ -350,5 +350,61 @@ class MaintenanceContractTests(unittest.TestCase):
             )
 
 
+    def test_own_images_require_consistent_oci_labels(self) -> None:
+        labels = {
+            f"org.opencontainers.image.{key}": value
+            for key, value in {
+                "vendor": "example.test",
+                "title": "tools",
+                "description": "Tools",
+                "version": "0.1.0",
+                "revision": "abc123",
+                "licenses": "LicenseRef-Proprietary",
+                "base.name": "base:1",
+                "created": "",
+                "source": "",
+                "url": "",
+            }.items()
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "tools.Dockerfile").write_text(
+                "FROM helper:2 AS helper\nFROM base:1@sha256:" + "a" * 64 + "\n",
+                encoding="utf-8",
+            )
+            config = {
+                "x-stack-domain": "example.test",
+                "services": {
+                    "tools": {
+                        "image": "registry.example.test/tools:0.1.0",
+                        "build": {"dockerfile": "tools.Dockerfile", "labels": dict(labels)},
+                    },
+                    "upstream": {"image": "postgres:16"},
+                },
+            }
+            self.assertEqual(contracts.own_image_label_failures(config, root), [])
+
+            build = config["services"]["tools"]["build"]
+            build["labels"]["org.opencontainers.image.vendor"] = "other.test"
+            build["labels"]["org.opencontainers.image.version"] = "0.2.0"
+            build["labels"]["org.opencontainers.image.base.name"] = "helper:2"
+            self.assertEqual(
+                contracts.own_image_label_failures(config, root),
+                [
+                    "Vendor label of tools must equal STACK_DOMAIN",
+                    "Version label of tools must equal its image tag",
+                    "Base-name label of tools must equal the final FROM image of its Dockerfile",
+                ],
+            )
+
+            del build["labels"]["org.opencontainers.image.revision"]
+            del build["labels"]["org.opencontainers.image.source"]
+            build["labels"]["org.opencontainers.image.title"] = " "
+            self.assertEqual(
+                contracts.own_image_label_failures(config, root),
+                ["Locally built image of tools lacks OCI labels: title, revision, source"],
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -61,6 +61,17 @@ DOCKERFILE_FROM_RE = re.compile(r"^FROM\s+(?:--platform=\S+\s+)?(\S+)", re.MULTI
 D3_IMAGE_RE = re.compile(r"^D3_[A-Z_]*IMAGE='([^']+)'", re.MULTILINE)
 D3_REVISION_RE = re.compile(r"^D3_MODEL_REVISION='([0-9a-f]{40})'", re.MULTILINE)
 TRIVY_IMAGE_RE = re.compile(r'^\s*"(aquasec/trivy:[^"@]+)"', re.MULTILINE)
+OWN_IMAGE_REQUIRED_LABELS = (
+    "vendor",
+    "title",
+    "description",
+    "version",
+    "revision",
+    "licenses",
+    "base.name",
+)
+# Base images such as uv set these; own images must override them explicitly.
+OWN_IMAGE_OVERRIDDEN_LABELS = ("created", "source", "url")
 REGISTER_ROW_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|", re.MULTILINE)
 
 
@@ -371,11 +382,63 @@ def compose_model_revisions(services: Mapping[str, Any]) -> set[str]:
 
 
 def rendered_supply_chain_failures(config: Mapping[str, Any]) -> list[str]:
-    """Check the licence register against a fully rendered config."""
+    """Check the register and own-image labels against a fully rendered config."""
     services = config.get("services")
     if not isinstance(services, dict):
         return ["Compose configuration has no services object"]
-    return licence_register_failures(services)
+    return [
+        *licence_register_failures(services),
+        *own_image_label_failures(config),
+    ]
+
+
+def final_base_image(dockerfile: Path) -> str | None:
+    if not dockerfile.is_file() or dockerfile.is_symlink():
+        return None
+    references = DOCKERFILE_FROM_RE.findall(dockerfile.read_text(encoding="utf-8"))
+    return image_without_digest(references[-1]) if references else None
+
+
+def own_image_label_failures(config: Mapping[str, Any], root: Path = ROOT) -> list[str]:
+    """Require consistent OCI labels on every image this repository builds."""
+    failures: list[str] = []
+    services = config.get("services")
+    if not isinstance(services, dict):
+        return failures
+    vendor = config.get("x-stack-domain")
+    for name, service in sorted(services.items()):
+        build = service.get("build") if isinstance(service, dict) else None
+        if not isinstance(build, dict):
+            continue
+        labels = build.get("labels")
+        labels = labels if isinstance(labels, dict) else {}
+        missing = [
+            key
+            for key in OWN_IMAGE_REQUIRED_LABELS
+            if not str(labels.get(f"org.opencontainers.image.{key}") or "").strip()
+        ]
+        missing.extend(
+            key
+            for key in OWN_IMAGE_OVERRIDDEN_LABELS
+            if f"org.opencontainers.image.{key}" not in labels
+        )
+        if missing:
+            failures.append(
+                f"Locally built image of {name} lacks OCI labels: " + ", ".join(missing)
+            )
+            continue
+        if isinstance(vendor, str) and labels["org.opencontainers.image.vendor"] != vendor:
+            failures.append(f"Vendor label of {name} must equal STACK_DOMAIN")
+        image = service.get("image")
+        tag = str(image).partition("@")[0].rsplit("/", 1)[-1].partition(":")[2] if image else ""
+        if labels["org.opencontainers.image.version"] != tag:
+            failures.append(f"Version label of {name} must equal its image tag")
+        base = final_base_image(root / str(build.get("dockerfile") or "Dockerfile"))
+        if labels["org.opencontainers.image.base.name"] != base:
+            failures.append(
+                f"Base-name label of {name} must equal the final FROM image of its Dockerfile"
+            )
+    return failures
 
 
 def licence_register_failures(

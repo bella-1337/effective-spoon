@@ -1854,6 +1854,44 @@ pinned to immutable revisions (`BGE_M3_REVISION` for BGE-M3 and
 `D3_MODEL_REVISION` in `scripts/deploy-d3-mini.sh`) and recorded in the
 register.
 
+### Labels of locally built images
+
+The three images this repository builds carry the standard OCI image labels,
+set in the Compose `build.labels` of `litellm-opensearch-tools`,
+`litellm-pgvector`, and `litellm-image-security-monitor`:
+
+| Label | Value |
+|---|---|
+| `org.opencontainers.image.vendor` | `STACK_DOMAIN`, identifying the organisation that builds and operates the image |
+| `org.opencontainers.image.title`, `.description` | Image name and purpose |
+| `org.opencontainers.image.version` | The Compose image tag |
+| `org.opencontainers.image.revision` | `STACK_REPOSITORY_REVISION`, or the upstream commit for `litellm-pgvector` |
+| `org.opencontainers.image.licenses` | `LicenseRef-Proprietary` for repository code; `MIT` for `litellm-pgvector` |
+| `org.opencontainers.image.base.name` | The final `FROM` image of the Dockerfile, without digest |
+| `org.opencontainers.image.source`, `.url` | `STACK_REPOSITORY_URL` (empty when unset), or the upstream repository for `litellm-pgvector` |
+| `org.opencontainers.image.created` | Always empty; see below |
+
+Build with the repository commit recorded:
+
+```bash
+export STACK_REPOSITORY_REVISION="$(git rev-parse HEAD)"
+docker compose --env-file .env --env-file .env.optional \
+  --profile dev --profile security build
+docker image inspect --format '{{json .Config.Labels}}' litellm-opensearch-tools:0.1.0
+```
+
+`doctor`, the game-day preflight, and `scripts/ci/validate.sh` fail when a
+label is missing or when the vendor, version, or base-name label drifts from
+`STACK_DOMAIN`, the image tag, or the Dockerfile, so a base-image tag update
+must change the label and the register row in the same commit.
+
+Base images also carry OCI labels; the `uv` base, for example, sets `source`,
+`url`, and `created` for uv itself. Docker would otherwise copy those into the
+stack's own images, so `source`, `url`, and `created` are always overridden.
+`created` stays empty on purpose: Docker records the build time in the image
+metadata, and a timestamp label would make otherwise identical builds differ. The SBOM generator copies all
+`org.opencontainers.image.*` labels into the stack SBOM.
+
 ## 17. Back up the databases
 
 Run the repository-owned backup script while `postgres` and `vector-postgres`

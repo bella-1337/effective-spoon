@@ -9,6 +9,20 @@ name: ${COMPOSE_PROJECT_NAME:-litellm-stack}
 # Interpolating this extension field makes Compose refuse to render without it.
 x-stack-domain: ${STACK_DOMAIN:?Set STACK_DOMAIN in .env}
 
+# OCI image labels for every image this repository builds. The organisation,
+# identified by STACK_DOMAIN, is the vendor. Export STACK_REPOSITORY_REVISION
+# (for example "$(git rev-parse HEAD)") before building so the revision label
+# identifies the exact repository commit. created, source, and url are always
+# set so labels inherited from a base image cannot describe the wrong software;
+# Docker's own image creation time remains authoritative.
+x-own-image-labels: &own-image-labels
+  org.opencontainers.image.vendor: ${STACK_DOMAIN:?Set STACK_DOMAIN in .env}
+  org.opencontainers.image.licenses: LicenseRef-Proprietary
+  org.opencontainers.image.revision: ${STACK_REPOSITORY_REVISION:-unknown}
+  org.opencontainers.image.source: ${STACK_REPOSITORY_URL:-}
+  org.opencontainers.image.url: ${STACK_REPOSITORY_URL:-}
+  org.opencontainers.image.created: ""
+
 x-default-logging: &default-logging
   driver: json-file
   options:
@@ -612,6 +626,12 @@ services:
     build: &opensearch-tools-build
       context: .
       dockerfile: opensearch/tools/Dockerfile
+      labels:
+        <<: *own-image-labels
+        org.opencontainers.image.title: litellm-opensearch-tools
+        org.opencontainers.image.description: OpenSearch certificate, cluster, dashboard, and LiteLLM bridge tooling for the LiteLLM stack
+        org.opencontainers.image.version: "0.1.0"
+        org.opencontainers.image.base.name: ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm-slim
     user: "0:0"
     entrypoint: ["/bin/sh", "/app/generate-certs.sh"]
     environment:
@@ -1059,7 +1079,13 @@ services:
       additional_contexts:
         upstream: https://github.com/BerriAI/litellm-pgvector.git#5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
       labels:
+        <<: *own-image-labels
+        org.opencontainers.image.title: litellm-pgvector
+        org.opencontainers.image.description: LiteLLM pgvector vector-store connector built from the pinned upstream commit
+        org.opencontainers.image.version: 5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
+        org.opencontainers.image.base.name: python:3.11.18-slim-bookworm
         org.opencontainers.image.source: https://github.com/BerriAI/litellm-pgvector
+        org.opencontainers.image.url: https://github.com/BerriAI/litellm-pgvector
         org.opencontainers.image.revision: 5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
         org.opencontainers.image.licenses: MIT
     environment:

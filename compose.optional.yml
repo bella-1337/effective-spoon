@@ -1,3 +1,17 @@
+# OCI image labels for every image this repository builds. The organisation,
+# identified by STACK_DOMAIN, is the vendor. Export STACK_REPOSITORY_REVISION
+# (for example "$(git rev-parse HEAD)") before building so the revision label
+# identifies the exact repository commit. created, source, and url are always
+# set so labels inherited from a base image cannot describe the wrong software;
+# Docker's own image creation time remains authoritative.
+x-own-image-labels: &own-image-labels
+  org.opencontainers.image.vendor: ${STACK_DOMAIN:?Set STACK_DOMAIN in .env}
+  org.opencontainers.image.licenses: LicenseRef-Proprietary
+  org.opencontainers.image.revision: ${STACK_REPOSITORY_REVISION:-unknown}
+  org.opencontainers.image.source: ${STACK_REPOSITORY_URL:-}
+  org.opencontainers.image.url: ${STACK_REPOSITORY_URL:-}
+  org.opencontainers.image.created: ""
+
 x-default-logging: &default-logging
   driver: json-file
   options:
@@ -459,6 +473,12 @@ services:
     build:
       context: .
       dockerfile: security/image-monitor.Dockerfile
+      labels:
+        <<: *own-image-labels
+        org.opencontainers.image.title: litellm-image-security-monitor
+        org.opencontainers.image.description: Scheduled Trivy vulnerability scanning and SBOM generation for the running LiteLLM stack images
+        org.opencontainers.image.version: "0.1.0"
+        org.opencontainers.image.base.name: ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm-slim
     user: "${IMAGE_SECURITY_UID:-1000}:${IMAGE_SECURITY_GID:-1000}"
     environment:
       COMPOSE_PROJECT_NAME: "${COMPOSE_PROJECT_NAME:-litellm-stack}"
