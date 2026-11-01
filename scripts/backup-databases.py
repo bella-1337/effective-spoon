@@ -31,6 +31,7 @@ from maintenance_common import (
     write_checksum_manifest,
     write_private_file,
 )
+from maintenance_contracts import backup_freshness_metrics
 
 DATABASES = (
     ("postgres", "litellm_prod", "litellm_prod.dump"),
@@ -132,11 +133,7 @@ def publish_success_metric() -> None:
     try:
         write_private_file(
             temporary,
-            "# HELP litellm_backup_last_success_timestamp_seconds "
-            "Unix timestamp of the last complete database backup.\n"
-            "# TYPE litellm_backup_last_success_timestamp_seconds gauge\n"
-            f"litellm_backup_last_success_timestamp_seconds "
-            f"{int(datetime.now(timezone.utc).timestamp())}\n",
+            backup_freshness_metrics(int(datetime.now(timezone.utc).timestamp())),
         )
         os.chmod(temporary, 0o644)
         os.replace(temporary, destination)

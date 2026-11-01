@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from maintenance_common import (
+    ROOT,
     SCRIPTS_DIR,
     compose,
     fail,
@@ -20,6 +21,11 @@ from maintenance_common import (
     run,
     run_main,
     run_python_script,
+)
+from maintenance_contracts import (
+    load_compose_config,
+    validate_compose_contracts,
+    validate_repository_contracts,
 )
 
 USAGE = """Usage: scripts/maintenance.py COMMAND [OPTIONS]
@@ -32,6 +38,10 @@ Commands:
 
   status
       Show all Compose containers and their current state.
+
+  game-day-preflight [--env-file FILE]
+      Validate all Compose profiles and the static safety contracts required
+      before executing the operations game-day drills.
 
   security-scan [--all | --services LIST] [--enforce] [--project NAME]
       Scan running image digests with pinned Trivy, correlate CISA KEV, retain
@@ -76,7 +86,8 @@ Commands:
 """
 
 SCRIPTS = (
-    "maintenance.py", "backup-databases.py", "restore-databases.py", "verify-pgvector.py",
+    "maintenance.py", "game-day-preflight.py", "backup-databases.py",
+    "restore-databases.py", "verify-pgvector.py",
     "check-litellm-upgrade-compatibility.py", "prepare-litellm-upgrade.py",
     "verify-litellm-upgrade.py", "rollback-litellm-upgrade.py",
     "monitor-image-vulnerabilities.py", "install-image-security-schedule.py",
@@ -132,10 +143,17 @@ def doctor() -> None:
     if prometheus_key.stat().st_mode & 0o077:
         fail("litellm/secrets/litellm-master-key must not be accessible to group or other users")
     print("PASS: Prometheus credential source exists with private permissions")
-    compose(["--profile", "prod", "config", "--quiet"])
-    compose(["--profile", "dev", "config", "--quiet"])
-    compose(["--profile", "security", "config", "--quiet"])
-    print("PASS: production, development, and security Compose profiles are valid")
+    env_file = ROOT / ".env"
+    if not env_file.is_file() or env_file.is_symlink():
+        fail(f"environment file is missing or unsafe: {env_file}")
+    config = load_compose_config(env_file)
+    failures = [
+        *validate_compose_contracts(config),
+        *validate_repository_contracts(),
+    ]
+    if failures:
+        fail("game-day safety contracts failed:\n- " + "\n- ".join(failures))
+    print("PASS: all Compose profiles and game-day safety contracts are valid")
 
 
 def pre_upgrade(arguments: list[str]) -> None:
@@ -195,6 +213,8 @@ def main() -> None:
             usage_error("status accepts no additional arguments")
         require_docker()
         compose(["ps", "--all"])
+    elif command == "game-day-preflight":
+        invoke("game-day-preflight.py", args)
     elif command == "security-scan":
         invoke("monitor-image-vulnerabilities.py", args)
     elif command == "security-schedule":

@@ -57,8 +57,9 @@ Checks (run in this order unless filtered):
   dev-vllm-embedding coding-routing pgvector presidio searxng xberg-mcp
   langfuse observability opensearch opensearch-logs logs
 
-The "logs" check and the Grafana parts of "observability" apply only when the
-optional grafana profile is running.
+The `langfuse` check applies only when the optional Langfuse profile is running.
+The `logs` check and the Grafana parts of `observability` apply only when the
+optional Grafana profile is running.
 
 Options:
   --only CHECK[,CHECK...]  Run only the listed checks (comma-separated)
@@ -293,11 +294,13 @@ WHERE vector_store_id = 'sme-knowledge'
         states = {str(item.get("Service")): str(item.get("State")) for item in containers}
         bad = False
         shared = ["traefik", "postgres", "presidio-analyzer", "presidio-anonymizer", "searxng", "xberg",
-                  "prometheus", "alloy", "langfuse-postgres", "langfuse-clickhouse", "langfuse-minio",
-                  "langfuse-redis", "langfuse-worker", "langfuse-web", "opensearch", "opensearch-dashboards",
-                  "data-prepper", "opensearch-bridge"]
+                  "prometheus", "alloy", "opensearch", "opensearch-dashboards", "data-prepper",
+                  "opensearch-bridge"]
         if states.get("grafana") == "running":
             shared += ["loki", "alloy-loki"]
+        if states.get("langfuse-web") == "running":
+            shared += ["langfuse-postgres", "langfuse-clickhouse", "langfuse-minio",
+                       "langfuse-redis", "langfuse-worker", "langfuse-web"]
         for service in shared:
             if states.get(service) != "running":
                 self.fail_(f"shared service '{service}' is not running (state: {states.get(service, 'missing')})")

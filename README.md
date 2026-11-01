@@ -2,11 +2,10 @@
 
 A Docker Compose stack for running separate LiteLLM production and development
 proxies behind Traefik, with PostgreSQL, Presidio, SearXNG, Xberg MCP,
-Langfuse, development vLLM model servers, Prometheus, host/container exporters,
-and OpenSearch with OpenSearch Dashboards as the default multi-user
-observability platform for logs, metrics, LiteLLM usage, alerting, and audit
-trails. Grafana, Loki, and a Loki collector remain available through the
-optional `grafana` profile.
+development vLLM model servers, Prometheus, host/container exporters, and
+OpenSearch with OpenSearch Dashboards as the default multi-user observability
+platform for logs, metrics, LiteLLM usage, tracing, alerting, and audit trails.
+Grafana/Loki and Langfuse remain available through optional profiles.
 
 The `prod` and `dev` names below describe LiteLLM runtime profiles. The on-prem
 deployment expects a certificate delivery process to place the configured TLS
@@ -353,6 +352,7 @@ docker compose --profile prod config --quiet
 docker compose --profile dev config --quiet
 docker compose --profile prod --profile demo config --quiet
 docker compose --profile prod --profile grafana config --quiet
+docker compose --profile prod --profile langfuse config --quiet
 ```
 
 To inspect the fully interpolated model, use `docker compose config` carefully:
@@ -393,6 +393,21 @@ The Grafana container refuses to start until `GRAFANA_ADMIN_PASSWORD`,
 `docker compose up -d postgres-init` after setting the database password so the
 `grafana_ro` role exists.
 
+Langfuse is also optional. OpenSearch already receives standards-based LiteLLM
+traces, so Langfuse is not needed when it would only duplicate observability.
+Enable it when you specifically want Langfuse's LLM trace UI, datasets, prompt
+management, or evaluations:
+
+```sh
+docker compose --profile prod --profile langfuse up -d
+```
+
+Set the `LANGFUSE_*` values in the optional section of `.env` first. The
+`langfuse-preflight` job rejects missing credentials before any Langfuse
+datastore starts. When the profile is absent, LiteLLM removes the Langfuse
+callback and attribution hook from its generated runtime config; OpenSearch
+tracing remains enabled.
+
 Synthetic production dashboard data is opt-in. To seed it explicitly, activate
 the `demo` profile together with production:
 
@@ -401,8 +416,9 @@ docker compose --profile prod --profile demo up -d
 ```
 
 The production and development proxies use separate databases and config files,
-while PostgreSQL, Traefik, Langfuse, OpenSearch, Prometheus, SearXNG, Presidio,
-and exporters are shared.
+while PostgreSQL, Traefik, OpenSearch, Prometheus, SearXNG, Presidio, and
+exporters are shared. Langfuse is shared only when its optional profile is
+enabled.
 
 ## 8. Verify the stack
 
@@ -421,6 +437,7 @@ curl --fail --show-error --silent https://llm.example.test/health/liveliness
 # OpenSearch Dashboards requires authentication; 401 proves the route is up.
 curl --silent --output /dev/null --write-out '%{http_code}\n' \
   https://opensearch.example.test/api/status
+# Optional langfuse profile only:
 curl --fail --show-error --silent \
   'https://langfuse.example.test/api/public/health?failIfDatabaseUnavailable=true'
 curl --fail --show-error --silent --output /dev/null https://search.example.test/
@@ -450,27 +467,27 @@ verification. Open `https://opensearch.example.test`, sign in as `admin` with
 `OPENSEARCH_ADMIN_PASSWORD` from `.env`, choose the **Global** tenant, and open
 **Dashboards → LiteLLM Overview**.
 
-## 9. Use the hybrid logging pipeline
+## 9. Use the observability pipeline
 
-LiteLLM requests are traced to Langfuse through LiteLLM's OpenTelemetry v2
+OpenSearch is the default trace and log backend. LiteLLM sends standards-based
+OpenTelemetry spans to Data Prepper, and Alloy sends stdout/stderr from every
+Compose service through the same default platform. The optional `grafana`
+profile also sends logs to Loki.
+
+With the optional `langfuse` profile, LiteLLM additionally loads its
 `langfuse_otel` integration. Open `https://langfuse.example.test`, sign in with
 the initial administrator account, and select the pre-provisioned **LiteLLM**
 project. Traces include model, provider, token, cost, timing, and error metadata.
 Prompt and response content is deliberately excluded by both
 `turn_off_message_logging: true` and
-`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=no_content`.
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=no_content`. Do not enable
+the legacy `langfuse` callback alongside `langfuse_otel`, because doing so
+duplicates traces.
 
-Langfuse is an LLM tracing platform, not a general Docker log collector. Alloy
-therefore remains in the stack and sends stdout/stderr from LiteLLM and every
-other Compose service to OpenSearch through Data Prepper (and, with the optional
-`grafana` profile, to Loki). This hybrid split preserves the existing
-infrastructure and application log coverage while adding structured LiteLLM
-traces. Do not enable the legacy `langfuse` callback alongside
-`langfuse_otel`, because doing so duplicates traces.
-
-The callback is global in both LiteLLM profiles, so requests made by every
-authenticated LiteLLM user or virtual key are traced to the administrator
-project. The trusted pre-call hook replaces any caller-supplied `trace_user_id`
+When enabled, the callback is global in both LiteLLM profiles, so requests made
+by every authenticated LiteLLM user or virtual key are traced to the
+administrator project. The trusted pre-call hook replaces any caller-supplied
+`trace_user_id`
 with a stable HMAC pseudonym derived from the authenticated LiteLLM user ID (or
 the authenticated key identity when no user owns the key). It also strips
 caller-supplied `langfuse_*` headers and pseudonymizes a supplied `user` field.
@@ -515,11 +532,12 @@ Langfuse organization/SCIM APIs requires Enterprise. Keep the shared Langfuse
 project restricted to administrators and operators; do not present a saved user
 filter as access isolation.
 
-The production LiteLLM proxy does not use Xberg or Langfuse health as a startup
-gate. Tracing and extraction are auxiliary capabilities: an outage in either
-must not prevent the core authenticated model gateway from starting or being
-recreated. Their failures remain visible through service health, request errors,
-and the observability checks.
+The production LiteLLM proxy does not require Xberg or an inactive Langfuse
+profile to start. When Langfuse is explicitly enabled, LiteLLM waits for its web
+service before retaining the optional callbacks in the runtime config. Later
+Langfuse outages do not block model requests; their failures remain visible
+through service health, callback logs, and the default OpenSearch observability
+checks.
 
 ### OpenSearch: the default multi-user observability platform
 
@@ -1762,7 +1780,7 @@ checks the topology, alert, backup, restore, and rollback contracts before any
 live drill begins:
 
 ```bash
-./scripts/game-day-preflight.py --env-file .env
+./scripts/maintenance.py game-day-preflight --env-file .env
 ```
 
 ## 18. Validate and roll back a LiteLLM image upgrade
@@ -1781,6 +1799,7 @@ The single maintenance entry point exposes the routine operational workflows:
 ./scripts/maintenance.py help
 ./scripts/maintenance.py doctor
 ./scripts/maintenance.py status
+./scripts/maintenance.py game-day-preflight
 ./scripts/maintenance.py backup
 ./scripts/maintenance.py post-upgrade
 ```

@@ -96,16 +96,7 @@ if failures:
     raise SystemExit("\n".join(failures))
 PY
 
-echo "==> Validating every Compose profile without starting services"
-docker compose \
-  --profile prod \
-  --profile dev \
-  --profile demo \
-  --profile security \
-  --profile grafana \
-  config --quiet
-
-echo "==> Validating game-day safety contracts"
+echo "==> Validating every Compose profile and game-day safety contracts"
 python3 scripts/game-day-preflight.py --env-file .env
 
 echo "==> Checking tracked changes for whitespace errors"

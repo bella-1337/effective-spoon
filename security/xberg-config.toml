@@ -1,0 +1,2 @@
+[url.crawl.ssrf]
+allowlist = [{ type = "exact", value = "docs.xberg.io" }]

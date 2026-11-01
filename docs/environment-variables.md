@@ -35,8 +35,8 @@ as `30s`, `15m`, or `15d`.
 | `OPENSEARCH_DASHBOARDS_HOST` | Optional: `opensearch.example.test` | DNS hostname | Public Traefik hostname of OpenSearch Dashboards, the default multi-user observability UI. It must be covered by the TLS certificate. Changing it invalidates browser sessions. |
 | `GRAFANA_HOST` | Optional: `grafana.example.test` | DNS hostname | Used only by the optional `grafana` profile: public Traefik hostname and Grafana root URL. Changing it can invalidate generated links and browser sessions. |
 | `SEARXNG_HOST` | Optional: `search.example.test` | DNS hostname | Public Traefik hostname used to construct the SearXNG base URL. |
-| `LANGFUSE_WEB_HOST` | Optional: `langfuse.example.test` | DNS hostname | Public Traefik hostname used by Langfuse web/API routing and `NEXTAUTH_URL`. |
-| `LANGFUSE_S3_HOST` | Optional: `langfuse-s3.example.test` | DNS hostname | Public Traefik hostname used for Langfuse signed media upload URLs. It must resolve to this stack and be covered by the TLS certificate. |
+| `LANGFUSE_WEB_HOST` | Optional: `langfuse.example.test` | DNS hostname | Used only by the optional `langfuse` profile: public Traefik hostname for Langfuse web/API routing and `NEXTAUTH_URL`. |
+| `LANGFUSE_S3_HOST` | Optional: `langfuse-s3.example.test` | DNS hostname | Used only by the optional `langfuse` profile for signed media upload URLs. It must resolve to this stack and be covered by the TLS certificate. |
 
 Changing a hostname requires recreation of every service that consumes that
 hostname, plus coordinated updates to DNS or local host resolution, TLS
@@ -45,12 +45,12 @@ discovers recreated routed services automatically.
 
 ## Credentials and cryptographic material
 
-All secret values in this section are required, except the Grafana values, which
-are required only when the optional `grafana` profile is started; the Grafana
-container refuses to start while any of them is empty. `GRAFANA_DATABASE_USER`
-has a fixed compatibility default. Recreate every consumer after a rotation. For
-production, inject values from a secrets manager rather than persisting them in a
-developer-managed `.env` file.
+All secret values in this section are required except the Grafana and Langfuse
+values, which are required only when their optional profiles are started. Their
+preflight checks refuse to start the profile while a required value is empty.
+`GRAFANA_DATABASE_USER` has a fixed compatibility default. Recreate every
+consumer after a rotation. For production, inject values from a secrets manager
+rather than persisting them in a developer-managed `.env` file.
 
 | Variable | Classification / format | Description and rotation guidance |
 | --- | --- | --- |
@@ -72,22 +72,23 @@ developer-managed `.env` file.
 | `OPENSEARCH_INGEST_PASSWORD` | Secret; 16+ characters from `[A-Za-z0-9._~-]` | Password of the `data_prepper` user, which may only write `litellm-logs-*`. Data Prepper rejects other characters. Re-run `opensearch-setup` and recreate `data-prepper` together. |
 | `OPENSEARCH_BRIDGE_PASSWORD` | Secret; 16+ URL-safe characters | Password of the `litellm_bridge` user, which may only write the bridge's `litellm-*` indices. Re-run `opensearch-setup` and recreate `opensearch-bridge` together. |
 | `OPENSEARCH_DATASOURCES_MASTER_KEY` | Secret; exactly 32 characters | Encrypts credentials of OpenSearch SQL/PPL direct-query data sources (the registered Prometheus source). Keep stable; changing it makes stored data-source credentials unreadable. Generate with `openssl rand -hex 16`. |
+| `OPENSEARCH_SESSION_ID_SALT` | Secret; 32+ random bytes | HMAC salt used to pseudonymize session identifiers stored by the default OpenSearch usage bridge. Keep stable to preserve longitudinal grouping; rotation changes all derived identifiers. During migration only, the stack falls back to `LANGFUSE_USER_ID_SALT` when this value is absent. |
 | `GRAFANA_ADMIN_PASSWORD` | Secret; strong random password; `grafana` profile only | Initial Grafana administrator password. Grafana persists credentials in its volume, so changing this value does not reset an already initialized administrator; use Grafana's supported reset workflow. |
 | `GRAFANA_SECURITY_SECRET_KEY` | Secret; stable 32+ byte value; `grafana` profile only | Encrypts Grafana datasource and alerting credentials. Back it up securely. Changing it can make existing encrypted values unreadable. |
 | `SEARXNG_SECRET` | Secret; 32+ random bytes | SearXNG signing secret. Rotation invalidates signed state and existing sessions. |
-| `LANGFUSE_POSTGRES_PASSWORD` | Secret; URL-safe random string | Password for Langfuse PostgreSQL. Rotate the database role and Langfuse web/worker configuration together. |
-| `LANGFUSE_CLICKHOUSE_PASSWORD` | Secret; URL-safe random string | Password for Langfuse ClickHouse trace storage. Rotate ClickHouse and both Langfuse application services together. |
-| `LANGFUSE_REDIS_AUTH` | Secret; strong random string | Password for the Langfuse Redis queue. Rotate Redis and both Langfuse application services together. |
-| `LANGFUSE_MINIO_PASSWORD` | Secret; strong random string | MinIO root password and Langfuse S3 secret access key. Rotate MinIO and both Langfuse application services together. |
-| `LANGFUSE_NEXTAUTH_SECRET` | Secret; 32+ random bytes | Protects Langfuse web sessions. Rotation intentionally invalidates active sessions. |
-| `LANGFUSE_SALT` | Secret; stable 32+ byte value | Salt used by Langfuse credential encryption. Treat it as persistent key material; rotation may require an application-supported migration. |
-| `LANGFUSE_ENCRYPTION_KEY` | Secret; exactly 64 hexadecimal characters | 32-byte key used by Langfuse encryption. Generate with `openssl rand -hex 32`. Back it up securely; uncoordinated replacement can make encrypted data unreadable. |
-| `LANGFUSE_PUBLIC_KEY` | Sensitive; `pk-lf-...` | Public identifier for the pre-provisioned Langfuse project. Keep it paired with `LANGFUSE_SECRET_KEY`. |
-| `LANGFUSE_SECRET_KEY` | Secret; `sk-lf-...` | Secret key for the pre-provisioned Langfuse project and LiteLLM callbacks. Rotate in Langfuse and both LiteLLM profiles together. |
-| `LANGFUSE_USER_ID_SALT` | Secret; 32+ random bytes | HMAC salt used to pseudonymize LiteLLM principal identifiers before Langfuse attribution. Keep stable to preserve longitudinal attribution; rotation changes all derived identifiers. |
-| `LANGFUSE_INIT_USER_EMAIL` | Sensitive; email address | Bootstrap Langfuse administrator email. Used during first initialization; later changes do not rename an existing account. |
-| `LANGFUSE_INIT_USER_NAME` | Sensitive; display name | Bootstrap Langfuse administrator display name. Used during first initialization. |
-| `LANGFUSE_INIT_USER_PASSWORD` | Secret; strong random password | Bootstrap Langfuse administrator password. Change it through Langfuse after first login and retain this value only if repeatable bootstrap is required. |
+| `LANGFUSE_POSTGRES_PASSWORD` | Secret; URL-safe random string; `langfuse` profile only | Password for Langfuse PostgreSQL. Rotate the database role and Langfuse web/worker configuration together. |
+| `LANGFUSE_CLICKHOUSE_PASSWORD` | Secret; URL-safe random string; `langfuse` profile only | Password for Langfuse ClickHouse trace storage. Rotate ClickHouse and both Langfuse application services together. |
+| `LANGFUSE_REDIS_AUTH` | Secret; strong random string; `langfuse` profile only | Password for the Langfuse Redis queue. Rotate Redis and both Langfuse application services together. |
+| `LANGFUSE_MINIO_PASSWORD` | Secret; strong random string; `langfuse` profile only | MinIO root password and Langfuse S3 secret access key. Rotate MinIO and both Langfuse application services together. |
+| `LANGFUSE_NEXTAUTH_SECRET` | Secret; 32+ random bytes; `langfuse` profile only | Protects Langfuse web sessions. Rotation intentionally invalidates active sessions. |
+| `LANGFUSE_SALT` | Secret; stable 32+ byte value; `langfuse` profile only | Salt used by Langfuse credential encryption. Treat it as persistent key material; rotation may require an application-supported migration. |
+| `LANGFUSE_ENCRYPTION_KEY` | Secret; exactly 64 hexadecimal characters; `langfuse` profile only | 32-byte key used by Langfuse encryption. Generate with `openssl rand -hex 32`. Back it up securely; uncoordinated replacement can make encrypted data unreadable. |
+| `LANGFUSE_PUBLIC_KEY` | Sensitive; `pk-lf-...`; `langfuse` profile only | Public identifier for the pre-provisioned Langfuse project. Keep it paired with `LANGFUSE_SECRET_KEY`. |
+| `LANGFUSE_SECRET_KEY` | Secret; `sk-lf-...`; `langfuse` profile only | Secret key for the pre-provisioned Langfuse project and LiteLLM callbacks. Rotate in Langfuse and both LiteLLM profiles together. |
+| `LANGFUSE_USER_ID_SALT` | Secret; 32+ random bytes; `langfuse` profile only | HMAC salt used to pseudonymize LiteLLM principal identifiers before Langfuse attribution. Keep stable to preserve longitudinal attribution; rotation changes all derived identifiers. |
+| `LANGFUSE_INIT_USER_EMAIL` | Sensitive; email address; `langfuse` profile only | Bootstrap Langfuse administrator email. Used during first initialization; later changes do not rename an existing account. |
+| `LANGFUSE_INIT_USER_NAME` | Sensitive; display name; `langfuse` profile only | Bootstrap Langfuse administrator display name. Used during first initialization. |
+| `LANGFUSE_INIT_USER_PASSWORD` | Secret; strong random password; `langfuse` profile only | Bootstrap Langfuse administrator password. Change it through Langfuse after first login and retain this value only if repeatable bootstrap is required. |
 
 Recommended generation commands:
 
@@ -147,7 +148,7 @@ Retention changes do not recover data already deleted.
 | `OPENSEARCH_CERT_RENEW_BEFORE_DAYS` | `30`; days | `opensearch-certs` reissues leaf certificates inside this window. Restart the stack (or run `docker compose up -d opensearch-certs` and recreate `opensearch`) at least once per window. |
 | `OPENSEARCH_ALERT_CHANNEL_ID` | empty | ID of an OpenSearch Notifications channel (Slack, email, webhook, ...). When set, every provisioned monitor notifies it. Create the channel in Dashboards first, then re-run `opensearch-setup`. |
 
-## Langfuse behavior and bootstrap metadata
+## Optional Langfuse profile behavior and bootstrap metadata
 
 | Variable | Default / format | Description and guidance |
 | --- | --- | --- |
@@ -212,6 +213,8 @@ can cause startup failures or corrupt semantic-cache expectations.
 | `XBERG_MAX_MULTIPART_FIELD_BYTES` | `10485760`; positive integer bytes | Maximum multipart field size accepted by Xberg; default is 10 MiB. It should not exceed the request body limit without a documented reason. |
 | `XBERG_CPU_LIMIT` | `1`; positive decimal CPUs | CPU limit for Xberg. |
 | `XBERG_MEMORY_LIMIT` | `1g`; Docker size | Memory limit for Xberg. Consider request-size limits when tuning it. |
+| `XBERG_SANDBOX_SUBNET` | `172.29.0.0/24`; private IPv4 CIDR | Dedicated internal subnet for Xberg and its restricted egress helpers. Change it if the default overlaps another Docker or host network. |
+| `XBERG_DNS_IP` | `172.29.0.53`; IPv4 address within `XBERG_SANDBOX_SUBNET` | Fixed address of the DNS-only relay that lets Xberg's SSRF validator resolve public names without giving Xberg direct Internet access. |
 | `PGVECTOR_EMBEDDING_MODEL` | `openai/bge-m3`; connector model identifier | Model the pgvector connector requests from LiteLLM development. Keep aligned with LiteLLM model configuration. |
 | `PGVECTOR_EMBEDDING_DIMENSIONS` | `1024`; positive integer | Stored vector width. It must match model output and the database schema. Changing it requires a planned schema migration and re-index. |
 

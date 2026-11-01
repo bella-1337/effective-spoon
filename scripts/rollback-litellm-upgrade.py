@@ -35,6 +35,11 @@ from maintenance_common import (
     verify_checksum_manifest,
     write_private_file,
 )
+from maintenance_contracts import (
+    ACTIVE_ROLLBACK_MARKER,
+    ACTIVE_ROLLBACK_OVERRIDE,
+    render_rollback_override,
+)
 
 USAGE = """Usage:
   scripts/rollback-litellm-upgrade.py --confirm-rollback --mode MODE [options]
@@ -133,20 +138,16 @@ def detect_drift(state: Path, allow: bool) -> None:
 
 
 def override_file(path: Path, services: list[str], images: dict[str, str]) -> None:
-    write_private_file(
-        path,
-        "x-litellm-stack-active-rollback: true\nservices:\n"
-        + "".join(f"  {service}:\n    image: {images[service]}\n" for service in services),
-    )
+    write_private_file(path, render_rollback_override(services, images))
 
 
 def persist_active_override(source: Path) -> Path:
-    active = ROOT / "docker-compose.override.yml"
+    active = ACTIVE_ROLLBACK_OVERRIDE
     if active.exists():
         if active.is_symlink() or not active.is_file():
             fail(f"refusing to replace unsafe active rollback override: {active}")
         if not active.read_text(encoding="utf-8").startswith(
-            "x-litellm-stack-active-rollback: true\n"
+            ACTIVE_ROLLBACK_MARKER + "\n"
         ):
             fail(
                 "docker-compose.override.yml already exists and was not generated "

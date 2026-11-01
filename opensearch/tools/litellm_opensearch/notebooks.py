@@ -424,9 +424,9 @@ source = litellm-metrics-*
 ## 4. Preflight and backup
 
 ```bash
-./scripts/game-day-preflight.py
-./scripts/backup-databases.py
-./scripts/verify-litellm-upgrade.py --only pgvector,langfuse,observability,opensearch
+./scripts/maintenance.py game-day-preflight
+./scripts/maintenance.py backup
+./scripts/maintenance.py upgrade-verify --only pgvector,langfuse,observability,opensearch
 ```
 
 Treat a partial backup as failed even if some archives were published. Confirm

@@ -206,7 +206,8 @@ class ClickHouseObservabilityTests(unittest.TestCase):
         self.assertEqual(config.findtext("prometheus/port"), "9363")
         prometheus = (ROOT / "litellm" / "prometheus.yml").read_text(encoding="utf-8")
         self.assertIn("job_name: langfuse-clickhouse", prometheus)
-        self.assertIn('targets: ["langfuse-clickhouse:9363"]', prometheus)
+        self.assertIn('names: ["langfuse-clickhouse"]', prometheus)
+        self.assertIn("port: 9363", prometheus)
 
     def test_cleanup_is_limited_to_disabled_clickhouse_system_logs(self) -> None:
         cleanup = (
@@ -517,14 +518,12 @@ class NotebookTests(unittest.TestCase):
             for paragraph in item["attributes"]["savedNotebook"]["paragraphs"]
             if paragraph["input"]["inputText"].startswith("%md\n")
         )
-        for script in (
-            "verify-litellm-upgrade.py",
-            "game-day-preflight.py",
-            "backup-databases.py",
-            "prepare-litellm-upgrade.py",
-            "rollback-litellm-upgrade.py",
+        for command in (
+            "maintenance.py game-day-preflight",
+            "maintenance.py backup",
+            "maintenance.py upgrade-verify",
         ):
-            self.assertIn(script, markdown)
+            self.assertIn(command, markdown)
         self.assertNotIn("OPENSEARCH_ADMIN_PASSWORD=", markdown)
 
 

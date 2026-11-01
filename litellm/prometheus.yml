@@ -32,7 +32,11 @@ scrape_configs:
     static_configs: [{ targets: ["cadvisor:8080"] }]
 
   - job_name: langfuse-clickhouse
-    static_configs: [{ targets: ["langfuse-clickhouse:9363"] }]
+    dns_sd_configs:
+      - names: ["langfuse-clickhouse"]
+        type: A
+        port: 9363
+        refresh_interval: 30s
 
   - job_name: blackbox-http
     metrics_path: /probe

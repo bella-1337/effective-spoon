@@ -8,7 +8,7 @@ This repository deploys a local, Docker Compose-based LiteLLM platform with:
 - separate production and development LiteLLM profiles;
 - PII masking through Microsoft Presidio;
 - PostgreSQL-backed LiteLLM state and spend records;
-- Langfuse tracing backed by PostgreSQL, ClickHouse, Redis, and MinIO;
+- optional Langfuse tracing backed by PostgreSQL, ClickHouse, Redis, and MinIO;
 - D3-assisted coding routing, Qdrant-backed semantic caching, and
   pgvector-backed shared RAG;
 - allowlisted Xberg MCP document extraction through an egress proxy;
@@ -17,7 +17,9 @@ This repository deploys a local, Docker Compose-based LiteLLM platform with:
   for container logs, Prometheus metrics, LiteLLM usage data, alerting, and
   security audit trails;
 - optional Grafana, Loki, and a Loki-specific Alloy collector (`grafana`
-  profile) for operators who still want the Grafana dashboards.
+  profile) for operators who still want the Grafana dashboards;
+- optional Langfuse (`langfuse` profile) for LLM-specific tracing workflows
+  beyond the default OpenSearch Trace Analytics pipeline.
 
 The bundled `mkcert` configuration is for a trusted local workstation or
 private network. It is not a public Internet TLS solution.
@@ -66,10 +68,10 @@ Docker metadata access, image-security monitoring, and untrusted fetch egress.
 
 | Network | Members | Purpose |
 | --- | --- | --- |
-| `edge` | Traefik, OpenSearch Dashboards, optional Grafana, SearXNG, Langfuse web/MinIO, LiteLLM prod/dev | Services reachable through Traefik routes |
+| `edge` | Traefik, OpenSearch Dashboards, optional Grafana and Langfuse web/MinIO, SearXNG, LiteLLM prod/dev | Services reachable through Traefik routes |
 | `internal` | Trusted application, data, and observability services | Databases, telemetry, Presidio, and service-to-service calls |
-| `xberg-sandbox` | Xberg, its egress proxy, LiteLLM prod/dev | Internal-only MCP traffic; Xberg has no direct route to `internal` or the Internet |
-| `egress` | Xberg egress proxy | Internet route available only to the destination-filtering proxy |
+| `xberg-sandbox` | Xberg, its DNS and egress proxies, LiteLLM prod/dev | Internal-only MCP traffic; Xberg has no direct route to `internal` or the Internet |
+| `egress` | Xberg DNS and egress proxies | Internet route available only to the DNS relay and destination-filtering HTTP proxy |
 | `traefik-monitor` | Traefik and its Docker socket proxy | Read-only Docker routing metadata |
 | `alloy-monitor` | Alloy and its Docker socket proxy | Read-only Docker discovery and log metadata |
 | `security-monitor` | Image scanner and its Docker socket proxy | Isolated image and container inventory |
@@ -93,6 +95,7 @@ docker compose --profile prod --profile dev up -d
 | `prod` | `litellm-prod` | `litellm_prod` | Normal proxy configuration with Presidio PII guardrail |
 | `dev` | `litellm-dev` | `litellm_dev` | Debug-oriented proxy configuration |
 | `grafana` | `grafana`, `loki`, `alloy-loki` | read-only `grafana_ro` | Optional Grafana dashboards, Explore, and alert rules |
+| `langfuse` | Langfuse web/worker, PostgreSQL, ClickHouse, Redis, MinIO | Langfuse-specific stores | Optional LLM trace UI, datasets, prompt management, and evaluations |
 
 `postgres-init` is a required one-shot service, not redundant: it creates the
 two LiteLLM databases on a fresh PostgreSQL volume.
@@ -100,8 +103,8 @@ two LiteLLM databases on a fresh PostgreSQL volume.
 ## Request and PII Flow
 
 1. A client connects to a configured hostname over HTTPS.
-2. Traefik selects the matching LiteLLM, OpenSearch Dashboards, optional Grafana,
-   or SearXNG route.
+2. Traefik selects the matching LiteLLM, OpenSearch Dashboards, optional Grafana
+   or Langfuse, or SearXNG route.
 3. LiteLLM authenticates API requests with `LITELLM_MASTER_KEY`.
 4. Requests for `coding-router` are classified by the remote authenticated D3-mini
    Decisions endpoint. LiteLLM selects a configured coding tier and falls back to
@@ -137,11 +140,11 @@ blackbox `/health` probes.
 | `prometheus-data` | Prometheus | Metrics time series |
 | `prometheus-secrets` | Prometheus | Non-root-readable copy of the LiteLLM metrics credential |
 | `loki-data` | Loki (optional) | Project-scoped Docker log history |
-| `langfuse-postgres-data` | Langfuse PostgreSQL | Langfuse relational state |
-| `langfuse-clickhouse-data` | ClickHouse | Langfuse trace and analytics data plus bounded 7/30-day incident diagnostics |
-| `langfuse-clickhouse-logs` | ClickHouse | Warning-or-higher ClickHouse logs, rotated at 100 MB with three files per channel |
-| `langfuse-minio-data` | MinIO | Langfuse events and media objects |
-| `langfuse-redis-data` | Redis | Langfuse queues |
+| `langfuse-postgres-data` | Langfuse PostgreSQL (optional) | Langfuse relational state |
+| `langfuse-clickhouse-data` | ClickHouse (optional) | Langfuse trace and analytics data plus bounded 7/30-day incident diagnostics |
+| `langfuse-clickhouse-logs` | ClickHouse (optional) | Warning-or-higher ClickHouse logs, rotated at 100 MB with three files per channel |
+| `langfuse-minio-data` | MinIO (optional) | Langfuse events and media objects |
+| `langfuse-redis-data` | Redis (optional) | Langfuse queues |
 | `bge-m3-vllm-cache` | vLLM | Downloaded BGE-M3 model artifacts |
 
 The D3-mini model and its cache live on a separate GPU host and are not part of
@@ -186,10 +189,12 @@ exporters merely because a panel is currently empty.
 LiteLLM's OpenTelemetry v2 integration exports request, guardrail, model-call,
 and database spans over OTLP/gRPC to Data Prepper (`data-prepper:21890`), which
 writes OpenSearch Trace Analytics indices (`otel-v1-apm-span-*` and
-`otel-v1-apm-service-map`). Langfuse keeps receiving its own copy through the
-`langfuse_otel` callback. Message content capture stays disabled, and only
-`litellm_operator` can read the span indices. The proxies do not depend on Data
-Prepper at startup; spans are dropped while it is unavailable.
+`otel-v1-apm-service-map`). When the `langfuse` profile is enabled, Langfuse
+receives an additional copy through the `langfuse_otel` callback; otherwise the
+runtime config removes that callback and its attribution hook. Message content
+capture stays disabled, and only `litellm_operator` can read the OpenSearch span
+indices. The proxies do not depend on Data Prepper at startup; spans are dropped
+while it is unavailable.
 
 ### Alerting
 
@@ -266,6 +271,7 @@ Before declaring a change complete:
 
 ```sh
 docker compose --profile prod --profile dev config --quiet
+docker compose --profile prod --profile langfuse config --quiet
 docker compose --profile prod --profile dev up -d --wait --wait-timeout 150
 ```
 

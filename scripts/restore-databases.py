@@ -27,6 +27,11 @@ from maintenance_common import (
     service_is_running,
     verify_checksum_manifest,
 )
+from maintenance_contracts import (
+    RESTORE_DATABASE_CLIENTS,
+    restore_database_names,
+    terminate_database_connections_sql,
+)
 
 USAGE = """Usage:
   scripts/restore-databases.py --confirm-restore BACKUP_DIRECTORY
@@ -83,14 +88,7 @@ def read_metadata(backup: Path) -> tuple[list[str], dict[str, str]]:
 
 
 def require_application_services_stopped() -> None:
-    for service in (
-        "litellm-prod",
-        "litellm-dev",
-        "litellm-pgvector",
-        "grafana",
-        "opensearch-bridge",
-        "pgvector-exporter",
-    ):
+    for service in RESTORE_DATABASE_CLIENTS:
         if service_is_running(service):
             fail(f"database client '{service}' must be stopped before restoration")
 
@@ -153,8 +151,7 @@ def rename_database(service: str, source: str, destination: str) -> bool:
             "ON_ERROR_STOP=1",
             "--command",
             (
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                f"WHERE datname = '{source}' AND pid <> pg_backend_pid()"
+                terminate_database_connections_sql(source)
             ),
         ],
         check=False,
@@ -188,8 +185,7 @@ def remove_staging_database(service: str, staging: str) -> None:
 
 
 def restore_database(service: str, database: str, archive: Path) -> bool:
-    staging = f"{database}_restore_{os.getpid()}"
-    previous = f"{database}_pre_restore_{os.getpid()}"
+    staging, previous = restore_database_names(database, os.getpid())
     if not service_is_running(service):
         print(f"ERROR: cannot restore {database} because service {service} is unavailable", file=sys.stderr)
         return False

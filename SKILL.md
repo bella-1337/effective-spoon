@@ -69,7 +69,7 @@ Do not probe `/` for Presidio: the health endpoint is `/health`.
 Run:
 
 ```sh
-docker compose --profile prod --profile dev --profile grafana config --quiet
+docker compose --profile prod --profile dev --profile grafana --profile langfuse config --quiet
 python3 -m unittest discover -s scripts/tests
 jq empty grafana/dashboards/litellm-stack/litellm-stack.json
 jq empty grafana/dashboards/litellm-cost/litellm-cost.json

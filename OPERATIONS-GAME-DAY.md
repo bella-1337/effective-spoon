@@ -28,29 +28,31 @@ payloads into game-day evidence.
 From the repository root:
 
 ```bash
-./scripts/game-day-preflight.py --env-file .env
+./scripts/maintenance.py game-day-preflight --env-file .env
 python3 -m unittest discover -s scripts/tests -v
 ```
 
 The preflight renders every Compose profile and verifies the contracts required
-by the drills: production independence from Langfuse and Xberg, required alert
-definitions, complete-backup freshness metrics, rename-aside restore safety, and
-persistent rollback overrides. Stop if either command fails.
+by the drills: optional Langfuse wiring, production independence from Langfuse
+and Xberg, required alert definitions, complete-backup freshness metrics,
+rename-aside restore safety, and persistent rollback overrides. Stop if either
+command fails.
 
 Also confirm the most recent complete backup is replicated to encrypted,
 access-controlled off-host storage and that its `SHA256SUMS` verifies.
 
 ## 3. Langfuse outage isolation
 
-This drill proves that the production proxy remains available when tracing is
-unavailable.
+This drill applies only when the optional `langfuse` profile is enabled. It
+proves that the production proxy remains available when the secondary tracing
+backend is unavailable; OpenSearch tracing remains the default path.
 
 1. Send a known, non-sensitive completion through the production proxy and
    record the response status and latency.
 2. Stop only the Langfuse application tier:
 
    ```bash
-   docker compose stop langfuse-web langfuse-worker
+   docker compose --profile langfuse stop langfuse-web langfuse-worker
    ```
 
 3. Wait two normal request intervals, then repeat the same production
@@ -61,7 +63,7 @@ unavailable.
 5. Start Langfuse and wait for health:
 
    ```bash
-   docker compose up -d --wait langfuse-web langfuse-worker
+   docker compose --profile langfuse up -d --wait langfuse-web langfuse-worker
    ```
 
 6. Send one more completion and confirm new tracing resumes.

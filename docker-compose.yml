@@ -4,32 +4,32 @@ x-langfuse-environment: &langfuse-environment
   HOSTNAME: 0.0.0.0
   TZ: UTC
   NEXTAUTH_URL: https://${LANGFUSE_WEB_HOST:-langfuse.example.test}
-  DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASSWORD:?Set LANGFUSE_POSTGRES_PASSWORD in .env}@langfuse-postgres:5432/langfuse
-  SALT: ${LANGFUSE_SALT:?Set LANGFUSE_SALT in .env}
-  ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?Set LANGFUSE_ENCRYPTION_KEY in .env}
+  DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASSWORD:-}@langfuse-postgres:5432/langfuse
+  SALT: ${LANGFUSE_SALT:-}
+  ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-}
   TELEMETRY_ENABLED: "${LANGFUSE_TELEMETRY_ENABLED:-false}"
   LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}"
   CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
   CLICKHOUSE_URL: http://langfuse-clickhouse:8123
   CLICKHOUSE_USER: langfuse
-  CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?Set LANGFUSE_CLICKHOUSE_PASSWORD in .env}
+  CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-}
   CLICKHOUSE_CLUSTER_ENABLED: "false"
   LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
   LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
   LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: langfuse
-  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:?Set LANGFUSE_MINIO_PASSWORD in .env}
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-}
   LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
   LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
   LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
   LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
   LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: langfuse
-  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:?Set LANGFUSE_MINIO_PASSWORD in .env}
+  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-}
   LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://langfuse-minio:9000
   LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
   LANGFUSE_S3_BATCH_EXPORT_ENABLED: "${LANGFUSE_S3_BATCH_EXPORT_ENABLED:-false}"
   REDIS_HOST: langfuse-redis
   REDIS_PORT: "6379"
-  REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:?Set LANGFUSE_REDIS_AUTH in .env}
+  REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:-}
   REDIS_TLS_ENABLED: "${LANGFUSE_REDIS_TLS_ENABLED:-false}"
 
 x-default-logging: &default-logging
@@ -48,6 +48,9 @@ networks:
     internal: true
   xberg-sandbox:
     internal: true
+    ipam:
+      config:
+        - subnet: "${XBERG_SANDBOX_SUBNET:-172.29.0.0/24}"
   egress: {}
 
 volumes:
@@ -474,6 +477,10 @@ services:
       - xberg
       - --allowed-host
       - xberg:8001
+      - --config
+      - /etc/xberg/xberg.toml
+    volumes:
+      - ./security/xberg-config.toml:/etc/xberg/xberg.toml:ro
     environment:
       RUST_LOG: ${XBERG_LOG_LEVEL:-info}
       XBERG_CACHE_DIR: /tmp/xberg-cache
@@ -484,6 +491,8 @@ services:
       HTTPS_PROXY: http://xberg-egress-proxy:3128
       ALL_PROXY: http://xberg-egress-proxy:3128
       NO_PROXY: 127.0.0.1,localhost
+    dns:
+      - "${XBERG_DNS_IP:-172.29.0.53}"
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -496,32 +505,52 @@ services:
           cpus: "${XBERG_CPU_LIMIT:-1}"
           memory: ${XBERG_MEMORY_LIMIT:-1g}
     depends_on:
+      xberg-dns:
+        condition: service_started
       xberg-egress-proxy:
         condition: service_healthy
     networks: [xberg-sandbox]
     restart: unless-stopped
     healthcheck:
       test:
-        - CMD
-        - curl
-        - --fail
-        - --silent
-        - --show-error
-        - --output
-        - /dev/null
-        - --request
-        - POST
-        - --header
-        - "Content-Type: application/json"
-        - --header
-        - "Accept: application/json, text/event-stream"
-        - --data
-        - '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"healthcheck","version":"1"}}}'
-        - http://127.0.0.1:8001/mcp
+        - CMD-SHELL
+        - >-
+          getent hosts docs.xberg.io >/dev/null &&
+          curl --fail --silent --show-error --output /dev/null
+          --request POST
+          --header 'Content-Type: application/json'
+          --header 'Accept: application/json, text/event-stream'
+          --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"healthcheck","version":"1"}}}'
+          http://127.0.0.1:8001/mcp
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  xberg-dns:
+    logging: *default-logging
+    profiles: [prod, dev]
+    image: ubuntu/bind9:9.20-26.04_stable@sha256:bce2d69f34f4dce93540118c1b05d2c8cd33817c1efc77bd82a8d75c3f722706
+    entrypoint: ["/usr/sbin/named", "-g", "-c", "/etc/bind/named.conf"]
+    volumes:
+      - ./security/xberg-dns.conf:/etc/bind/named.conf.options:ro
+    networks:
+      xberg-sandbox:
+        ipv4_address: "${XBERG_DNS_IP:-172.29.0.53}"
+      egress: {}
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /var/cache/bind:uid=584792,gid=584792,mode=0750
+      - /run/named:uid=584792,gid=584792,mode=0750
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128m
+    restart: unless-stopped
 
   xberg-egress-proxy:
     logging: *default-logging
@@ -666,18 +695,65 @@ services:
       retries: 12
     restart: unless-stopped
 
+  langfuse-preflight:
+    logging: *default-logging
+    profiles: [langfuse]
+    image: postgres:17.11@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        test -n "$$LANGFUSE_POSTGRES_PASSWORD" || { echo "Set LANGFUSE_POSTGRES_PASSWORD in .env to use the langfuse profile" >&2; exit 64; }
+        test -n "$$LANGFUSE_CLICKHOUSE_PASSWORD" || { echo "Set LANGFUSE_CLICKHOUSE_PASSWORD in .env to use the langfuse profile" >&2; exit 64; }
+        test -n "$$LANGFUSE_REDIS_AUTH" || { echo "Set LANGFUSE_REDIS_AUTH in .env to use the langfuse profile" >&2; exit 64; }
+        test -n "$$LANGFUSE_MINIO_PASSWORD" || { echo "Set LANGFUSE_MINIO_PASSWORD in .env to use the langfuse profile" >&2; exit 64; }
+        test -n "$$LANGFUSE_NEXTAUTH_SECRET" || { echo "Set LANGFUSE_NEXTAUTH_SECRET in .env to use the langfuse profile" >&2; exit 64; }
+        test -n "$$LANGFUSE_SALT" || { echo "Set LANGFUSE_SALT in .env to use the langfuse profile" >&2; exit 64; }
+        printf '%s' "$$LANGFUSE_ENCRYPTION_KEY" | grep -Eq '^[[:xdigit:]]{64}$' || { echo "Set LANGFUSE_ENCRYPTION_KEY to exactly 64 hexadecimal characters to use the langfuse profile" >&2; exit 64; }
+        test -n "$$LANGFUSE_PUBLIC_KEY" || { echo "Set LANGFUSE_PUBLIC_KEY in .env to use the langfuse profile" >&2; exit 64; }
+        test -n "$$LANGFUSE_SECRET_KEY" || { echo "Set LANGFUSE_SECRET_KEY in .env to use the langfuse profile" >&2; exit 64; }
+        test -n "$$LANGFUSE_USER_ID_SALT" || { echo "Set LANGFUSE_USER_ID_SALT in .env to use the langfuse profile" >&2; exit 64; }
+        test -n "$$LANGFUSE_INIT_USER_EMAIL" || { echo "Set LANGFUSE_INIT_USER_EMAIL in .env to use the langfuse profile" >&2; exit 64; }
+        test -n "$$LANGFUSE_INIT_USER_NAME" || { echo "Set LANGFUSE_INIT_USER_NAME in .env to use the langfuse profile" >&2; exit 64; }
+        test -n "$$LANGFUSE_INIT_USER_PASSWORD" || { echo "Set LANGFUSE_INIT_USER_PASSWORD in .env to use the langfuse profile" >&2; exit 64; }
+    environment:
+      LANGFUSE_POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:-}
+      LANGFUSE_CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-}
+      LANGFUSE_REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:-}
+      LANGFUSE_MINIO_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:-}
+      LANGFUSE_NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-}
+      LANGFUSE_SALT: ${LANGFUSE_SALT:-}
+      LANGFUSE_ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
+    networks: [internal]
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
   langfuse-postgres:
     logging: *default-logging
+    profiles: [langfuse]
     image: postgres:17.11@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
     environment:
       POSTGRES_DB: langfuse
       POSTGRES_USER: langfuse
-      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:?Set LANGFUSE_POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:-}
       TZ: UTC
       PGTZ: UTC
     volumes:
       - langfuse-postgres-data:/var/lib/postgresql/data
     networks: [internal]
+    depends_on:
+      langfuse-preflight:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
@@ -687,18 +763,22 @@ services:
 
   langfuse-clickhouse:
     logging: *default-logging
+    profiles: [langfuse]
     image: clickhouse/clickhouse-server:26.3.62.3@sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a
     user: "101:101"
     environment:
       CLICKHOUSE_DB: default
       CLICKHOUSE_USER: langfuse
-      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?Set LANGFUSE_CLICKHOUSE_PASSWORD in .env}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-}
     volumes:
       - ./langfuse/clickhouse/config.d/observability.xml:/etc/clickhouse-server/config.d/observability.xml:ro
       - ./langfuse/clickhouse/users.d/observability.xml:/etc/clickhouse-server/users.d/observability.xml:ro
       - langfuse-clickhouse-data:/var/lib/clickhouse
       - langfuse-clickhouse-logs:/var/log/clickhouse-server
     networks: [internal]
+    depends_on:
+      langfuse-preflight:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
@@ -709,6 +789,7 @@ services:
 
   langfuse-clickhouse-observability-setup:
     logging: *default-logging
+    profiles: [langfuse]
     image: clickhouse/clickhouse-server:26.3.62.3@sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a
     entrypoint: ["/bin/sh", "-ec"]
     command:
@@ -721,10 +802,12 @@ services:
           --queries-file /cleanup/cleanup-system-logs.sql
     environment:
       CLICKHOUSE_USER: langfuse
-      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?Set LANGFUSE_CLICKHOUSE_PASSWORD in .env}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-}
     volumes:
       - ./langfuse/clickhouse/cleanup-system-logs.sql:/cleanup/cleanup-system-logs.sql:ro
     depends_on:
+      langfuse-preflight:
+        condition: service_completed_successfully
       langfuse-clickhouse:
         condition: service_healthy
     networks: [internal]
@@ -738,15 +821,19 @@ services:
 
   langfuse-minio:
     logging: *default-logging
+    profiles: [langfuse]
     image: cgr.dev/chainguard/minio:latest@sha256:c47b1779bfd12cdf5a4fcd3bd50671b8d66465fdae45271babc2fb467958b712
     entrypoint: sh
     command: -c 'mkdir -p /data/langfuse && exec minio server --address ":9000" --console-address ":9001" /data'
     environment:
       MINIO_ROOT_USER: langfuse
-      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:?Set LANGFUSE_MINIO_PASSWORD in .env}
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:-}
     volumes:
       - langfuse-minio-data:/data
     networks: [edge, internal]
+    depends_on:
+      langfuse-preflight:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
@@ -763,18 +850,22 @@ services:
 
   langfuse-redis:
     logging: *default-logging
+    profiles: [langfuse]
     image: redis:7.4.12@sha256:b6b6e3dc0c0952737748e55d5d885272840c7e42ba41ab1d5489f693419882f5
     command:
       - redis-server
       - --requirepass
-      - ${LANGFUSE_REDIS_AUTH:?Set LANGFUSE_REDIS_AUTH in .env}
+      - ${LANGFUSE_REDIS_AUTH:-}
       - --maxmemory-policy
       - noeviction
     environment:
-      REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:?Set LANGFUSE_REDIS_AUTH in .env}
+      REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:-}
     volumes:
       - langfuse-redis-data:/data
     networks: [internal]
+    depends_on:
+      langfuse-preflight:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_AUTH redis-cli ping | grep -q PONG"]
@@ -784,10 +875,13 @@ services:
 
   langfuse-worker:
     logging: *default-logging
+    profiles: [langfuse]
     image: docker.langfuse.com/langfuse/langfuse-worker:4.72.0@sha256:aa1724b989a00f1e4ca9930709202489c73deaaf2f1116bbd3d71c77edb8fedb
     environment:
       <<: *langfuse-environment
     depends_on:
+      langfuse-preflight:
+        condition: service_completed_successfully
       langfuse-postgres:
         condition: service_healthy
       langfuse-clickhouse:
@@ -809,24 +903,27 @@ services:
 
   langfuse-web:
     logging: *default-logging
+    profiles: [langfuse]
     image: docker.langfuse.com/langfuse/langfuse:4.72.0@sha256:c311fd9db4b69f6514fdcb1b86a2a105d5a4ed51fbf0ded033ff2722459c804a
     environment:
       <<: *langfuse-environment
-      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?Set LANGFUSE_NEXTAUTH_SECRET in .env}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-}
       LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: https://${LANGFUSE_S3_HOST:-langfuse-s3.example.test}
       LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://langfuse-minio:9000
       LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-litellm-stack}
       LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-LiteLLM Stack}
       LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-litellm}
       LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-LiteLLM}
-      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?Set LANGFUSE_PUBLIC_KEY in .env}
-      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?Set LANGFUSE_SECRET_KEY in .env}
-      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:?Set LANGFUSE_INIT_USER_EMAIL in .env}
-      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:?Set LANGFUSE_INIT_USER_NAME in .env}
-      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:?Set LANGFUSE_INIT_USER_PASSWORD in .env}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
       LANGFUSE_TRUSTED_PROXY_COUNT: "${LANGFUSE_TRUSTED_PROXY_COUNT:-1}"
       LANGFUSE_DISABLE_SIGNUP_ONBOARDING: "${LANGFUSE_DISABLE_SIGNUP_ONBOARDING:-true}"
     depends_on:
+      langfuse-preflight:
+        condition: service_completed_successfully
       langfuse-postgres:
         condition: service_healthy
       langfuse-clickhouse:
@@ -1087,7 +1184,7 @@ services:
       OPENSEARCH_BRIDGE_INTERVAL_SECONDS: "${OPENSEARCH_BRIDGE_INTERVAL_SECONDS:-60}"
       OPENSEARCH_USAGE_RETENTION_DAYS: "${OPENSEARCH_USAGE_RETENTION_DAYS:-180}"
       OPENSEARCH_USAGE_OVERLAP_MINUTES: "${OPENSEARCH_USAGE_OVERLAP_MINUTES:-30}"
-      OPENSEARCH_SESSION_ID_SALT: ${LANGFUSE_USER_ID_SALT:?Set LANGFUSE_USER_ID_SALT in .env}
+      OPENSEARCH_SESSION_ID_SALT: ${OPENSEARCH_SESSION_ID_SALT:-${LANGFUSE_USER_ID_SALT:-}}
     volumes:
       - opensearch-ca:/certs/ca:ro
       - ./grafana/alerting:/app/alerting:ro
@@ -1118,9 +1215,11 @@ services:
     logging: *default-logging
     profiles: [prod]
     image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    entrypoint: ["/bin/sh", "-ec"]
     command:
-      - --config=/app/config.yaml
-      - --port=4000
+      - |
+        python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml
+        exec /app/docker/prod_entrypoint.sh --config=/app/runtime-config.yaml --port=4000
     volumes:
       - ./litellm/config.prod.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
@@ -1145,9 +1244,9 @@ services:
       LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""
       OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: ${OTEL_GENAI_CAPTURE_MESSAGE_CONTENT:-no_content}
       OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: "${OTEL_PYTHON_FASTAPI_EXCLUDED_URLS:-.*}"
-      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?Set LANGFUSE_PUBLIC_KEY in .env}
-      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?Set LANGFUSE_SECRET_KEY in .env}
-      LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:?Set LANGFUSE_USER_ID_SALT in .env}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:-}
       LANGFUSE_HOST: http://langfuse-web:3000
       PROXY_BASE_URL: https://${LITELLM_PROD_HOST:-llm.example.test}
       FORWARDED_ALLOW_IPS: "${LITELLM_FORWARDED_ALLOW_IPS:-*}"
@@ -1158,6 +1257,9 @@ services:
         condition: service_healthy
       presidio-anonymizer:
         condition: service_healthy
+      langfuse-web:
+        condition: service_healthy
+        required: false
     networks: [edge, internal, xberg-sandbox]
     restart: unless-stopped
     healthcheck:
@@ -1201,9 +1303,11 @@ services:
     logging: *default-logging
     profiles: [dev]
     image: ghcr.io/berriai/litellm:v1.107.0-dev.3@sha256:e7f68da02ed3ec52f0b8d386dbb278a0aa06dbc879f5ddda5a3cf87b2bff194c
+    entrypoint: ["/bin/sh", "-ec"]
     command:
-      - --config=/app/config.yaml
-      - --port=4000
+      - |
+        python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml
+        exec /app/docker/prod_entrypoint.sh --config=/app/runtime-config.yaml --port=4000
     volumes:
       - ./litellm/config.dev.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
@@ -1228,9 +1332,9 @@ services:
       LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""
       OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: ${OTEL_GENAI_CAPTURE_MESSAGE_CONTENT:-no_content}
       OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: "${OTEL_PYTHON_FASTAPI_EXCLUDED_URLS:-.*}"
-      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?Set LANGFUSE_PUBLIC_KEY in .env}
-      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?Set LANGFUSE_SECRET_KEY in .env}
-      LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:?Set LANGFUSE_USER_ID_SALT in .env}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:-}
       LANGFUSE_HOST: http://langfuse-web:3000
       PG_VECTOR_API_BASE: http://litellm-pgvector:8000
       PG_VECTOR_API_KEY: ${PG_VECTOR_API_KEY:?Set PG_VECTOR_API_KEY in .env}
@@ -1253,10 +1357,11 @@ services:
         condition: service_started
       xberg:
         condition: service_healthy
-      langfuse-web:
-        condition: service_healthy
       qdrant:
         condition: service_healthy
+      langfuse-web:
+        condition: service_healthy
+        required: false
       bge-m3-vllm:
         condition: service_healthy
     networks: [edge, internal, xberg-sandbox]
