@@ -905,6 +905,39 @@ Use `https://$LITELLM_DEV_HOST` to test the development profile. SearXNG
 returns a fixed page of results, so `max_results` may not reduce the number of
 results returned by the upstream service.
 
+### Search-engine terms of use
+
+SearXNG itself is AGPL-3.0 and free to run internally unmodified, but it grants
+no right to use the search engines it queries. [`searxng/settings.yml`](searxng/settings.yml)
+sets `use_default_settings: true`, so the image's default engine set is active
+(for example DuckDuckGo, Brave, Wikipedia, and Bing and Google news/media
+engines). SearXNG obtains those results by scraping the public web pages, not
+through a licensed API. Most commercial engines' terms of service prohibit
+automated querying and reuse of results, and this deployment additionally
+sends traffic from a single egress IP on behalf of every LiteLLM user and
+feeds results to LLMs. Consequences:
+
+- Using the default engines is not covered by any agreement; treat it as a
+  legal and compliance risk to be accepted or mitigated, not as licensed.
+- Engines can rate-limit, CAPTCHA, or block the egress IP without notice, so
+  search results can degrade or disappear silently.
+- Search terms leave the organisation and are sent to each queried engine.
+
+Before production use, have the decision recorded by the responsible owner and
+choose one of these options:
+
+1. Restrict SearXNG to sources whose terms allow automated use (for example
+   Wikipedia/Wikidata and other open-data or internal sources) by replacing
+   `use_default_settings: true` with an explicit `use_default_settings.engines.keep_only`
+   list.
+2. Use engines through their contracted APIs (for example a paid Brave Search
+   or Google Programmable Search API key) under the provider's commercial terms.
+3. Formally accept the residual risk of scraping the default engines for
+   internal use.
+
+Review this decision whenever the SearXNG image or its default engine list
+changes.
+
 The beta LiteLLM Chat UI is enabled only for the development profile at
 `https://$LITELLM_DEV_HOST/ui/chat`. Production keeps the Chat UI disabled.
 Users must sign in and can only select models allowed by their LiteLLM access
