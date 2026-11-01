@@ -26,6 +26,7 @@ from maintenance_common import (
 )
 from maintenance_contracts import (
     load_compose_config,
+    rendered_supply_chain_failures,
     validate_compose_contracts,
     validate_repository_contracts,
 )
@@ -157,6 +158,7 @@ def doctor() -> None:
     failures = [
         *validate_compose_contracts(config),
         *validate_repository_contracts(),
+        *rendered_supply_chain_failures(config),
     ]
     if failures:
         fail("game-day safety contracts failed:\n- " + "\n- ".join(failures))

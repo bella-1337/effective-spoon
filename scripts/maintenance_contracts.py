@@ -50,6 +50,18 @@ BRAND_RASTER_SIGNATURES = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF8", b"RIF
 BRAND_IMAGE_VARIABLES = ("UI_LOGO_PATH", "UI_LOGO_PATH_DARK", "LITELLM_FAVICON_URL")
 BRAND_CONTAINER_DIR = "/app/branding/"
 UNSAFE_SVG_RE = re.compile(r"<script|\son[a-z]+\s*=|javascript:|<foreignObject", re.IGNORECASE)
+LICENCE_REGISTER = Path("docs") / "third-party-licences.md"
+LICENCE_REGISTER_IMAGE_SECTIONS = ("## Runtime images", "## Build and auxiliary images")
+LOCAL_BUILD_DOCKERFILES = (
+    Path("pgvector") / "Dockerfile",
+    Path("opensearch") / "tools" / "Dockerfile",
+    Path("security") / "image-monitor.Dockerfile",
+)
+DOCKERFILE_FROM_RE = re.compile(r"^FROM\s+(?:--platform=\S+\s+)?(\S+)", re.MULTILINE | re.IGNORECASE)
+D3_IMAGE_RE = re.compile(r"^D3_[A-Z_]*IMAGE='([^']+)'", re.MULTILINE)
+D3_REVISION_RE = re.compile(r"^D3_MODEL_REVISION='([0-9a-f]{40})'", re.MULTILINE)
+TRIVY_IMAGE_RE = re.compile(r'^\s*"(aquasec/trivy:[^"@]+)"', re.MULTILINE)
+REGISTER_ROW_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|", re.MULTILINE)
 
 
 def compose_profile_arguments() -> list[str]:
@@ -301,6 +313,120 @@ def validate_compose_contracts(config: Mapping[str, Any]) -> list[str]:
 
     failures.extend(public_hostname_failures(services))
     failures.extend(branding_failures(services))
+    return failures
+
+
+def image_without_digest(reference: str) -> str:
+    return reference.partition("@")[0]
+
+
+def register_image_rows(source: str) -> set[str]:
+    """Return image references from the register's image tables."""
+    images: set[str] = set()
+    section = ""
+    for line in source.splitlines():
+        if line.startswith("## "):
+            section = line.strip()
+            continue
+        if section in LICENCE_REGISTER_IMAGE_SECTIONS:
+            match = REGISTER_ROW_RE.match(line)
+            if match:
+                images.add(match.group(1))
+    return images
+
+
+def auxiliary_images(root: Path) -> tuple[set[str], list[str]]:
+    """Collect build bases and non-Compose images the stack executes."""
+    images: set[str] = set()
+    failures: list[str] = []
+    for relative in LOCAL_BUILD_DOCKERFILES:
+        path = root / relative
+        if not path.is_file() or path.is_symlink():
+            failures.append(f"Local build Dockerfile is missing or unsafe: {relative}")
+            continue
+        for reference in DOCKERFILE_FROM_RE.findall(path.read_text(encoding="utf-8")):
+            images.add(image_without_digest(reference))
+    deploy_d3 = root / "scripts" / "deploy-d3-mini.sh"
+    if deploy_d3.is_file() and not deploy_d3.is_symlink():
+        images.update(
+            image_without_digest(reference)
+            for reference in D3_IMAGE_RE.findall(deploy_d3.read_text(encoding="utf-8"))
+        )
+    monitor = root / "scripts" / "monitor-image-vulnerabilities.py"
+    if monitor.is_file() and not monitor.is_symlink():
+        images.update(TRIVY_IMAGE_RE.findall(monitor.read_text(encoding="utf-8")))
+    return images, failures
+
+
+def compose_model_revisions(services: Mapping[str, Any]) -> set[str]:
+    revisions: set[str] = set()
+    for service in services.values():
+        command = service.get("command") if isinstance(service, dict) else None
+        if not isinstance(command, list):
+            continue
+        for option, value in zip(command, command[1:]):
+            if option in {"--revision", "--tokenizer-revision"} and isinstance(value, str):
+                revisions.add(value)
+    return revisions
+
+
+def rendered_supply_chain_failures(config: Mapping[str, Any]) -> list[str]:
+    """Check the licence register against a fully rendered config."""
+    services = config.get("services")
+    if not isinstance(services, dict):
+        return ["Compose configuration has no services object"]
+    return licence_register_failures(services)
+
+
+def licence_register_failures(
+    services: Mapping[str, Any], root: Path = ROOT
+) -> list[str]:
+    """Keep docs/third-party-licences.md in step with every image and model pin."""
+    register = root / LICENCE_REGISTER
+    if not register.is_file() or register.is_symlink():
+        return [f"Licence register is missing or unsafe: {LICENCE_REGISTER}"]
+    source = register.read_text(encoding="utf-8")
+    listed = register_image_rows(source)
+    required = {
+        image_without_digest(service["image"])
+        for service in services.values()
+        if isinstance(service, dict) and isinstance(service.get("image"), str)
+    }
+    extra, failures = auxiliary_images(root)
+    required |= extra
+    failures.extend(
+        f"Licence register has no row for image {image}"
+        for image in sorted(required - listed)
+    )
+    failures.extend(
+        f"Licence register lists an image the stack no longer uses: {image}"
+        for image in sorted(listed - required)
+    )
+    revisions = compose_model_revisions(services)
+    deploy_d3 = root / "scripts" / "deploy-d3-mini.sh"
+    if deploy_d3.is_file() and not deploy_d3.is_symlink():
+        revisions.update(D3_REVISION_RE.findall(deploy_d3.read_text(encoding="utf-8")))
+    failures.extend(
+        f"Licence register does not record pinned model revision {revision}"
+        for revision in sorted(revisions)
+        if f"`{revision}`" not in source
+    )
+    for name, service in sorted(services.items()):
+        build = service.get("build") if isinstance(service, dict) else None
+        labels = build.get("labels") if isinstance(build, dict) else None
+        revision = (
+            labels.get("org.opencontainers.image.revision")
+            if isinstance(labels, dict)
+            else None
+        )
+        contexts = build.get("additional_contexts") if isinstance(build, dict) else None
+        if revision is None or not isinstance(contexts, dict) or not contexts:
+            continue
+        sources = contexts.values()
+        if not any(str(value).endswith(f"#{revision}") for value in sources):
+            failures.append(
+                f"Build revision label of {name} does not match its pinned upstream context"
+            )
     return failures
 
 

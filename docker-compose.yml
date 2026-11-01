@@ -1058,6 +1058,10 @@ services:
       dockerfile: pgvector/Dockerfile
       additional_contexts:
         upstream: https://github.com/BerriAI/litellm-pgvector.git#5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
+      labels:
+        org.opencontainers.image.source: https://github.com/BerriAI/litellm-pgvector
+        org.opencontainers.image.revision: 5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
+        org.opencontainers.image.licenses: MIT
     environment:
       DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}@vector-postgres:5432/vector_store?schema=public
       SERVER_API_KEY: ${PG_VECTOR_API_KEY:?Set PG_VECTOR_API_KEY in .env}
