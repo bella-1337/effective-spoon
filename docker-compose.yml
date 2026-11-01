@@ -835,8 +835,23 @@ services:
     volumes:
       - ./litellm/config.prod.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
+      - ${BRAND_ASSETS_DIR:-./branding/foo-bar}:/app/branding:ro
       - ${D3_DECISION_CA_BUNDLE:?Set D3_DECISION_CA_BUNDLE in .env}:/etc/ssl/certs/d3-decision-ca-bundle.pem:ro
     environment:
+      # LiteLLM-native branding. Logo and favicon accept a local PNG/JPEG/WEBP/ICO
+      # path under /app/branding or an https:// URL; the rest are LiteLLM
+      # Enterprise options and are passed only when set in .env.
+      UI_LOGO_PATH: ${UI_LOGO_PATH:-/app/branding/logo.png}
+      UI_LOGO_PATH_DARK: ${UI_LOGO_PATH_DARK:-/app/branding/logo-dark.png}
+      LITELLM_FAVICON_URL: ${LITELLM_FAVICON_URL:-/app/branding/favicon.png}
+      DOCS_TITLE:
+      DOCS_DESCRIPTION:
+      EMAIL_LOGO_URL:
+      EMAIL_SUPPORT_CONTACT:
+      EMAIL_SIGNATURE:
+      EMAIL_SUBJECT_INVITATION:
+      EMAIL_SUBJECT_KEY_CREATED:
+      EMAIL_SUBJECT_KEY_ROTATED:
       DATABASE_URL: postgresql://${PG_USER:-litellm}:${PG_PASSWORD:?Set PG_PASSWORD in .env}@postgres:5432/litellm_prod
       STORE_MODEL_IN_DB: "${LITELLM_STORE_MODEL_IN_DB:-True}"
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
@@ -923,8 +938,23 @@ services:
     volumes:
       - ./litellm/config.dev.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
+      - ${BRAND_ASSETS_DIR:-./branding/foo-bar}:/app/branding:ro
       - ${D3_DECISION_CA_BUNDLE:?Set D3_DECISION_CA_BUNDLE in .env}:/etc/ssl/certs/d3-decision-ca-bundle.pem:ro
     environment:
+      # LiteLLM-native branding. Logo and favicon accept a local PNG/JPEG/WEBP/ICO
+      # path under /app/branding or an https:// URL; the rest are LiteLLM
+      # Enterprise options and are passed only when set in .env.
+      UI_LOGO_PATH: ${UI_LOGO_PATH:-/app/branding/logo.png}
+      UI_LOGO_PATH_DARK: ${UI_LOGO_PATH_DARK:-/app/branding/logo-dark.png}
+      LITELLM_FAVICON_URL: ${LITELLM_FAVICON_URL:-/app/branding/favicon.png}
+      DOCS_TITLE:
+      DOCS_DESCRIPTION:
+      EMAIL_LOGO_URL:
+      EMAIL_SUPPORT_CONTACT:
+      EMAIL_SIGNATURE:
+      EMAIL_SUBJECT_INVITATION:
+      EMAIL_SUBJECT_KEY_CREATED:
+      EMAIL_SUBJECT_KEY_ROTATED:
       DATABASE_URL: postgresql://${PG_USER:-litellm}:${PG_PASSWORD:?Set PG_PASSWORD in .env}@postgres:5432/litellm_dev
       STORE_MODEL_IN_DB: "${LITELLM_STORE_MODEL_IN_DB:-True}"
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}

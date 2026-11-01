@@ -222,6 +222,69 @@ class MaintenanceContractTests(unittest.TestCase):
             ],
         )
 
+    def test_branding_uses_only_native_litellm_inputs(self) -> None:
+        def service(**environment: str) -> dict[str, object]:
+            return {
+                "environment": environment,
+                "volumes": [{"target": "/app/branding", "read_only": True}],
+            }
+
+        valid = {
+            "UI_LOGO_PATH": "/app/branding/logo.png",
+            "UI_LOGO_PATH_DARK": "https://cdn.corp.example/logo-dark.svg",
+            "LITELLM_FAVICON_URL": "/app/branding/favicon.png",
+        }
+        self.assertEqual(
+            contracts.branding_failures({"litellm-prod": service(**valid)}), []
+        )
+        failures = contracts.branding_failures(
+            {
+                "litellm-dev": {
+                    "environment": {**valid, "UI_LOGO_PATH": "/etc/passwd", "LITELLM_FAVICON_URL": "http://x.test/f.png"},
+                    "volumes": [{"target": "/app/branding", "read_only": False}],
+                }
+            }
+        )
+        self.assertEqual(
+            failures,
+            [
+                "litellm-dev must mount the brand asset directory read-only at /app/branding",
+                "litellm-dev UI_LOGO_PATH must be an https:// URL or a file under /app/branding/",
+                "litellm-dev LITELLM_FAVICON_URL must be an https:// URL or a file under /app/branding/",
+            ],
+        )
+
+    def test_brand_example_files_must_be_raster_images_litellm_serves(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            assets = root / "brand"
+            assets.mkdir()
+            (assets / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\nrest")
+            (assets / "logo.svg").write_text("<svg><script>x</script></svg>", encoding="utf-8")
+            (assets / "favicon.svg").write_text("<svg/>", encoding="utf-8")
+            failures = contracts.brand_asset_failures(
+                root,
+                {
+                    "BRAND_ASSETS_DIR": "./brand",
+                    "UI_LOGO_PATH": "/app/branding/logo.png",
+                    "UI_LOGO_PATH_DARK": "/app/branding/missing.png",
+                    "LITELLM_FAVICON_URL": "/app/branding/favicon.svg",
+                },
+            )
+            outside = contracts.brand_asset_failures(root, {"BRAND_ASSETS_DIR": "../elsewhere"})
+
+        self.assertEqual(
+            failures,
+            [
+                "UI_LOGO_PATH_DARK example file is missing: ./brand/missing.png",
+                "LITELLM_FAVICON_URL example file is not a PNG, JPEG, GIF, WEBP, or ICO image "
+                "that LiteLLM can serve: ./brand/favicon.svg",
+                "Brand SVG contains scriptable content: brand/logo.svg",
+            ],
+        )
+        self.assertEqual(
+            outside, ["BRAND_ASSETS_DIR in .env.example must be a repository-relative directory"]
+        )
 
 if __name__ == "__main__":
     unittest.main()

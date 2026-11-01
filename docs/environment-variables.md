@@ -54,6 +54,33 @@ hostname, plus coordinated updates to DNS or local host resolution, TLS
 certificates, firewall policy, and clients. Traefik watches Docker labels and
 discovers recreated routed services automatically.
 
+## Corporate branding
+
+These are LiteLLM's own branding settings, passed through unchanged; the stack
+adds no UI customisation of its own. See [`branding/README.md`](../branding/README.md)
+for the asset contract. Recreate `litellm-prod` and `litellm-dev` after a change.
+
+| Variable | Requirement / default | Format | Description and guidance |
+| --- | --- | --- | --- |
+| `BRAND_COMPANY_NAME` | Optional: `Foo-Bar` in the example | Text | Referenced only inside `.env` to compose the text values below; it is not passed to any container. |
+| `BRAND_ASSETS_DIR` | Optional: `./branding/foo-bar` | Host directory path | Mounted read-only at `/app/branding` in both LiteLLM containers. Keep only public brand images here. |
+| `UI_LOGO_PATH` | Optional: `/app/branding/logo.png` | File under `/app/branding/` or `https://` URL | Admin UI sidebar logo. LiteLLM serves local PNG, JPEG, GIF, WEBP, or ICO files and redirects browsers to URLs; use a URL for SVG. Unsupported files fall back to the LiteLLM logo. |
+| `UI_LOGO_PATH_DARK` | Optional: `/app/branding/logo-dark.png` | Same as `UI_LOGO_PATH` | Admin UI logo in dark mode. LiteLLM falls back to `UI_LOGO_PATH`. |
+| `LITELLM_FAVICON_URL` | Optional: `/app/branding/favicon.png` | Same as `UI_LOGO_PATH` | Admin UI browser-tab icon. |
+| `DOCS_TITLE`, `DOCS_DESCRIPTION` | Optional; LiteLLM Enterprise | Text | Title and Markdown description of the Swagger API docs. Ignored without an Enterprise licence. |
+| `EMAIL_LOGO_URL` | Optional; LiteLLM Enterprise | `https://` URL | Logo in invitation and key emails. Use a PNG or JPEG that recipients' mail clients can fetch. |
+| `EMAIL_SUPPORT_CONTACT` | Optional; LiteLLM Enterprise | Email address | Support contact shown in emails. |
+| `EMAIL_SIGNATURE` | Optional; LiteLLM Enterprise | HTML | Email footer. Unset keeps LiteLLM's footer. |
+| `EMAIL_SUBJECT_INVITATION`, `EMAIL_SUBJECT_KEY_CREATED`, `EMAIL_SUBJECT_KEY_ROTATED` | Optional; LiteLLM Enterprise | Text with `{event_message}` | Email subject templates. |
+
+Compose passes the Enterprise variables only when they are present in `.env`.
+Delete a line rather than leaving it empty: LiteLLM treats an empty value as
+configured and would, for example, show an empty API docs title. The page title,
+login heading, colours, and fonts have no LiteLLM setting and stay unchanged.
+`game-day-preflight` checks that the logo and favicon values are `https://` URLs
+or files in the read-only `/app/branding` mount, and that the example files are
+image formats LiteLLM can serve.
+
 ## Credentials and cryptographic material
 
 All secret values in this section are required except the Grafana and Langfuse

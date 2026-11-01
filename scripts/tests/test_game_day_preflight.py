@@ -37,7 +37,13 @@ class GameDayPreflightTests(unittest.TestCase):
                             "condition": "service_healthy",
                             "required": False,
                         },
-                    }
+                    },
+                    "environment": {
+                        "UI_LOGO_PATH": "/app/branding/logo.png",
+                        "UI_LOGO_PATH_DARK": "/app/branding/logo-dark.png",
+                        "LITELLM_FAVICON_URL": "/app/branding/favicon.png",
+                    },
+                    "volumes": [{"target": "/app/branding", "read_only": True}],
                 },
                 "alloy-docker-proxy": {"environment": {"NETWORKS": "1"}},
                 "alloy": {},

@@ -162,6 +162,25 @@ echo "$LITELLM_PROD_HOST"
 
 Use the same names in the certificate request and host resolution.
 
+### Corporate branding
+
+The LiteLLM Admin UI logo, dark-mode logo, and favicon use LiteLLM's native
+`UI_LOGO_PATH`, `UI_LOGO_PATH_DARK`, and `LITELLM_FAVICON_URL` settings. The
+example `.env` points them at the placeholder Foo-Bar images in
+[`branding/foo-bar`](branding/foo-bar), mounted read-only into both gateways.
+Replace the images, or point the variables at `https://` URLs, then recreate
+the gateways:
+
+```sh
+docker compose --profile prod up -d --force-recreate litellm-prod
+```
+
+API-docs and email branding (`DOCS_*`, `EMAIL_*`) also use LiteLLM's own
+variables but take effect only with a LiteLLM Enterprise licence. LiteLLM offers
+no setting for the page title, login heading, colours, or fonts, so this stack
+does not change them. See [`branding/README.md`](branding/README.md) and the
+[environment variable reference](docs/environment-variables.md#corporate-branding).
+
 ### Automatic virtual-key rotation
 
 LiteLLM 1.104 exposes per-key auto-rotation settings in the UI, but key
