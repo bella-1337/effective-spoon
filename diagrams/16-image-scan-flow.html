@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="dashmotion-source" content="sha256:60561d7c3b10bc7c58c56666c050a3e0a38790c471ad2f74e8eff1b5a5597292">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Image-security scan run — dashmotion</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace; background: #020617;
+         min-height: 100vh; padding: 2rem; color: #e2e8f0; }
+  .container { max-width: 960px; margin: 0 auto; }
+  .header { display: flex; align-items: center; gap: 12px; margin-bottom: 0.4rem; }
+  .pulse-dot { width: 10px; height: 10px; border-radius: 50%; background: #34d399; }
+  h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; }
+  .subtitle { color: #64748b; font-size: 0.8rem; margin-bottom: 1.5rem; }
+  .diagram-card { border: 1px solid #1e293b; border-radius: 12px; position: relative;
+    background: repeating-linear-gradient(0deg, #0f1b33 0 0.5px, transparent 0.5px 40px),
+      repeating-linear-gradient(90deg, #0f1b33 0 0.5px, transparent 0.5px 40px), #030a1c;
+    padding: 1.25rem 1rem; }
+  .pause-btn { position: absolute; top: 12px; right: 12px; z-index: 2; background: transparent;
+    border: 1px solid #1e293b; color: #64748b; border-radius: 6px; padding: 4px 10px;
+    font: inherit; font-size: 11px; cursor: pointer; }
+  .pause-btn:hover { color: #e2e8f0; border-color: #334155; }
+  .footer { color: #475569; font-size: 0.7rem; margin-top: 1rem; }
+  .flow { stroke-dasharray: 5 5; }
+  .flow-async { stroke-dasharray: 2 4; }
+  .flow-auth { stroke-dasharray: 4 4; }
+  @media (prefers-reduced-motion: no-preference) {
+    .flow { animation: dashmove 0.75s linear infinite; }
+    .flow-async { animation: dashasync 0.9s linear infinite; }
+    .flow-auth { animation: dashauth 1.2s linear infinite; }
+    .pulse-dot { animation: pulse 2s ease-in-out infinite; }
+  }
+  @keyframes dashmove { to { stroke-dashoffset: -10; } }
+  @keyframes dashasync { to { stroke-dashoffset: -12; } }
+  @keyframes dashauth { to { stroke-dashoffset: -8; } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  body.paused .flow, body.paused .flow-async, body.paused .flow-auth,
+  body.paused .pulse-dot { animation-play-state: paused; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header"><div class="pulse-dot"></div><h1>Image-security scan run</h1></div>
+  <p class="subtitle">One scheduled or manual run of the fail-closed image scanner</p>
+  <div class="diagram-card">
+    <button class="pause-btn" id="pauseBtn" aria-pressed="false">⏸ pause</button>
+    <svg id="flowsvg" width="100%" viewBox="0 0 462 1198" role="img" aria-roledescription="flowchart" aria-labelledby="flowsvg-title" aria-describedby="flowsvg-desc"><title id="flowsvg-title">Image-security scan run animated diagram</title><desc id="flowsvg-desc">Top-down flow diagram; dashed connectors animate in the direction of flow and dots ride the main paths.</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs><g fill="none"><path class="flow" d="M231 74 V126" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M231 174 V226" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M231 288 V340" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M231 402 V454" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M231 502 V531 H109 V556" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M231 502 V530 H321 V554" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M321 602 V630 H231 V654" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M231 716 V768" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M231 830 V882" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M231 944 V976.5 H131 V1005" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M231 944 V972 H321 V996" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M321 1058 V1086 H231 V1110" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/></g><text x="180" y="528" fill="#64748b" font-size="10">no</text><text x="282" y="527" fill="#64748b" font-size="10">yes</text><text x="191" y="973.5" fill="#64748b" font-size="10">yes</text><text x="282" y="969" fill="#64748b" font-size="10">no</text><g></g><g font-family="JetBrains Mono, ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace" text-anchor="middle"><rect x="156" y="34" width="150" height="40" rx="20" fill="rgba(52,211,153,0.06)" stroke="#34d399" stroke-width="1.5"/><text x="231" y="58" fill="#e2e8f0" font-size="13" font-weight="600">SCHEDULE OR MANUAL RUN</text><rect x="128" y="130" width="206" height="44" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981"/><text x="231" y="156" fill="#e2e8f0" font-size="13" font-weight="500">Acquire the scanner lock</text><rect x="141.5" y="230" width="179" height="58" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981"/><text x="231" y="256" fill="#e2e8f0" font-size="13" font-weight="500"><tspan x="231">Inventory running</tspan><tspan x="231" dy="15">digests via the proxy</tspan></text><rect x="140" y="344" width="182" height="58" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981"/><text x="231" y="370" fill="#e2e8f0" font-size="13" font-weight="500"><tspan x="231">Download Trivy DB</tspan><tspan x="231" dy="15">and validate CISA KEV</tspan></text><rect x="134.5" y="458" width="193" height="44" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981" stroke-dasharray="4 3"/><text x="231" y="484" fill="#e2e8f0" font-size="13" font-weight="500">Feeds fresh and valid?</text><rect x="34" y="560" width="150" height="40" rx="20" fill="rgba(52,211,153,0.06)" stroke="#34d399" stroke-width="1.5"/><text x="109" y="577" fill="#e2e8f0" font-size="13" font-weight="600"><tspan x="109">OPERATIONAL</tspan><tspan x="109" dy="15">FAILURE — NONZERO</tspan></text><rect x="214" y="558" width="214" height="44" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981"/><text x="321" y="584" fill="#e2e8f0" font-size="13" font-weight="500">Scan each platform digest</text><rect x="152" y="658" width="158" height="58" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981"/><text x="231" y="684" fill="#e2e8f0" font-size="13" font-weight="500"><tspan x="231">Apply time-limited</tspan><tspan x="231" dy="15">exceptions</tspan></text><rect x="140" y="772" width="182" height="58" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981"/><text x="231" y="798" fill="#e2e8f0" font-size="13" font-weight="500"><tspan x="231">Write private reports</tspan><tspan x="231" dy="15">and textfile metrics</tspan></text><rect x="123.5" y="886" width="215" height="58" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981" stroke-dasharray="4 3"/><text x="231" y="912" fill="#e2e8f0" font-size="13" font-weight="500"><tspan x="231">--enforce and unexcepted</tspan><tspan x="231" dy="15">KEV or fixable Critical?</tspan></text><rect x="56" y="1009" width="150" height="40" rx="20" fill="rgba(52,211,153,0.06)" stroke="#34d399" stroke-width="1.5"/><text x="131" y="1033" fill="#e2e8f0" font-size="13" font-weight="600">RELEASE GATE FAILS</text><rect x="236" y="1000" width="170" height="58" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981"/><text x="321" y="1026" fill="#e2e8f0" font-size="13" font-weight="500"><tspan x="321">Generate SBOMs and</tspan><tspan x="321" dy="15">licence evidence</tspan></text><rect x="163" y="1114" width="136" height="40" rx="20" fill="rgba(52,211,153,0.06)" stroke="#34d399" stroke-width="1.5"/><text x="231" y="1138" fill="#e2e8f0" font-size="13" font-weight="600">RUN COMPLETE</text></g></svg>
+  </div>
+
+  <p class="footer">Generated from 16-image-scan-flow.mmd by scripts/render-diagrams.py — edit the Mermaid source, not this file</p>
+</div>
+
+<script>
+(function () {
+  var svg = document.getElementById('flowsvg');
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    document.querySelectorAll('.dot').forEach(function (d) { d.remove(); });
+    var b = document.getElementById('pauseBtn'); if (b) b.remove(); return;
+  }
+  var btn = document.getElementById('pauseBtn'); var paused = false;
+  btn.addEventListener('click', function () {
+    paused = !paused; document.body.classList.toggle('paused', paused);
+    paused ? svg.pauseAnimations() : svg.unpauseAnimations();
+    btn.textContent = paused ? '▶ play' : '⏸ pause';
+    btn.setAttribute('aria-pressed', String(paused));
+  });
+})();
+</script>
+
+</body>
+</html>

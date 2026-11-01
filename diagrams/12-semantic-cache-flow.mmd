@@ -1,0 +1,28 @@
+---
+title: Development semantic cache
+---
+flowchart TD
+  %% Source for 12-semantic-cache-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @subtitle How litellm-dev decides between replaying a cached answer from Qdrant and calling the model
+
+  S(["DEV CHAT COMPLETION"])
+  OPT{"cache.use-cache is true?"}
+  EMB["Embed messages with local bge-m3"]
+  Q["Search Qdrant in the end-user scope"]
+  HIT{"Similarity at least 0.92?"}
+  REP["Replay cached response with similarity header"]
+  GEN["Call the generation model"]
+  STO["Store response in Qdrant (tmpfs)"]
+  E(["RESPONSE"])
+
+  S --> OPT
+  OPT -->|"yes"| EMB
+  OPT -->|"no"| GEN
+  EMB --> Q
+  Q --> HIT
+  HIT -->|"yes"| REP
+  HIT -->|"no"| GEN
+  GEN --> STO
+  REP --> E
+  STO --> E

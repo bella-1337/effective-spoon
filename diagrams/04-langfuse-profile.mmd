@@ -1,0 +1,54 @@
+---
+title: Optional Langfuse profile
+---
+flowchart TD
+  %% Source for 04-langfuse-profile.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @mode architecture
+  %% @subtitle Extra LLM trace UI, datasets, and evaluations fed by LiteLLM's langfuse_otel callback
+  %% @card cyan | Trace path | LiteLLM adds langfuse_otel only when the profile runs | A trusted hook replaces user and session IDs with HMAC pseudonyms | Prompt and response content is never exported
+  %% @card violet | Datastores | PostgreSQL for state, ClickHouse for traces, Redis for queues | MinIO stores events and media behind its own Traefik host | All Langfuse values live in .env.optional
+  %% @card rose | Access limits | Public sign-up is disabled; one initial administrator | trace_user_id is not an authorization boundary | Keep the shared project restricted to administrators and operators
+  %% @tier 0: OP API
+  %% @tier 1: TR
+  %% @tier 2: LL
+  %% @tier 3: LW
+  %% @tier 4: LWK
+  %% @tier 5: LPG CH RD MI
+  %% @journey #22d3ee: API TR LL LW RD
+  %% @journey #a78bfa: OP TR LW LPG
+
+  subgraph CL["Clients — outside the stack"]
+    OP["Operator browser<br/>administrators and operators only"]:::frontend
+    API["API client / agent<br/>may send session_id metadata"]:::frontend
+  end
+  subgraph ST["LiteLLM stack — Docker Compose host"]
+    TR["Traefik<br/>LANGFUSE_WEB_HOST · LANGFUSE_S3_HOST"]:::cloud
+    LL["LiteLLM prod / dev<br/>langfuse_otel · HMAC pseudonyms"]:::backend
+    subgraph LF["langfuse profile — compose.optional.yml"]
+      LW["langfuse-web<br/>UI · public API · OTel ingest"]:::frontend
+      LWK["langfuse-worker<br/>async ingestion"]:::backend
+      LPG[("Langfuse PostgreSQL<br/>relational state")]:::database
+      CH[("ClickHouse<br/>traces and analytics")]:::database
+      RD["Redis<br/>queues"]:::bus
+      MI[("MinIO<br/>S3 events and media")]:::database
+    end
+  end
+
+  OP ==>|"HTTPS"| TR
+  API ==>|"HTTPS"| TR
+  TR ==> LL
+  TR --> LW
+  LL -.->|"OTLP · no message content"| LW
+  LW --> LPG
+  LW -.-> RD
+  LW --> MI
+  RD -.-> LWK
+  LWK --> CH
+  LWK --> MI
+
+  classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
+  classDef bus fill:#9a3412,stroke:#fb923c,color:#e2e8f0
+  classDef cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+  classDef database fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+  classDef frontend fill:#083344,stroke:#22d3ee,color:#e2e8f0

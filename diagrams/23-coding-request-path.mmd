@@ -1,0 +1,48 @@
+---
+title: Coding request path
+---
+flowchart TD
+  %% Source for 23-coding-request-path.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @mode architecture
+  %% @subtitle A coding prompt is classified by D3-mini and completed by the model assigned to its tier
+  %% @card cyan | Request path | The client calls model coding-router through Traefik | LiteLLM authenticates, applies budgets and guardrails, then hands off to the Auto Router | The response returns in the normal OpenAI format
+  %% @card violet | Decision | Only the classification request goes to D3-mini | SIMPLE and MEDIUM map to gpt-4o-mini; COMPLEX and REASONING to gpt-4o | A timeout after 15 seconds falls back to gpt-4o
+  %% @card rose | Telemetry | Classifier and completion calls are both traced | Spans and metrics carry no prompt content | Validate tier accuracy on representative prompts before relying on savings
+  %% @tier 0: CLI
+  %% @tier 1: TR
+  %% @tier 2: LL
+  %% @tier 3: AR
+  %% @tier 4: OBS
+  %% @tier 5: D3 OAI
+  %% @journey #22d3ee: CLI TR LL AR D3
+  %% @journey #34d399: AR OAI
+
+  subgraph CL["Clients — outside the stack"]
+    CLI["Client<br/>model: coding-router"]:::frontend
+  end
+  subgraph ST["LiteLLM stack — Docker Compose host"]
+    TR["Traefik<br/>verified HTTPS ingress"]:::cloud
+    LL["LiteLLM<br/>auth · budgets · guardrails"]:::security
+    AR["LiteLLM Auto Router<br/>tier mapping + fallback"]:::backend
+    OBS[("Metrics + traces<br/>classifier and completion")]:::database
+  end
+  subgraph EX["External services — outside the stack"]
+    D3["D3-mini<br/>four-tier decision"]:::external
+    OAI["Completion model<br/>gpt-4o-mini or gpt-4o"]:::external
+  end
+
+  CLI ==>|"HTTPS"| TR
+  TR ==> LL
+  LL ==> AR
+  AR ==>|"classification only"| D3
+  AR ==>|"selected tier"| OAI
+  LL -.-> OBS
+  AR -.-> OBS
+
+  classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
+  classDef cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+  classDef database fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+  classDef external fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
+  classDef frontend fill:#083344,stroke:#22d3ee,color:#e2e8f0
+  classDef security fill:#881337,stroke:#fb7185,color:#e2e8f0

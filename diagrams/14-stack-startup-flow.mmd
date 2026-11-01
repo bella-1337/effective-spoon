@@ -1,0 +1,32 @@
+---
+title: Stack start-up order
+---
+flowchart TD
+  %% Source for 14-stack-startup-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @subtitle One-shot init jobs and health checks that run when a profile starts, in Compose dependency order
+
+  S(["COMPOSE --PROFILE PROD UP"])
+  CERT["opensearch-certs creates the private CA"]
+  PGH["postgres becomes healthy"]
+  SEC["prometheus-secrets-init copies the metrics key"]
+  OS["OpenSearch becomes healthy"]
+  PGI["postgres-init creates litellm_dev"]
+  PM["Prometheus starts scraping"]
+  OSS["opensearch-setup provisions users, roles, monitors"]
+  LL["litellm-prod starts after Presidio is healthy"]
+  DSH["Dashboards, Data Prepper, and bridge start"]
+  E(["STACK READY FOR VERIFICATION"])
+
+  S --> CERT
+  S --> PGH
+  S --> SEC
+  CERT --> OS
+  PGH --> PGI
+  SEC --> PM
+  OS --> OSS
+  PGI --> LL
+  OSS --> DSH
+  LL --> E
+  DSH --> E
+  PM --> E

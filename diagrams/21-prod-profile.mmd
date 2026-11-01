@@ -1,0 +1,58 @@
+---
+title: LiteLLM production profile
+---
+flowchart TD
+  %% Source for 21-prod-profile.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @mode architecture
+  %% @subtitle Stable production serving with PII controls, isolated state, the configured provider, tools, and default observability
+  %% @card cyan | Request path | Clients reach litellm-prod only through Traefik on the production hostname | The eu-data-protection policy applies Presidio before and after every model call | coding-router asks the remote D3-mini host for a tier, then calls OpenAI
+  %% @card violet | State and telemetry | litellm_prod keeps keys, budgets, and spend without prompt content | Prometheus scrapes metrics; OpenSearch stores logs, traces, and usage copies | Langfuse and Grafana are optional profiles, not part of the default path
+  %% @card rose | Production limits | No Qdrant cache, pgvector store, or local BGE-M3 model in production | Xberg reaches the Internet only through the Squid allowlist | The Chat UI is disabled; the demo profile seeds data only when explicitly enabled
+  %% @tier 0: USR
+  %% @tier 1: TR
+  %% @tier 2: LP
+  %% @tier 3: PR SX XB PG
+  %% @tier 4: PM OS
+  %% @tier 5: OAI D3 SE
+  %% @journey #22d3ee: USR TR LP OAI
+  %% @journey #fb7185: LP PR
+  %% @journey #fb923c: LP OS
+
+  subgraph CL["Clients — outside the stack"]
+    USR["Users and applications<br/>SDKs · agents · Admin UI"]:::frontend
+  end
+  subgraph ST["LiteLLM stack — Docker Compose host"]
+    TR["Traefik<br/>TLS · production hostname"]:::cloud
+    LP["litellm-prod<br/>keys · budgets · policies"]:::backend
+    PR["Presidio<br/>analyzer · anonymizer"]:::security
+    SX["SearXNG<br/>internal web search"]:::backend
+    XB["Xberg MCP<br/>read-only extraction tools"]:::backend
+    PG[("PostgreSQL 16<br/>litellm_prod database")]:::database
+    PM[("Prometheus<br/>metrics and target health")]:::database
+    OS[("OpenSearch<br/>logs · traces · usage copies")]:::database
+  end
+  subgraph EX["External services — outside the stack"]
+    OAI["OpenAI<br/>configured provider"]:::external
+    D3["D3-mini GPU host<br/>coding-tier decisions"]:::external
+    SE["Public search engines<br/>queried by SearXNG"]:::external
+  end
+
+  USR ==>|"HTTPS"| TR
+  TR ==> LP
+  LP -->|"PII policy"| PR
+  LP -->|"web search"| SX
+  LP -->|"MCP tools"| XB
+  LP -->|"state and spend"| PG
+  LP --> PM
+  LP -.-> OS
+  LP ==> OAI
+  LP --> D3
+  SX --> SE
+
+  classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
+  classDef cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+  classDef database fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+  classDef external fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
+  classDef frontend fill:#083344,stroke:#22d3ee,color:#e2e8f0
+  classDef security fill:#881337,stroke:#fb7185,color:#e2e8f0

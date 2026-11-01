@@ -1,0 +1,32 @@
+---
+title: Continuous integration and release
+---
+flowchart TD
+  %% Source for 20-ci-release-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @subtitle What runs on pull requests and tags, and where a human still deploys
+
+  S(["PULL REQUEST, PUSH, OR TAG"])
+  VAL["scripts/ci/validate.sh"]
+  SC["ShellCheck and Actionlint"]
+  DC["Build the development container"]
+  PASS{"All checks pass?"}
+  RED(["CHANGE BLOCKED"])
+  TAG{"Semantic-version tag?"}
+  MERGE(["READY TO MERGE"])
+  APR["Release environment approval"]
+  PUB["Publish source bundle and SHA256SUMS"]
+  E(["OPERATOR DEPLOYS ON-PREM"])
+
+  S --> VAL
+  S --> SC
+  S --> DC
+  VAL --> PASS
+  SC --> PASS
+  DC --> PASS
+  PASS -->|"no"| RED
+  PASS -->|"yes"| TAG
+  TAG -->|"no"| MERGE
+  TAG -->|"yes"| APR
+  APR --> PUB
+  PUB --> E

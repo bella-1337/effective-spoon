@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="dashmotion-source" content="sha256:c86d34d629913244d88a48ef699ff620f4063a6035f03d3ee2a1ab7c49296246">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Xberg extraction and opt-in auto-indexing — dashmotion</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace; background: #020617;
+         min-height: 100vh; padding: 2rem; color: #e2e8f0; }
+  .container { max-width: 960px; margin: 0 auto; }
+  .header { display: flex; align-items: center; gap: 12px; margin-bottom: 0.4rem; }
+  .pulse-dot { width: 10px; height: 10px; border-radius: 50%; background: #34d399; }
+  h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; }
+  .subtitle { color: #64748b; font-size: 0.8rem; margin-bottom: 1.5rem; }
+  .diagram-card { border: 1px solid #1e293b; border-radius: 12px; position: relative;
+    background: repeating-linear-gradient(0deg, #0f1b33 0 0.5px, transparent 0.5px 40px),
+      repeating-linear-gradient(90deg, #0f1b33 0 0.5px, transparent 0.5px 40px), #030a1c;
+    padding: 1.25rem 1rem; }
+  .pause-btn { position: absolute; top: 12px; right: 12px; z-index: 2; background: transparent;
+    border: 1px solid #1e293b; color: #64748b; border-radius: 6px; padding: 4px 10px;
+    font: inherit; font-size: 11px; cursor: pointer; }
+  .pause-btn:hover { color: #e2e8f0; border-color: #334155; }
+  .footer { color: #475569; font-size: 0.7rem; margin-top: 1rem; }
+  .flow { stroke-dasharray: 5 5; }
+  .flow-async { stroke-dasharray: 2 4; }
+  .flow-auth { stroke-dasharray: 4 4; }
+  @media (prefers-reduced-motion: no-preference) {
+    .flow { animation: dashmove 0.75s linear infinite; }
+    .flow-async { animation: dashasync 0.9s linear infinite; }
+    .flow-auth { animation: dashauth 1.2s linear infinite; }
+    .pulse-dot { animation: pulse 2s ease-in-out infinite; }
+  }
+  @keyframes dashmove { to { stroke-dashoffset: -10; } }
+  @keyframes dashasync { to { stroke-dashoffset: -12; } }
+  @keyframes dashauth { to { stroke-dashoffset: -8; } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  body.paused .flow, body.paused .flow-async, body.paused .flow-auth,
+  body.paused .pulse-dot { animation-play-state: paused; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header"><div class="pulse-dot"></div><h1>Xberg extraction and opt-in auto-indexing</h1></div>
+  <p class="subtitle">The caller always gets the extraction; indexing into pgvector runs as a bounded background task in dev</p>
+  <div class="diagram-card">
+    <button class="pause-btn" id="pauseBtn" aria-pressed="false">⏸ pause</button>
+    <svg id="flowsvg" width="100%" viewBox="0 0 466 998" role="img" aria-roledescription="flowchart" aria-labelledby="flowsvg-title" aria-describedby="flowsvg-desc"><title id="flowsvg-title">Xberg extraction and opt-in auto-indexing animated diagram</title><desc id="flowsvg-desc">Top-down flow diagram; dashed connectors animate in the direction of flow and dots ride the main paths.</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs><g fill="none"><path class="flow" d="M233 74 V126" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M233 188 V240" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M233 302 V334.5 H131 V363" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M233 302 V330 H323 V354" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M323 416 V444 H233 V468" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M233 530 V582" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M233 644 V673 H109 V698" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M233 644 V672 H323 V696" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M323 744 V772 H233 V796" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/><path class="flow" d="M233 858 V910" stroke="#10b981" stroke-width="1" opacity="0.85" marker-end="url(#arrow)"/></g><text x="192" y="331.5" fill="#64748b" font-size="10">no</text><text x="284" y="327" fill="#64748b" font-size="10">yes</text><text x="181" y="670" fill="#64748b" font-size="10">no</text><text x="284" y="669" fill="#64748b" font-size="10">yes</text><g></g><g font-family="JetBrains Mono, ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace" text-anchor="middle"><rect x="158" y="34" width="150" height="40" rx="20" fill="rgba(52,211,153,0.06)" stroke="#34d399" stroke-width="1.5"/><text x="233" y="58" fill="#e2e8f0" font-size="13" font-weight="600">MCP EXTRACT VIA LITELLM</text><rect x="155" y="130" width="156" height="58" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981"/><text x="233" y="156" fill="#e2e8f0" font-size="13" font-weight="500"><tspan x="233">Xberg fetches the</tspan><tspan x="233" dy="15">URL through Squid</tspan></text><rect x="139.5" y="244" width="187" height="58" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981" stroke-dasharray="4 3"/><text x="233" y="270" fill="#e2e8f0" font-size="13" font-weight="500"><tspan x="233">Auto-index enabled</tspan><tspan x="233" dy="15">and principal trusted?</tspan></text><rect x="56" y="367" width="150" height="40" rx="20" fill="rgba(52,211,153,0.06)" stroke="#34d399" stroke-width="1.5"/><text x="131" y="384" fill="#e2e8f0" font-size="13" font-weight="600"><tspan x="131">RETURN EXTRACTION</tspan><tspan x="131" dy="15">TO CALLER</tspan></text><rect x="236" y="358" width="174" height="58" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981"/><text x="323" y="384" fill="#e2e8f0" font-size="13" font-weight="500"><tspan x="323">Start background</tspan><tspan x="323" dy="15">task (3 min timeout)</tspan></text><rect x="152.5" y="472" width="161" height="58" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981"/><text x="233" y="498" fill="#e2e8f0" font-size="13" font-weight="500"><tspan x="233">Chunk text (~4,000</tspan><tspan x="233" dy="15">chars, max 256)</tspan></text><rect x="145.5" y="586" width="175" height="58" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981" stroke-dasharray="4 3"/><text x="233" y="612" fill="#e2e8f0" font-size="13" font-weight="500"><tspan x="233">Presidio anonymized</tspan><tspan x="233" dy="15">every chunk?</tspan></text><rect x="34" y="702" width="150" height="40" rx="20" fill="rgba(52,211,153,0.06)" stroke="#34d399" stroke-width="1.5"/><text x="109" y="719" fill="#e2e8f0" font-size="13" font-weight="600"><tspan x="109">INDEXING FAILS</tspan><tspan x="109" dy="15">CLOSED AND IS LOGGED</tspan></text><rect x="214" y="700" width="218" height="44" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981"/><text x="323" y="726" fill="#e2e8f0" font-size="13" font-weight="500">Embed chunks with bge-m3</text><rect x="152.5" y="800" width="161" height="58" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10b981"/><text x="233" y="826" fill="#e2e8f0" font-size="13" font-weight="500"><tspan x="233">Atomically replace</tspan><tspan x="233" dy="15">source chunks</tspan></text><rect x="158" y="914" width="150" height="40" rx="20" fill="rgba(52,211,153,0.06)" stroke="#34d399" stroke-width="1.5"/><text x="233" y="931" fill="#e2e8f0" font-size="13" font-weight="600"><tspan x="233">INDEXED IN</tspan><tspan x="233" dy="15">SME-KNOWLEDGE</tspan></text></g></svg>
+  </div>
+
+  <p class="footer">Generated from 13-xberg-auto-index-flow.mmd by scripts/render-diagrams.py — edit the Mermaid source, not this file</p>
+</div>
+
+<script>
+(function () {
+  var svg = document.getElementById('flowsvg');
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    document.querySelectorAll('.dot').forEach(function (d) { d.remove(); });
+    var b = document.getElementById('pauseBtn'); if (b) b.remove(); return;
+  }
+  var btn = document.getElementById('pauseBtn'); var paused = false;
+  btn.addEventListener('click', function () {
+    paused = !paused; document.body.classList.toggle('paused', paused);
+    paused ? svg.pauseAnimations() : svg.unpauseAnimations();
+    btn.textContent = paused ? '▶ play' : '⏸ pause';
+    btn.setAttribute('aria-pressed', String(paused));
+  });
+})();
+</script>
+
+</body>
+</html>

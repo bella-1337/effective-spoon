@@ -1,0 +1,62 @@
+---
+title: Observability pipeline (default)
+---
+flowchart TD
+  %% Source for 03-observability-pipeline.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @mode architecture
+  %% @subtitle Logs, metrics, traces, and LiteLLM usage converge in OpenSearch; operators read them through Dashboards
+  %% @card cyan | Ingest paths | Alloy ships container logs over OTLP to Data Prepper | LiteLLM exports content-free spans to Data Prepper Trace Analytics | The bridge mirrors Prometheus series and non-content PostgreSQL rows every minute
+  %% @card violet | Stores | OpenSearch: logs, mirrored metrics, alert state, usage copies, audit log | Prometheus stays the metrics source of truth and a PPL direct-query source | LiteLLM PostgreSQL stays the system of record for spend and identity
+  %% @card rose | Access and alerts | OpenSearch security roles and tenants restrict each user | One alerting monitor per Grafana rule, plus staleness monitors | Set OPENSEARCH_ALERT_CHANNEL_ID or alerts are visible only in the UI
+  %% @tier 0: OP
+  %% @tier 1: TR LL CT EXP
+  %% @tier 2: OSD AL PM PG
+  %% @tier 3: DP BR
+  %% @tier 4: OS
+  %% @tier 5: NC
+  %% @journey #fb923c: CT AL DP OS
+  %% @journey #34d399: LL PM BR OS NC
+  %% @journey #22d3ee: OP TR OSD OS
+
+  subgraph CL["Clients — outside the stack"]
+    OP["Operator browser<br/>per-user roles and tenants"]:::frontend
+  end
+  subgraph ST["LiteLLM stack — Docker Compose host"]
+    TR["Traefik<br/>HTTPS routing"]:::cloud
+    LL["LiteLLM prod / dev<br/>/metrics · OTel v2 spans"]:::backend
+    CT["All Compose containers<br/>stdout / stderr"]:::backend
+    EXP["Exporters<br/>node · cAdvisor · postgres · blackbox"]:::backend
+    OSD["OpenSearch Dashboards<br/>dashboards · Discover · alerting"]:::frontend
+    AL["Alloy<br/>joins multi-line · redacts query terms"]:::backend
+    PM[("Prometheus<br/>metrics source of truth")]:::database
+    PG[("LiteLLM PostgreSQL<br/>spend · audit · entities")]:::database
+    DP["Data Prepper<br/>OTLP logs + traces"]:::bus
+    BR["opensearch-bridge<br/>metrics, alert state, usage copies"]:::backend
+    OS[("OpenSearch<br/>security · ISM · alerting monitors")]:::database
+  end
+  subgraph EX["External services — outside the stack"]
+    NC["Notification channel<br/>email · chat · webhook"]:::external
+  end
+
+  OP ==>|"HTTPS"| TR
+  TR ==> OSD
+  OSD ==>|"TLS · private CA"| OS
+  CT -.->|"Docker logs"| AL
+  AL -.->|"OTLP"| DP
+  LL -.-> DP
+  LL --> PM
+  EXP --> PM
+  LL --> PG
+  PM -->|"PromQL"| BR
+  PG -->|"opensearch_ro"| BR
+  DP -.-> OS
+  BR --> OS
+  OS -->|"alert"| NC
+
+  classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
+  classDef bus fill:#9a3412,stroke:#fb923c,color:#e2e8f0
+  classDef cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+  classDef database fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+  classDef external fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
+  classDef frontend fill:#083344,stroke:#22d3ee,color:#e2e8f0

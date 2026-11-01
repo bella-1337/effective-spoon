@@ -1,0 +1,54 @@
+---
+title: Optional Grafana profile
+---
+flowchart TD
+  %% Source for 05-grafana-profile.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @mode architecture
+  %% @subtitle Grafana, Loki, and a Loki-specific Alloy collector for operators who want the original dashboards
+  %% @card cyan | Queries | Grafana reads Loki, Prometheus, and PostgreSQL through grafana_ro | grafana-db-init creates and updates the least-privilege role | Dashboards come from the pinned fetch-dashboards script
+  %% @card violet | Logs | alloy-loki ships the same container streams to Loki | It discovers containers through the POST-disabled socket proxy | Only the current Compose project is collected
+  %% @card rose | Limits | Grafana OSS cannot restrict data sources per user | Sign-up and anonymous access stay disabled | Configure a contact point or alerts cannot notify anyone
+  %% @tier 0: OP
+  %% @tier 1: TR
+  %% @tier 2: GF
+  %% @tier 3: AK
+  %% @tier 4: LK
+  %% @tier 5: PM PG ADP
+  %% @tier 6: CP
+  %% @journey #22d3ee: OP TR GF PM
+  %% @journey #fb923c: AK LK
+
+  subgraph CL["Clients — outside the stack"]
+    OP["Operator browser<br/>operators only — no per-user isolation"]:::frontend
+  end
+  subgraph ST["LiteLLM stack — Docker Compose host"]
+    TR["Traefik<br/>GRAFANA_HOST"]:::cloud
+    PM[("Prometheus<br/>core metrics")]:::database
+    PG[("LiteLLM PostgreSQL<br/>grafana_ro read-only role")]:::database
+    ADP["alloy-docker-proxy<br/>read-only Docker API"]:::security
+    subgraph GR["grafana profile — compose.optional.yml"]
+      GF["Grafana<br/>dashboards · Explore · alert rules"]:::frontend
+      AK["alloy-loki<br/>Loki log collector"]:::backend
+      LK[("Loki<br/>raw container log lines")]:::database
+    end
+  end
+  subgraph EX["External services — outside the stack"]
+    CP["Grafana contact point<br/>email · chat · webhook"]:::external
+  end
+
+  OP ==>|"HTTPS"| TR
+  TR ==> GF
+  GF --> LK
+  GF --> PM
+  GF --> PG
+  AK -.->|"push logs"| LK
+  AK -->|"discover containers"| ADP
+  GF -->|"notify"| CP
+
+  classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
+  classDef cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+  classDef database fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+  classDef external fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
+  classDef frontend fill:#083344,stroke:#22d3ee,color:#e2e8f0
+  classDef security fill:#881337,stroke:#fb7185,color:#e2e8f0

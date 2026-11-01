@@ -1,0 +1,65 @@
+---
+title: Image-security monitor
+---
+flowchart TD
+  %% Source for 08-image-security.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @mode architecture
+  %% @subtitle Scheduled Trivy and CISA KEV scanning of the digests actually running, with private reports and Prometheus alerts
+  %% @card cyan | Scan scope | Every running service, using the platform-specific digest | Registry images are scanned remotely without the Docker socket | Local or mutable images are reported unknown, not clean
+  %% @card violet | Evidence | Private Trivy JSON and KEV evidence (0700 / 0600) | One aggregate textfile with no CVE IDs or secrets | SBOMs and licence evidence are generated after each scan
+  %% @card rose | Policy | Scheduled mode fails only on operational errors | --enforce also fails on an unexcepted KEV or fixable Critical | Exceptions are time-limited and alert before expiry
+  %% @tier 0: OP
+  %% @tier 1: MON
+  %% @tier 2: SDP TV
+  %% @tier 3: DOCK RPT TXT
+  %% @tier 4: NE
+  %% @tier 5: PM
+  %% @tier 6: ALR
+  %% @tier 7: REG TDB KEV NC
+  %% @journey #22d3ee: OP MON TV REG
+  %% @journey #fb7185: MON TXT NE PM ALR NC
+
+  subgraph CL["Clients — outside the stack"]
+    OP["Operator<br/>manual scan · systemd timer"]:::frontend
+  end
+  subgraph SEC["security profile (or host timer)"]
+    MON["image-security-monitor<br/>daily 02:45 · scanner lock"]:::backend
+    SDP["image-security proxy<br/>read-only Docker API"]:::security
+    TV["Trivy 0.76.1<br/>pinned digest"]:::security
+  end
+  subgraph ST["LiteLLM stack — Docker Compose host"]
+    DOCK["Docker Engine<br/>running containers + digests"]:::cloud
+    RPT[("Reports and state<br/>security-reports · security-state")]:::database
+    TXT[("Textfile metrics<br/>security-metrics/*.prom")]:::database
+    NE["node-exporter<br/>textfile collector"]:::backend
+    PM[("Prometheus<br/>scrapes image-security series")]:::database
+    ALR["OpenSearch / Grafana alerts<br/>KEV · critical · staleness"]:::backend
+  end
+  subgraph EX["External services — outside the stack"]
+    REG["Container registries<br/>remote digest scans"]:::external
+    TDB["Trivy vulnerability DB<br/>fresh download each run"]:::external
+    KEV["CISA KEV catalog<br/>validated feed"]:::external
+    NC["Notification channel<br/>operator alerts"]:::external
+  end
+
+  OP ==>|"security-scan"| MON
+  MON -->|"inventory"| SDP
+  SDP --> DOCK
+  MON ==> TV
+  MON --> RPT
+  MON --> TXT
+  TXT --> NE
+  NE --> PM
+  PM --> ALR
+  TV ==> REG
+  TV --> TDB
+  MON --> KEV
+  ALR --> NC
+
+  classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
+  classDef cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+  classDef database fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+  classDef external fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
+  classDef frontend fill:#083344,stroke:#22d3ee,color:#e2e8f0
+  classDef security fill:#881337,stroke:#fb7185,color:#e2e8f0

@@ -1,0 +1,30 @@
+---
+title: Xberg extraction and opt-in auto-indexing
+---
+flowchart TD
+  %% Source for 13-xberg-auto-index-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @subtitle The caller always gets the extraction; indexing into pgvector runs as a bounded background task in dev
+
+  S(["MCP EXTRACT VIA LITELLM"])
+  FETCH["Xberg fetches the URL through Squid"]
+  EN{"Auto-index enabled and principal trusted?"}
+  RET(["RETURN EXTRACTION TO CALLER"])
+  BG["Start background task (3 min timeout)"]
+  CH["Chunk text (~4,000 chars, max 256)"]
+  RED{"Presidio anonymized every chunk?"}
+  SKIP(["INDEXING FAILS CLOSED AND IS LOGGED"])
+  EMB["Embed chunks with bge-m3"]
+  UP["Atomically replace source chunks"]
+  E(["INDEXED IN SME-KNOWLEDGE"])
+
+  S --> FETCH
+  FETCH --> EN
+  EN -->|"no"| RET
+  EN -->|"yes"| BG
+  BG --> CH
+  CH --> RED
+  RED -->|"no"| SKIP
+  RED -->|"yes"| EMB
+  EMB --> UP
+  UP --> E

@@ -79,6 +79,7 @@ To stop, restart, or remove the stack, see
 | Document | Covers |
 | --- | --- |
 | [Architecture](ARCHITECTURE.md) | Stack components and their interactions |
+| [Diagrams](diagrams/README.md) | Animated architecture and flow diagrams, including clients and external services, generated from Mermaid sources |
 | [Environment variable reference](docs/environment-variables.md) | Every variable, its format, default, classification, rotation, and change impact |
 | [Third-party licence register](docs/third-party-licences.md) | Licences of the deployed images and external services |
 | [Development-to-production promotion register](docs/dev-to-prod-promotion-register.md) | Development-only capabilities and their production promotion status |

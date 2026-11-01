@@ -1,0 +1,54 @@
+---
+title: Xberg MCP extraction sandbox
+---
+flowchart TD
+  %% Source for 06-xberg-mcp-sandbox.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @mode architecture
+  %% @subtitle LiteLLM is the authentication boundary; Xberg fetches remote documents only through an allowlisting proxy
+  %% @card cyan | Request path | Clients call /mcp-rest/tools/call on LiteLLM, never Xberg directly | Only extract, detect_mime_type, get_version, and list_formats are exposed | Cache mutation and warming tools stay hidden
+  %% @card violet | Sandbox | Xberg has no route to the internal network or the Internet | It has no published host port | In dev, extraction results can feed opt-in pgvector auto-indexing
+  %% @card rose | Egress control | Squid denies private, loopback, link-local, and unlisted hosts | Review every change to security/xberg-egress-allowlist.txt | Xberg is a server-side fetcher — grant MCP access only to trusted keys
+  %% @tier 0: AG
+  %% @tier 1: TR
+  %% @tier 2: LL
+  %% @tier 3: XB
+  %% @tier 4: DNS SQ
+  %% @tier 5: PDNS ALW BLK
+  %% @journey #22d3ee: AG TR LL XB SQ ALW
+  %% @journey #fb7185: XB DNS PDNS
+
+  subgraph CL["Clients — outside the stack"]
+    AG["MCP client / agent<br/>trusted key or team"]:::frontend
+  end
+  subgraph ST["LiteLLM stack — Docker Compose host"]
+    TR["Traefik<br/>HTTPS"]:::cloud
+    LL["LiteLLM gateway<br/>allowed_tools: extract, list_formats …"]:::backend
+    subgraph SBX["xberg-sandbox network"]
+      XB["Xberg MCP<br/>Streamable HTTP :8001"]:::backend
+    end
+    subgraph EGR["egress network"]
+      DNS["xberg-dns<br/>bind9 relay"]:::security
+      SQ["Squid egress proxy<br/>destination allowlist"]:::security
+    end
+  end
+  subgraph EX["External services — outside the stack"]
+    PDNS["Public DNS<br/>name resolution"]:::external
+    ALW["Allowlisted websites<br/>e.g. docs.xberg.io"]:::external
+    BLK["Other destinations<br/>private · loopback · link-local"]:::external
+  end
+
+  AG ==>|"HTTPS + virtual key"| TR
+  TR ==> LL
+  LL ==>|"MCP tools/call"| XB
+  XB --> DNS
+  XB ==>|"HTTP(S) via proxy"| SQ
+  DNS --> PDNS
+  SQ ==> ALW
+  SQ ---|"denied"| BLK
+
+  classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
+  classDef cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+  classDef external fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
+  classDef frontend fill:#083344,stroke:#22d3ee,color:#e2e8f0
+  classDef security fill:#881337,stroke:#fb7185,color:#e2e8f0
