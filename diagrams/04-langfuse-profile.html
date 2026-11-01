@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="dashmotion-source" content="sha256:89f4b933285e0a717642a86abacb32744ef491af94b09238405933fa6162c3d5">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Optional Langfuse profile — dashmotion</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace; background: #020617;
+         min-height: 100vh; padding: 2rem; color: #e2e8f0; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  .header { display: flex; align-items: center; gap: 12px; margin-bottom: 0.4rem; }
+  .pulse-dot { width: 10px; height: 10px; border-radius: 50%; background: #22d3ee; }
+  h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; }
+  .subtitle { color: #64748b; font-size: 0.8rem; margin-bottom: 1.5rem; }
+  .diagram-card { border: 1px solid #1e293b; border-radius: 12px; position: relative;
+    background: repeating-linear-gradient(0deg, #0f1b33 0 0.5px, transparent 0.5px 40px),
+      repeating-linear-gradient(90deg, #0f1b33 0 0.5px, transparent 0.5px 40px), #030a1c;
+    padding: 1.25rem 1rem; }
+  .pause-btn { position: absolute; top: 12px; right: 12px; z-index: 2; background: transparent;
+    border: 1px solid #1e293b; color: #64748b; border-radius: 6px; padding: 4px 10px;
+    font: inherit; font-size: 11px; cursor: pointer; }
+  .pause-btn:hover { color: #e2e8f0; border-color: #334155; }
+  .footer { color: #475569; font-size: 0.7rem; margin-top: 1rem; }
+  .flow { stroke-dasharray: 5 5; }
+  .flow-async { stroke-dasharray: 2 4; }
+  .flow-auth { stroke-dasharray: 4 4; }
+  @media (prefers-reduced-motion: no-preference) {
+    .flow { animation: dashmove 0.75s linear infinite; }
+    .flow-async { animation: dashasync 0.9s linear infinite; }
+    .flow-auth { animation: dashauth 1.2s linear infinite; }
+    .pulse-dot { animation: pulse 2s ease-in-out infinite; }
+  }
+  @keyframes dashmove { to { stroke-dashoffset: -10; } }
+  @keyframes dashasync { to { stroke-dashoffset: -12; } }
+  @keyframes dashauth { to { stroke-dashoffset: -8; } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  body.paused .flow, body.paused .flow-async, body.paused .flow-auth,
+  body.paused .pulse-dot { animation-play-state: paused; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1rem; margin-top: 1.25rem; }
+  .card { border: 1px solid #1e293b; border-radius: 10px; background: #060d20; padding: 1rem 1.1rem; }
+  .card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 0.6rem; }
+  .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .card-dot.cyan { background: #22d3ee; } .card-dot.violet { background: #a78bfa; }
+  .card-dot.rose { background: #fb7185; }
+  .card h3 { font-size: 0.8rem; font-weight: 600; }
+  .card ul { list-style: none; } .card li { font-size: 0.72rem; color: #94a3b8; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header"><div class="pulse-dot"></div><h1>Optional Langfuse profile</h1></div>
+  <p class="subtitle">Extra LLM trace UI, datasets, and evaluations fed by LiteLLM&#39;s langfuse_otel callback</p>
+  <div class="diagram-card">
+    <button class="pause-btn" id="pauseBtn" aria-pressed="false">⏸ pause</button>
+    <svg id="flowsvg" width="100%" viewBox="0 0 980 766" role="img" aria-roledescription="architecture diagram" aria-labelledby="flowsvg-title" aria-describedby="flowsvg-desc"><title id="flowsvg-title">Optional Langfuse profile animated diagram</title><desc id="flowsvg-desc">Top-down architecture diagram; dashed connectors animate in the direction of flow and dots ride the main paths.</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs><rect x="166.5" y="34" width="601" height="96" rx="12" fill="none" stroke="#fbbf24" stroke-width="1" stroke-dasharray="8 4" opacity="0.6" data-grp-id="CL"/><text x="180.5" y="52" fill="#fbbf24" font-size="11" opacity="0.9">Clients — outside the stack</text><rect x="34" y="146" width="866" height="564" rx="12" fill="none" stroke="#fbbf24" stroke-width="1" stroke-dasharray="8 4" opacity="0.6" data-grp-id="ST"/><text x="48" y="164" fill="#fbbf24" font-size="11" opacity="0.9">LiteLLM stack — Docker Compose host</text><rect x="54" y="370" width="826" height="320" rx="8" fill="none" stroke="#fb7185" stroke-width="1" stroke-dasharray="4 4" opacity="0.6" data-grp-id="LF"/><text x="68" y="388" fill="#fb7185" font-size="10" opacity="0.9">langfuse profile — compose.optional.yml</text><g fill="none"><path class="flow" d="M324.5 110 V138 H467 V162" stroke="#64748b" stroke-width="1.5" opacity="1" marker-end="url(#arrow)"/><path class="flow" d="M625 110 V138 H467 V162" stroke="#64748b" stroke-width="1.5" opacity="1" marker-end="url(#arrow)"/><path class="flow" d="M467 222 V274" stroke="#64748b" stroke-width="1.5" opacity="1" marker-end="url(#arrow)"/><path class="flow" d="M467 222 V246 H930 V362 H467 V386" stroke="#64748b" stroke-width="1" opacity="1" marker-end="url(#arrow)"/><path class="flow-async" d="M467 334 V386" stroke="#fb923c" stroke-width="1" opacity="1" marker-end="url(#arrow)"/><path class="flow" d="M467 446 V470 H165 V610" stroke="#64748b" stroke-width="1" opacity="1" marker-end="url(#arrow)"/><path class="flow-async" d="M467 446 V470 H579 V620" stroke="#fb923c" stroke-width="1" opacity="1" marker-end="url(#arrow)"/><path class="flow" d="M467 446 V470 H772 V610" stroke="#64748b" stroke-width="1" opacity="1" marker-end="url(#arrow)"/><path class="flow-async" d="M579 624 V600 H946 V586 H467 V562" stroke="#fb923c" stroke-width="1" opacity="1" marker-end="url(#arrow)"/><path class="flow" d="M467 558 V586 H385 V610" stroke="#64748b" stroke-width="1" opacity="1" marker-end="url(#arrow)"/><path class="flow" d="M467 558 V586 H772 V610" stroke="#64748b" stroke-width="1" opacity="1" marker-end="url(#arrow)"/></g><text x="401.8" y="135" fill="#64748b" font-size="10">HTTPS</text><text x="556" y="135" fill="#64748b" font-size="10">HTTPS</text><text x="475" y="357" fill="#64748b" font-size="10">OTLP · no message content</text><g><circle r="3.5" class="dot" fill="#22d3ee"><animateMotion id="j0_0" dur="1.4s" begin="0s;j0_3.end+0.6s" fill="freeze" path="M625 110 V138 H467 V162"/></circle><circle r="3.5" class="dot" fill="#22d3ee"><animateMotion id="j0_1" dur="0.6s" begin="j0_0.end+0.3s" fill="freeze" path="M467 222 V274"/></circle><circle r="3.5" class="dot" fill="#22d3ee"><animateMotion id="j0_2" dur="0.6s" begin="j0_1.end+0.3s" fill="freeze" path="M467 334 V386"/></circle><circle r="3.5" class="dot" fill="#22d3ee"><animateMotion id="j0_3" dur="1.9s" begin="j0_2.end+0.3s" fill="freeze" path="M467 446 V470 H579 V620"/></circle><circle r="3.5" class="dot" fill="#a78bfa"><animateMotion id="j1_0" dur="1.3s" begin="0s;j1_2.end+0.6s" fill="freeze" path="M324.5 110 V138 H467 V162"/></circle><circle r="3.5" class="dot" fill="#a78bfa"><animateMotion id="j1_1" dur="4.0s" begin="j1_0.end+0.3s" fill="freeze" path="M467 222 V246 H930 V362 H467 V386"/></circle><circle r="3.5" class="dot" fill="#a78bfa"><animateMotion id="j1_2" dur="3.1s" begin="j1_1.end+0.3s" fill="freeze" path="M467 446 V470 H165 V610"/></circle></g><g font-family="JetBrains Mono, ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace" text-anchor="middle"><rect x="186.5" y="54" width="276" height="56" rx="8" fill="#0b1226" data-grp="CL"/><rect x="186.5" y="54" width="276" height="56" rx="8" fill="rgba(8,51,68,0.45)" stroke="#22d3ee" stroke-width="1.5" data-grp="CL"/><text x="324.5" y="77" fill="#e2e8f0" font-size="13" font-weight="500">Operator browser</text><text x="324.5" y="100" fill="#64748b" font-size="10">administrators and operators only</text><rect x="502.5" y="54" width="245" height="56" rx="8" fill="#0b1226" data-grp="CL"/><rect x="502.5" y="54" width="245" height="56" rx="8" fill="rgba(8,51,68,0.45)" stroke="#22d3ee" stroke-width="1.5" data-grp="CL"/><text x="625" y="77" fill="#e2e8f0" font-size="13" font-weight="500">API client / agent</text><text x="625" y="100" fill="#64748b" font-size="10">may send session_id metadata</text><rect x="306.5" y="166" width="321" height="56" rx="8" fill="#0b1226" data-grp="ST"/><rect x="306.5" y="166" width="321" height="56" rx="8" fill="rgba(120,53,15,0.35)" stroke="#fbbf24" stroke-width="1.5" data-grp="ST"/><text x="467" y="189" fill="#e2e8f0" font-size="13" font-weight="500">Traefik</text><text x="467" y="212" fill="#64748b" font-size="10">LANGFUSE_WEB_HOST · LANGFUSE_S3_HOST</text><rect x="331" y="278" width="272" height="56" rx="8" fill="#0b1226" data-grp="ST"/><rect x="331" y="278" width="272" height="56" rx="8" fill="rgba(6,78,59,0.45)" stroke="#34d399" stroke-width="1.5" data-grp="ST"/><text x="467" y="301" fill="#e2e8f0" font-size="13" font-weight="500">LiteLLM prod / dev</text><text x="467" y="324" fill="#64748b" font-size="10">langfuse_otel · HMAC pseudonyms</text><rect x="349.5" y="390" width="235" height="56" rx="8" fill="#0b1226" data-grp="LF ST"/><rect x="349.5" y="390" width="235" height="56" rx="8" fill="rgba(8,51,68,0.45)" stroke="#22d3ee" stroke-width="1.5" data-grp="LF ST"/><text x="467" y="413" fill="#e2e8f0" font-size="13" font-weight="500">langfuse-web</text><text x="467" y="436" fill="#64748b" font-size="10">UI · public API · OTel ingest</text><rect x="389" y="502" width="156" height="56" rx="8" fill="#0b1226" data-grp="LF ST"/><rect x="389" y="502" width="156" height="56" rx="8" fill="rgba(6,78,59,0.45)" stroke="#34d399" stroke-width="1.5" data-grp="LF ST"/><text x="467" y="525" fill="#e2e8f0" font-size="13" font-weight="500">langfuse-worker</text><text x="467" y="548" fill="#64748b" font-size="10">async ingestion</text><rect x="74" y="614" width="182" height="56" rx="8" fill="#0b1226" data-grp="LF ST"/><rect x="74" y="614" width="182" height="56" rx="8" fill="rgba(76,29,149,0.45)" stroke="#a78bfa" stroke-width="1.5" data-grp="LF ST"/><text x="165" y="637" fill="#e2e8f0" font-size="13" font-weight="500">Langfuse PostgreSQL</text><text x="165" y="660" fill="#64748b" font-size="10">relational state</text><rect x="296" y="614" width="178" height="56" rx="8" fill="#0b1226" data-grp="LF ST"/><rect x="296" y="614" width="178" height="56" rx="8" fill="rgba(76,29,149,0.45)" stroke="#a78bfa" stroke-width="1.5" data-grp="LF ST"/><text x="385" y="637" fill="#e2e8f0" font-size="13" font-weight="500">ClickHouse</text><text x="385" y="660" fill="#64748b" font-size="10">traces and analytics</text><rect x="514" y="624" width="130" height="36" rx="8" fill="#0b1226" data-grp="LF ST"/><rect x="514" y="624" width="130" height="36" rx="8" fill="rgba(154,52,18,0.35)" stroke="#fb923c" stroke-width="1.5" data-grp="LF ST"/><text x="579" y="637" fill="#e2e8f0" font-size="13" font-weight="500">Redis</text><text x="579" y="650" fill="#64748b" font-size="10">queues</text><rect x="684" y="614" width="176" height="56" rx="8" fill="#0b1226" data-grp="LF ST"/><rect x="684" y="614" width="176" height="56" rx="8" fill="rgba(76,29,149,0.45)" stroke="#a78bfa" stroke-width="1.5" data-grp="LF ST"/><text x="772" y="637" fill="#e2e8f0" font-size="13" font-weight="500">MinIO</text><text x="772" y="660" fill="#64748b" font-size="10">S3 events and media</text></g><g font-family="JetBrains Mono, ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace" font-size="11"><rect x="34" y="716" width="12" height="12" rx="3" fill="rgba(8,51,68,0.45)" stroke="#22d3ee"/><text x="52" y="726" fill="#94a3b8" font-size="11">frontend</text><rect x="145" y="716" width="12" height="12" rx="3" fill="rgba(120,53,15,0.35)" stroke="#fbbf24"/><text x="163" y="726" fill="#94a3b8" font-size="11">cloud infra</text><rect x="274" y="716" width="12" height="12" rx="3" fill="rgba(6,78,59,0.45)" stroke="#34d399"/><text x="292" y="726" fill="#94a3b8" font-size="11">service</text><rect x="377" y="716" width="12" height="12" rx="3" fill="rgba(76,29,149,0.45)" stroke="#a78bfa"/><text x="395" y="726" fill="#94a3b8" font-size="11">data</text><rect x="456" y="716" width="12" height="12" rx="3" fill="rgba(154,52,18,0.35)" stroke="#fb923c"/><text x="474" y="726" fill="#94a3b8" font-size="11">message bus</text><circle cx="600" cy="722" r="3.5" fill="#22d3ee"/><text x="610" y="726" fill="#94a3b8" font-size="11">request in flight</text></g></svg>
+  </div>
+  <div class="cards"><div class="card"><div class="card-header"><div class="card-dot cyan"></div><h3>Trace path</h3></div><ul><li>• LiteLLM adds langfuse_otel only when the profile runs</li><li>• A trusted hook replaces user and session IDs with HMAC pseudonyms</li><li>• Prompt and response content is never exported</li></ul></div><div class="card"><div class="card-header"><div class="card-dot violet"></div><h3>Datastores</h3></div><ul><li>• PostgreSQL for state, ClickHouse for traces, Redis for queues</li><li>• MinIO stores events and media behind its own Traefik host</li><li>• All Langfuse values live in .env.optional</li></ul></div><div class="card"><div class="card-header"><div class="card-dot rose"></div><h3>Access limits</h3></div><ul><li>• Public sign-up is disabled; one initial administrator</li><li>• trace_user_id is not an authorization boundary</li><li>• Keep the shared project restricted to administrators and operators</li></ul></div></div>
+  <p class="footer">Generated from 04-langfuse-profile.mmd by scripts/render-diagrams.py — edit the Mermaid source, not this file</p>
+</div>
+
+<script>
+(function () {
+  var svg = document.getElementById('flowsvg');
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    document.querySelectorAll('.dot').forEach(function (d) { d.remove(); });
+    var b = document.getElementById('pauseBtn'); if (b) b.remove(); return;
+  }
+  var btn = document.getElementById('pauseBtn'); var paused = false;
+  btn.addEventListener('click', function () {
+    paused = !paused; document.body.classList.toggle('paused', paused);
+    paused ? svg.pauseAnimations() : svg.unpauseAnimations();
+    btn.textContent = paused ? '▶ play' : '⏸ pause';
+    btn.setAttribute('aria-pressed', String(paused));
+  });
+})();
+</script>
+
+</body>
+</html>

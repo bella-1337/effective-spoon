@@ -1,0 +1,34 @@
+---
+title: First deployment
+---
+flowchart TD
+  %% Source for 19-first-deployment-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @subtitle The getting-started steps, including the on-prem versus local-development TLS choice
+
+  S(["CLONE THE REPOSITORY"])
+  ENV["Create .env and set STACK_DOMAIN"]
+  TLS{"On-prem certificate delivered?"}
+  DEL["Point Traefik at the delivered cert and key"]
+  MK["mkcert local-development fallback"]
+  HOST["Resolve the hostnames"]
+  GF{"Enabling the grafana profile?"}
+  FD["Fetch pinned Grafana dashboards"]
+  KEY["Write the Prometheus metrics key file"]
+  VAL["docker compose config --quiet"]
+  UP["Start the prod and/or dev profile"]
+  E(["VERIFY HEALTH AND ROUTES"])
+
+  S --> ENV
+  ENV --> TLS
+  TLS -->|"yes"| DEL
+  TLS -->|"no"| MK
+  DEL --> HOST
+  MK --> HOST
+  HOST --> GF
+  GF -->|"yes"| FD
+  GF -->|"no"| KEY
+  FD --> KEY
+  KEY --> VAL
+  VAL --> UP
+  UP --> E

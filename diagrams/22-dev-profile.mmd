@@ -1,0 +1,63 @@
+---
+title: LiteLLM development profile
+---
+flowchart TD
+  %% Source for 22-dev-profile.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @mode architecture
+  %% @subtitle litellm-dev owns client policy and uses remote D3-mini only for coding-tier decisions; local models stay inside the stack
+  %% @card cyan | Request path | Clients and the beta Chat UI use the development hostname | litellm-dev authenticates, applies policy, and runs the Auto Router | D3-mini returns a tier; the completion goes to gpt-4o-mini or gpt-4o
+  %% @card violet | Dev-only services | BGE-M3 vLLM embeds for the semantic cache, tool filter, and pgvector | Qdrant holds the opt-in semantic cache on tmpfs | litellm-pgvector serves the sme-knowledge store
+  %% @card rose | Boundaries | Embeddings never pass through D3-mini | Xberg egress is limited by the Squid allowlist | Do not expose the dev profile or its debug logs to untrusted users
+  %% @tier 0: API
+  %% @tier 1: TR
+  %% @tier 2: LD
+  %% @tier 3: BGE QD CON
+  %% @tier 4: PR XB PG VP
+  %% @tier 5: OBS
+  %% @tier 6: D3 OAI
+  %% @journey #22d3ee: API TR LD D3
+  %% @journey #34d399: LD OAI
+  %% @journey #a78bfa: LD CON VP
+
+  subgraph CL["Clients — outside the stack"]
+    API["API client / Chat UI<br/>model: coding-router"]:::frontend
+  end
+  subgraph ST["LiteLLM stack — Docker Compose host"]
+    TR["Traefik<br/>development hostname"]:::cloud
+    LD["litellm-dev<br/>auth · policy · Auto Router"]:::backend
+    subgraph DEV["dev profile only"]
+      BGE[("BGE-M3 vLLM<br/>embeddings only")]:::database
+      QD[("Qdrant<br/>semantic cache")]:::database
+      CON["litellm-pgvector<br/>vector-store connector"]:::backend
+    end
+    PR["Presidio<br/>PII masking"]:::security
+    XB["Xberg MCP<br/>allowlisted extraction"]:::backend
+    PG[("PostgreSQL<br/>litellm_dev database")]:::database
+    VP[("vector-postgres<br/>sme-knowledge")]:::database
+    OBS[("OpenSearch + Prometheus<br/>default metrics and traces")]:::database
+  end
+  subgraph EX["External services — outside the stack"]
+    D3["Remote D3-mini<br/>Decisions over TLS"]:::external
+    OAI["Completion provider<br/>gpt-4o-mini or gpt-4o"]:::external
+  end
+
+  API ==>|"HTTPS"| TR
+  TR ==> LD
+  LD -->|"embeddings"| BGE
+  LD --> QD
+  LD --> CON
+  CON --> VP
+  LD --> PR
+  LD --> XB
+  LD --> PG
+  LD -.-> OBS
+  LD ==> D3
+  LD ==> OAI
+
+  classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
+  classDef cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+  classDef database fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+  classDef external fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
+  classDef frontend fill:#083344,stroke:#22d3ee,color:#e2e8f0
+  classDef security fill:#881337,stroke:#fb7185,color:#e2e8f0

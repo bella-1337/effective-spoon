@@ -1,0 +1,69 @@
+---
+title: LiteLLM stack — system context
+---
+flowchart TD
+  %% Source for 01-system-context.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @mode architecture
+  %% @subtitle Who calls the stack, what runs inside the Docker host, and which services live outside it
+  %% @card cyan | Clients | Browsers, SDKs, and agents reach the stack only through Traefik over HTTPS | API clients authenticate to LiteLLM with a virtual key or the master key | Operators use OpenSearch Dashboards, plus Grafana or Langfuse when enabled
+  %% @card violet | Inside the stack | LiteLLM is the single gateway for models, search, MCP tools, and guardrails | Presidio, SearXNG, Xberg, PostgreSQL, and telemetry stay on internal networks | Every container log, metric, and trace lands in OpenSearch by default
+  %% @card rose | Outside the stack | OpenAI serves completions; D3-mini runs on a separate GPU host | SearXNG scrapes public engines — review their terms of use | Xberg reaches only allowlisted sites through the Squid egress proxy
+  %% @tier 0: BR API AG
+  %% @tier 1: TR
+  %% @tier 2: LL OSD OPT
+  %% @tier 3: PR SX XB PG OBS
+  %% @tier 4: SQ
+  %% @tier 5: OAI D3 SE WEB
+  %% @journey #22d3ee: API TR LL OAI
+  %% @journey #a78bfa: BR TR OSD OBS
+  %% @journey #34d399: AG TR LL XB SQ WEB
+
+  subgraph CL["Clients — outside the stack"]
+    BR["Web browser<br/>Admin UI · Chat UI · dashboards"]:::frontend
+    API["API client / SDK<br/>OpenAI-compatible · virtual key"]:::frontend
+    AG["Agent / MCP client<br/>tools via LiteLLM MCP"]:::frontend
+  end
+  subgraph ST["LiteLLM stack — Docker Compose host"]
+    TR["Traefik<br/>TLS termination · only :80/:443"]:::cloud
+    LL["LiteLLM gateway<br/>prod / dev profile"]:::backend
+    OSD["OpenSearch Dashboards<br/>multi-user observability UI"]:::frontend
+    OPT["Optional UIs<br/>Grafana · Langfuse profiles"]:::frontend
+    PR["Presidio<br/>PII analyzer + anonymizer"]:::security
+    SX["SearXNG<br/>internal-only search"]:::backend
+    XB["Xberg MCP<br/>document extraction sandbox"]:::backend
+    PG[("PostgreSQL<br/>litellm_prod · litellm_dev")]:::database
+    OBS[("Observability<br/>Data Prepper · OpenSearch · Prometheus")]:::database
+    SQ["Squid egress proxy<br/>allowlist · denies private ranges"]:::security
+  end
+  subgraph EX["External services — outside the stack"]
+    OAI["OpenAI API<br/>completion provider"]:::external
+    D3["D3-mini GPU host<br/>remote coding classifier"]:::external
+    SE["Public search engines<br/>scraped by SearXNG"]:::external
+    WEB["Allowlisted websites<br/>security/xberg-egress-allowlist"]:::external
+  end
+
+  BR ==>|"HTTPS"| TR
+  API ==>|"HTTPS"| TR
+  AG -->|"HTTPS"| TR
+  TR ==> LL
+  TR --> OSD
+  TR --> OPT
+  LL --> PR
+  LL --> SX
+  LL --> XB
+  LL --> PG
+  LL -.->|"OTLP"| OBS
+  OSD --> OBS
+  XB --> SQ
+  LL ==>|"HTTPS"| OAI
+  LL -->|"TLS + bearer"| D3
+  SX --> SE
+  SQ --> WEB
+
+  classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
+  classDef cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+  classDef database fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+  classDef external fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
+  classDef frontend fill:#083344,stroke:#22d3ee,color:#e2e8f0
+  classDef security fill:#881337,stroke:#fb7185,color:#e2e8f0

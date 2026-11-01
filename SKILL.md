@@ -38,7 +38,9 @@ Map the change across these surfaces:
 - Grafana datasources, dashboard JSON, and `grafana/alerting/` (the single
   source of alert rules for both OpenSearch and Grafana);
 - `loki/config.yml`, `alloy/config.alloy`, and `alloy/loki.alloy`;
-- `.env.example`, `.env.optional.example`, `.gitignore`, and `README.md`.
+- `.env.example`, `.env.optional.example`, `.gitignore`, `README.md`, and the
+  guides under `docs/`;
+- the Mermaid diagram sources in `diagrams/*.mmd`.
 
 For every proposed removal, identify:
 
@@ -64,7 +66,26 @@ presidio_anonymizer_api_base: http://presidio-anonymizer:3000
 
 Do not probe `/` for Presidio: the health endpoint is `/health`.
 
-### 3. Validate static configuration
+### 3. Update the diagrams
+
+Every change that adds, removes, renames, or reconnects a service, network,
+profile, data store, external dependency, or flow step must update the
+affected Mermaid sources in `diagrams/*.mmd` in the same change. Clients and
+external services stay in their own boundaries outside the stack. Edit only the
+`.mmd` files, then regenerate the animated HTML with one command:
+
+```sh
+./scripts/render-diagrams.py
+./scripts/render-diagrams.py --check
+```
+
+Rendering needs the dashmotion skill (set `DASHMOTION_SKILL_DIR` when it is not
+in `~/.agents/skills/dashmotion`). If it is unavailable, update and commit the
+Mermaid sources only and say that the HTML still needs rendering. Never edit
+the generated HTML by hand. The syntax and directives are documented in
+[diagrams/README.md](diagrams/README.md#updating-diagrams).
+
+### 4. Validate static configuration
 
 Run:
 
@@ -79,7 +100,7 @@ jq empty grafana/dashboards/litellm-cost/litellm-cost.json
 
 Validate changed YAML with an installed YAML parser when available.
 
-### 4. Deploy and validate runtime behavior
+### 5. Deploy and validate runtime behavior
 
 Apply the smallest affected service set when possible:
 
@@ -105,7 +126,7 @@ docker compose exec -T prometheus wget -qO- \
   'http://localhost:9090/api/v1/targets?state=active'
 ```
 
-### 5. Validate observability
+### 6. Validate observability
 
 Run the OpenSearch checks of the regression suite:
 

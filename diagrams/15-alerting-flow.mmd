@@ -1,0 +1,26 @@
+---
+title: Alert evaluation and notification
+---
+flowchart TD
+  %% Source for 15-alerting-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @subtitle Grafana rule files stay the single source; the bridge and OpenSearch monitors turn them into notifications
+
+  S(["RULES IN GRAFANA/ALERTING"])
+  SET["opensearch-setup creates one monitor per rule"]
+  EV["Bridge evaluates each PromQL rule every minute"]
+  ST["Write litellm-alert-state-*"]
+  FOR{"Condition held for the full 'for' duration?"}
+  OK(["NO ALERT"])
+  CHN{"Alert channel configured?"}
+  UI(["VISIBLE IN THE UI ONLY"])
+  E(["OPERATOR NOTIFIED"])
+
+  S --> SET
+  SET --> EV
+  EV --> ST
+  ST --> FOR
+  FOR -->|"no"| OK
+  FOR -->|"yes"| CHN
+  CHN -->|"no"| UI
+  CHN -->|"yes"| E

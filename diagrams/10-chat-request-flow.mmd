@@ -1,0 +1,33 @@
+---
+title: Chat completion request flow
+---
+flowchart TD
+  %% Source for 10-chat-request-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @subtitle From the client's HTTPS call to the response, through authentication, policy, PII masking, routing, and telemetry
+
+  S(["CLIENT SENDS REQUEST"])
+  TLS["Traefik terminates TLS and routes by host"]
+  AUTH{"Key valid and model allowed?"}
+  DENY(["401 / 403 TO CLIENT"])
+  POL["Resolve eu-data-protection policy"]
+  PRE["Presidio pre_call masks PII in the input"]
+  RT{"Model is coding-router?"}
+  D3["D3-mini picks a tier (see routing flow)"]
+  PROV["Call the provider model (OpenAI)"]
+  POST["Presidio post_call masks PII in the output"]
+  TEL["Spend log, metrics, and content-free span"]
+  E(["RESPONSE TO CLIENT"])
+
+  S --> TLS
+  TLS --> AUTH
+  AUTH -->|"no"| DENY
+  AUTH -->|"yes"| POL
+  POL --> PRE
+  PRE --> RT
+  RT -->|"yes"| D3
+  RT -->|"no"| PROV
+  D3 --> PROV
+  PROV --> POST
+  POST --> TEL
+  TEL --> E

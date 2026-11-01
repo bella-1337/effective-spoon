@@ -1,0 +1,34 @@
+---
+title: Image-security scan run
+---
+flowchart TD
+  %% Source for 16-image-scan-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @subtitle One scheduled or manual run of the fail-closed image scanner
+
+  S(["SCHEDULE OR MANUAL RUN"])
+  LOCK["Acquire the scanner lock"]
+  INV["Inventory running digests via the proxy"]
+  FEED["Download Trivy DB and validate CISA KEV"]
+  FOK{"Feeds fresh and valid?"}
+  FAIL(["OPERATIONAL FAILURE — NONZERO"])
+  SCAN["Scan each platform digest"]
+  EXC["Apply time-limited exceptions"]
+  OUT["Write private reports and textfile metrics"]
+  ENF{"--enforce and unexcepted KEV or fixable Critical?"}
+  GATE(["RELEASE GATE FAILS"])
+  SBOM["Generate SBOMs and licence evidence"]
+  E(["RUN COMPLETE"])
+
+  S --> LOCK
+  LOCK --> INV
+  INV --> FEED
+  FEED --> FOK
+  FOK -->|"no"| FAIL
+  FOK -->|"yes"| SCAN
+  SCAN --> EXC
+  EXC --> OUT
+  OUT --> ENF
+  ENF -->|"yes"| GATE
+  ENF -->|"no"| SBOM
+  SBOM --> E

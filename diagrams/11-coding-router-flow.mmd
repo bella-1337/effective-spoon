@@ -1,0 +1,28 @@
+---
+title: coding-router tier selection
+---
+flowchart TD
+  %% Source for 11-coding-router-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @subtitle Only the classification request leaves for the remote D3-mini host; the completion goes to the selected tier
+
+  S(["MODEL = CODING-ROUTER"])
+  CL["Send classification request to D3-mini"]
+  OK{"D3 answered within 15 s?"}
+  FB["Fail safe to gpt-4o"]
+  TIER{"Tier is SIMPLE or MEDIUM?"}
+  MINI["Route to gpt-4o-mini"]
+  FULL["Route to gpt-4o (COMPLEX / REASONING)"]
+  CALL["Call OpenAI with the original request"]
+  E(["RESPONSE"])
+
+  S --> CL
+  CL --> OK
+  OK -->|"no"| FB
+  OK -->|"yes"| TIER
+  TIER -->|"yes"| MINI
+  TIER -->|"no"| FULL
+  FB --> CALL
+  MINI --> CALL
+  FULL --> CALL
+  CALL --> E

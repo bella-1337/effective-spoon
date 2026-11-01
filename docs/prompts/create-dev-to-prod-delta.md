@@ -32,7 +32,7 @@ Requirements:
    - pgvector/**;
    - Prometheus, Grafana dashboards, datasources, and alerts;
    - backup, restore, upgrade, rollback, and verification scripts;
-   - .env.example and README.md.
+   - .env.example, README.md, and the guides under docs/.
 3. Compare the complete prod and dev behavior. Include small differences such as
    model aliases, callback lists, timeout values, environment variables,
    profiles, seed jobs, routes, storage type, metrics, tests, and hardcoded

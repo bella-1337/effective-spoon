@@ -1,0 +1,56 @@
+---
+title: Data layer, readers, and backups
+---
+flowchart TD
+  %% Source for 09-data-layer.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @mode architecture
+  %% @subtitle Which service owns each database, who reads it with which role, and where backups go
+  %% @card cyan | Owners | Each LiteLLM profile has its own database on one PostgreSQL | pgvector runs in a separate PostgreSQL 16 instance | postgres-init creates litellm_dev on a fresh volume
+  %% @card violet | Readers | The bridge reads with opensearch_ro; Grafana with grafana_ro | Prompts, responses, and key hashes are never copied out | Exporters expose database health to Prometheus
+  %% @card rose | Backups | Custom-format dumps validated by pg_restore | Partial backups never advance the last-success metric | Replicate off-host; a local backup does not survive host loss
+  %% @tier 0: OP
+  %% @tier 1: LP LD CON BK
+  %% @tier 2: PG VP
+  %% @tier 3: BRG EXP GF BD
+  %% @tier 4: OFF
+  %% @journey #22d3ee: OP BK BD OFF
+  %% @journey #a78bfa: LP PG BRG
+
+  subgraph CL["Clients — outside the stack"]
+    OP["Operator shell<br/>backup · restore · cron"]:::frontend
+  end
+  subgraph ST["LiteLLM stack — Docker Compose host"]
+    LP["litellm-prod<br/>read/write"]:::backend
+    LD["litellm-dev<br/>read/write"]:::backend
+    CON["litellm-pgvector<br/>dev connector"]:::backend
+    BK["backup-databases.py<br/>pg_dump · pg_restore check"]:::backend
+    PG[("postgres<br/>litellm_prod · litellm_dev")]:::database
+    VP[("vector-postgres<br/>vector_store · pgvector")]:::database
+    BRG["opensearch-bridge<br/>opensearch_ro"]:::backend
+    EXP["postgres / pgvector exporters<br/>metrics only"]:::backend
+    GF["Grafana (optional)<br/>grafana_ro"]:::frontend
+    BD[("backups/ directory<br/>SHA256SUMS · 0700")]:::database
+  end
+  subgraph EX["External services — outside the stack"]
+    OFF["Off-host backup storage<br/>encrypted · access-controlled"]:::external
+  end
+
+  OP ==>|"run"| BK
+  LP ==> PG
+  LD --> PG
+  CON --> VP
+  LD -.->|"auto-index"| VP
+  BK --> PG
+  BK --> VP
+  PG -->|"non-content rows"| BRG
+  PG --> EXP
+  VP --> EXP
+  PG --> GF
+  BK ==>|"atomic publish"| BD
+  BD ==>|"replicate"| OFF
+
+  classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
+  classDef database fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+  classDef external fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
+  classDef frontend fill:#083344,stroke:#22d3ee,color:#e2e8f0

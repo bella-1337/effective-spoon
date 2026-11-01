@@ -3,7 +3,7 @@
 This register is the authoritative licence record for the LiteLLM stack. It
 covers every container image the stack runs or builds, the model weights it
 loads, and the Python packages the repository itself installs. Generated SBOMs
-(see [README section 16](../README.md#generate-sboms-and-licence-evidence)) are
+(see [Generate SBOMs and licence evidence](image-security.md#generate-sboms-and-licence-evidence)) are
 supporting evidence; they cannot replace this register because scanners do not
 detect the licence of most single-binary applications (for example Grafana,
 Loki, MinIO, Traefik, Qdrant, and ClickHouse).
@@ -69,7 +69,7 @@ Licence categories: **permissive** (MIT, Apache-2.0, BSD, PostgreSQL, PSF),
 | `traefik:v3.7.17` | `traefik` (core) | MIT | Permissive | None. |
 | `mcr.microsoft.com/presidio-analyzer:2.2.362` | `presidio-analyzer` (core) | MIT; includes the spaCy `en_core_web_lg` model (see [models](#models)) | Permissive | None. |
 | `mcr.microsoft.com/presidio-anonymizer:2.2.362` | `presidio-anonymizer` (core) | MIT | Permissive | None. |
-| `searxng/searxng:2026.10.30-ffa88e3ba` | `searxng` (core) | AGPL-3.0 | Strong copyleft | Unmodified internal use creates no AGPL obligation. The licence grants no right to use the queried search engines; see [external services](#external-services-and-terms) and README "Search-engine terms of use". |
+| `searxng/searxng:2026.10.30-ffa88e3ba` | `searxng` (core) | AGPL-3.0 | Strong copyleft | Unmodified internal use creates no AGPL obligation. The licence grants no right to use the queried search engines; see [external services](#external-services-and-terms) and [Search-engine terms of use](search-extraction-and-caching.md#search-engine-terms-of-use). |
 | `ghcr.io/xberg-io/xberg:1.3.10-core` | `xberg` (prod, dev) | MIT | Permissive | None. |
 | `ubuntu/bind9:9.20-26.04_stable` | `xberg-dns` (prod, dev) | BIND 9: MPL-2.0; Ubuntu base packages under their own licences | Weak copyleft | Unmodified internal use creates no MPL obligation. |
 | `ubuntu/squid:6.13-25.04_edge` | `xberg-egress-proxy` (core) | Squid: GPL-2.0-or-later; Ubuntu base packages under their own licences | Strong copyleft | Unmodified internal use creates no GPL obligation. The `edge` track is not a long-term-support channel; this is a support concern, not a licence one. |
@@ -121,7 +121,7 @@ required for compliant operation.
 | Service | Terms | Required action |
 | --- | --- | --- |
 | OpenAI API (`gpt-4o`, `gpt-4o-mini`) | OpenAI commercial API terms | An organisation API agreement and a data processing agreement for personal data. |
-| Search engines queried by SearXNG | Each engine's terms of service | Restrict engines, use contracted APIs, or formally accept the risk. See README "Search-engine terms of use". |
+| Search engines queried by SearXNG | Each engine's terms of service | Restrict engines, use contracted APIs, or formally accept the risk. See [Search-engine terms of use](search-extraction-and-caching.md#search-engine-terms-of-use). |
 | Hugging Face Hub | Hugging Face terms of service and each model's licence | Download only the pinned revisions listed under [models](#models). |
 | Docker Hub, GHCR, MCR, Chainguard, Langfuse registry | Each registry's terms of service | Anonymous pulls are rate-limited on Docker Hub; authenticate pulls if limits are reached. |
 
