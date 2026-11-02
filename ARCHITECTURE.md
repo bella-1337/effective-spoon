@@ -71,7 +71,7 @@ Docker metadata access, image-security monitoring, and untrusted fetch egress.
 | `edge` | Traefik, OpenSearch Dashboards, optional Grafana and Langfuse web/MinIO, LiteLLM prod/dev | Services reachable through Traefik routes |
 | `internal` | Trusted application, data, and observability services, including SearXNG | Databases, telemetry, Presidio, SearXNG (internal-only, reached through LiteLLM), and service-to-service calls |
 | `xberg-sandbox` | Xberg, its DNS and egress proxies, LiteLLM prod/dev | Internal-only MCP traffic; Xberg has no direct route to `internal` or the Internet |
-| `egress` | Xberg DNS and egress proxies | Internet route available only to the DNS relay and destination-filtering HTTP proxy |
+| `egress` | Xberg DNS and egress proxies | Internet route available only to the allowlist-only DNS resolver and the HTTPS-only destination-filtering proxy |
 | `traefik-monitor` | Traefik and its Docker socket proxy | Read-only Docker routing metadata |
 | `alloy-monitor` | Alloy and its Docker socket proxy | Read-only Docker discovery and log metadata |
 | `security-monitor` | Image scanner and its Docker socket proxy | Isolated image and container inventory |

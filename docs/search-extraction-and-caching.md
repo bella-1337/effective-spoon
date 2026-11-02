@@ -105,10 +105,27 @@ curl --fail --show-error --silent \
 Use `https://$LITELLM_DEV_HOST` for the development profile. Xberg accepts
 remote URLs and therefore acts as a server-side fetcher. Grant MCP access only
 to trusted keys and teams. Xberg has no direct route to the Internet or the
-stack's `internal` network: outbound HTTP and HTTPS must pass through the Squid
-proxy, which denies private, loopback, link-local, and non-allowlisted
-destinations. Review additions to `security/xberg-egress-allowlist.txt`; the
-secure default permits only the documented Xberg documentation host.
+stack's `internal` network:
+
+- outbound traffic must be an HTTPS `CONNECT` tunnel through the Squid proxy,
+  which denies plaintext HTTP and private, loopback, link-local, and
+  non-allowlisted destinations before resolving them;
+- the `xberg-dns` resolver answers `NXDOMAIN` for every name that is not
+  explicitly forwarded, so a URL cannot leak data through DNS lookups;
+- local paths and `file://` URIs are disabled in `security/xberg-config.toml`;
+  send local documents as `kind: bytes` instead;
+- a default-on `prompt-injection-tool-output` guardrail redacts explicit
+  injection phrases, such as "ignore all previous instructions", from tool
+  results.
+
+The secure default permits only the documented Xberg documentation host. To add
+a destination, update all of `security/xberg-egress-allowlist.txt`,
+`security/xberg-config.toml`, the forward zones in
+`security/xberg-dns-zones.conf`, and the delegations in
+`security/xberg-dns-deny-root.zone`, including every CNAME target (check with
+`dig +noall +answer <host>`). `python3 scripts/maintenance.py doctor` rejects
+lists that are out of step. See
+[Edge and abuse protection](edge-and-abuse-protection.md).
 
 The development gateway uses `BAAI/bge-m3` in the internal `bge-m3-vllm`
 container to semantically select up to three relevant MCP tools with a minimum

@@ -44,6 +44,7 @@ class GameDayPreflightTests(unittest.TestCase):
                         "LITELLM_FAVICON_URL": "/app/branding/favicon.png",
                     },
                     "volumes": [{"target": "/app/branding", "read_only": True}],
+                    "cap_drop": ["NET_RAW"],
                 },
                 "alloy-docker-proxy": {"environment": {"NETWORKS": "1"}},
                 "alloy": {},

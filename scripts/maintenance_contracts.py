@@ -324,6 +324,7 @@ def validate_compose_contracts(config: Mapping[str, Any]) -> list[str]:
 
     failures.extend(public_hostname_failures(services))
     failures.extend(branding_failures(services))
+    failures.extend(edge_and_abuse_compose_failures(services))
     return failures
 
 
@@ -667,6 +668,165 @@ def traefik_dynamic_config_failures(source: str) -> list[str]:
     return []
 
 
+EDGE_MIDDLEWARES = ("edge-security-headers", "edge-rate-limit", "edge-in-flight")
+WEAK_TLS12_CIPHER_RE = re.compile(r"_CBC_|_SHA\s*$|_RC4_|_3DES_", re.MULTILINE)
+
+
+def traefik_edge_hardening_failures(source: str) -> list[str]:
+    """Require the edge TLS policy, security headers, and abuse limits."""
+    uncommented = "\n".join(line.partition("#")[0] for line in source.splitlines())
+    failures: list[str] = []
+    if not re.search(r"^\s+minVersion:\s*VersionTLS1[23]\s*$", uncommented, re.MULTILINE):
+        failures.append("Traefik default TLS options must require TLS 1.2 or newer")
+    cipher_block = re.search(r"cipherSuites:\s*\n((?:\s+-\s*\S+\s*\n?)+)", uncommented)
+    if not cipher_block or WEAK_TLS12_CIPHER_RE.search(cipher_block.group(1)):
+        failures.append("Traefik TLS 1.2 cipher suites must be an explicit AEAD-only list")
+    if not re.search(r"^\s+stsSeconds:\s*[1-9][0-9]*\s*$", uncommented, re.MULTILINE):
+        failures.append("Traefik must send an HSTS header")
+    for name in EDGE_MIDDLEWARES:
+        if not re.search(rf"^\s+{re.escape(name)}:\s*$", uncommented, re.MULTILINE):
+            failures.append(f"Traefik dynamic configuration is missing middleware {name}")
+    return failures
+
+
+def edge_and_abuse_compose_failures(services: Mapping[str, Any]) -> list[str]:
+    """Reject Compose drift that would undo the DDoS and MITM protections."""
+    failures: list[str] = []
+    traefik = services.get("traefik")
+    if isinstance(traefik, dict):
+        command = traefik.get("command", []) or []
+        entrypoint_middlewares = next(
+            (
+                str(argument).partition("=")[2]
+                for argument in command
+                if str(argument).startswith("--entrypoints.websecure.http.middlewares=")
+            ),
+            "",
+        )
+        attached = {name.partition("@")[0] for name in entrypoint_middlewares.split(",")}
+        missing = [name for name in EDGE_MIDDLEWARES if name not in attached]
+        if missing:
+            failures.append(
+                "Traefik websecure entrypoint lacks edge middlewares: " + ", ".join(missing)
+            )
+        if any(
+            str(argument).startswith("--entrypoints.websecure.forwardedheaders")
+            for argument in command
+        ):
+            failures.append("Traefik must not trust client-supplied forwarded headers")
+
+    for name in ("traefik", "litellm-prod", "litellm-dev", "blackbox", "xberg-egress-proxy"):
+        service = services.get(name)
+        if not isinstance(service, dict):
+            continue
+        cap_drop = {str(cap).upper() for cap in service.get("cap_drop", []) or []}
+        if not cap_drop & {"NET_RAW", "ALL"}:
+            failures.append(f"{name} must drop NET_RAW to prevent ARP spoofing")
+
+    for name in ("presidio-analyzer", "presidio-anonymizer"):
+        service = services.get(name)
+        if not isinstance(service, dict):
+            continue
+        environment = service.get("environment", {})
+        workers = str(environment.get("WORKERS", "")) if isinstance(environment, dict) else ""
+        if not workers.isdigit() or int(workers) < 2:
+            failures.append(f"{name} needs at least two workers so one prompt cannot stall masking")
+    return failures
+
+
+def xberg_sandbox_policy_failures(root: Path) -> list[str]:
+    """Keep Xberg local-file access, plaintext egress, and DNS exfiltration closed."""
+    failures: list[str] = []
+    security = root / "security"
+    with (security / "xberg-config.toml").open("rb") as handle:
+        url_config = tomllib.load(handle).get("url", {})
+    if url_config.get("allow_local_file_inputs") is not False or url_config.get(
+        "allow_file_uris"
+    ) is not False:
+        failures.append("Xberg must disable local path and file:// inputs")
+
+    squid = [
+        line.strip()
+        for line in (security / "xberg-egress-squid.conf").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    access = [line for line in squid if line.startswith("http_access ")]
+    if "http_access deny !CONNECT" not in access:
+        failures.append("Xberg egress proxy must allow only HTTPS CONNECT tunnels")
+    if any(re.fullmatch(r"acl Safe_ports port 80", line) for line in squid):
+        failures.append("Xberg egress proxy must not allow plaintext port 80")
+    try:
+        allowlist_index = access.index("http_access deny !allowed_domains")
+        dst_index = min(
+            index for index, line in enumerate(access) if "blocked_ipv" in line
+        )
+    except ValueError:
+        failures.append("Xberg egress proxy must deny unlisted names before resolving them")
+    else:
+        if allowlist_index > dst_index:
+            failures.append("Xberg egress proxy must deny unlisted names before resolving them")
+    if "pinger_enable off" not in squid:
+        failures.append("Xberg egress proxy must disable the raw-socket ICMP pinger")
+
+    zones_source = (security / "xberg-dns-zones.conf").read_text(encoding="utf-8")
+    root_zone = (security / "xberg-dns-deny-root.zone").read_text(encoding="utf-8")
+    if not re.search(r'zone\s+"\."\s*\{[^}]*type\s+primary;', zones_source):
+        failures.append("Xberg DNS relay must serve an authoritative empty root")
+    forward_zones = set(
+        re.findall(r'zone\s+"([^"]+)"\s*\{[^}]*type\s+forward;', zones_source)
+    )
+    delegated = {
+        name.rstrip(".")
+        for name in re.findall(r"^(\S+)\s+IN\s+NS\s+", root_zone, re.MULTILINE)
+        if name not in {"@", "."}
+    }
+    if forward_zones != delegated:
+        failures.append("Xberg DNS forward zones and root delegations are not aligned")
+    proxy_allowlist = {
+        line.strip().lstrip(".")
+        for line in (security / "xberg-egress-allowlist.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+    unresolvable = proxy_allowlist - forward_zones
+    if unresolvable:
+        failures.append(
+            "Xberg egress allowlist entries have no DNS forward zone: "
+            + ", ".join(sorted(unresolvable))
+        )
+    return failures
+
+
+def litellm_guardrail_failures(root: Path) -> list[str]:
+    """Keep the prompt-injection screen, Presidio chunking, and key safety nets wired."""
+    failures: list[str] = []
+    modules = root / "litellm" / "modules" / "guardrails"
+    injection = modules / "prompt-injection.yaml"
+    injection_source = injection.read_text(encoding="utf-8") if injection.is_file() else ""
+    if (
+        "guardrail: litellm_content_filter" not in injection_source
+        or not re.search(r"mode:\s*\[[^\]]*post_mcp_call", injection_source)
+        or not re.search(r"default_on:\s*true", injection_source)
+    ):
+        failures.append("MCP tool output must pass a default-on prompt-injection guardrail")
+    presidio_source = (modules / "presidio.yaml").read_text(encoding="utf-8")
+    chunk = re.search(r"presidio_analyze_chunk_size_bytes:\s*([0-9]+)", presidio_source)
+    if not chunk or not 0 < int(chunk.group(1)) <= 200_000:
+        failures.append("Presidio analysis must chunk prompts at 200 KB or less")
+    for config_name in ("config.prod.yaml", "config.dev.yaml"):
+        source = (root / "litellm" / config_name).read_text(encoding="utf-8")
+        if "modules/guardrails/prompt-injection.yaml" not in source:
+            failures.append(f"{config_name} does not include the prompt-injection guardrail")
+        defaults = re.search(
+            r"default_key_generate_params:\s*\n((?:\s{4,}\S.*\n)+)", source
+        )
+        if not defaults or not all(
+            re.search(rf"^\s+{key}:\s*[1-9][0-9]*\s*$", defaults.group(1), re.MULTILINE)
+            for key in ("max_parallel_requests", "rpm_limit")
+        ):
+            failures.append(f"{config_name} must set default per-key request limits")
+    return failures
+
+
 def validate_repository_contracts(root: Path = ROOT) -> list[str]:
     failures: list[str] = []
 
@@ -674,9 +834,12 @@ def validate_repository_contracts(root: Path = ROOT) -> list[str]:
     if not traefik_dynamic.is_file() or traefik_dynamic.is_symlink():
         failures.append("Traefik dynamic configuration is missing or unsafe")
     else:
-        failures.extend(
-            traefik_dynamic_config_failures(traefik_dynamic.read_text(encoding="utf-8"))
-        )
+        traefik_source = traefik_dynamic.read_text(encoding="utf-8")
+        failures.extend(traefik_dynamic_config_failures(traefik_source))
+        failures.extend(traefik_edge_hardening_failures(traefik_source))
+
+    failures.extend(xberg_sandbox_policy_failures(root))
+    failures.extend(litellm_guardrail_failures(root))
 
     compose_file = root / "docker-compose.yml"
     optional_compose_file = root / "compose.optional.yml"

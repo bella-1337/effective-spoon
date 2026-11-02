@@ -67,6 +67,7 @@ services:
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
       - --entrypoints.web.http.redirections.entrypoint.scheme=https
       - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http.middlewares=edge-security-headers@file,edge-rate-limit@file,edge-in-flight@file
       - --entrypoints.metrics.address=:8082
       - --metrics.prometheus=true
       - --metrics.prometheus.entrypoint=metrics
@@ -97,6 +98,8 @@ services:
     depends_on:
       traefik-docker-proxy:
         condition: service_healthy
+    # Raw sockets would allow ARP spoofing of plaintext internal traffic.
+    cap_drop: [NET_RAW]
     networks: [edge, internal, traefik-monitor]
     restart: unless-stopped
 
@@ -383,6 +386,9 @@ services:
       PRESIDIO_NLP_ENGINE: ${PRESIDIO_NLP_ENGINE:-spacy}
       PRESIDIO_SUPPORTED_LANGUAGES: ${PRESIDIO_SUPPORTED_LANGUAGES:-en}
       NLP_CONF_FILE: /app/presidio_analyzer/conf/litellm-analyzer.yaml
+      # Each gunicorn worker is synchronous; one large prompt otherwise
+      # serializes the PII guardrail for every caller.
+      WORKERS: ${PRESIDIO_ANALYZER_WORKERS:-2}
     volumes:
       - ./presidio/analyzer.yaml:/app/presidio_analyzer/conf/litellm-analyzer.yaml:ro
     deploy:
@@ -401,6 +407,10 @@ services:
   presidio-anonymizer:
     logging: *default-logging
     image: mcr.microsoft.com/presidio-anonymizer:2.2.362@sha256:a10a12a2a613d13cf29d3ad3641e3258444dd8c90403dd644a0a114c472c2483
+    environment:
+      # A single synchronous worker lets one oversized request stall masking
+      # for every caller until gunicorn's 30 s worker timeout.
+      WORKERS: ${PRESIDIO_ANONYMIZER_WORKERS:-2}
     networks: [internal]
     restart: unless-stopped
     healthcheck:
@@ -495,9 +505,14 @@ services:
     logging: *default-logging
     profiles: [prod, dev]
     image: ubuntu/bind9:9.20-26.04_stable@sha256:bce2d69f34f4dce93540118c1b05d2c8cd33817c1efc77bd82a8d75c3f722706
-    entrypoint: ["/usr/sbin/named", "-g", "-c", "/etc/bind/named.conf"]
+    # Deny-by-default resolver: an empty authoritative root answers NXDOMAIN
+    # locally, and only the delegated allowlist zones are forwarded upstream,
+    # so injected URLs cannot exfiltrate data through DNS lookups.
+    entrypoint: ["/usr/sbin/named", "-g", "-c", "/etc/bind/xberg-named.conf"]
     volumes:
       - ./security/xberg-dns.conf:/etc/bind/named.conf.options:ro
+      - ./security/xberg-dns-zones.conf:/etc/bind/xberg-named.conf:ro
+      - ./security/xberg-dns-deny-root.zone:/etc/bind/xberg-deny-root.zone:ro
     networks:
       xberg-sandbox:
         ipv4_address: "${XBERG_DNS_IP:-172.29.0.53}"
@@ -529,6 +544,8 @@ services:
       - /run:mode=0755
       - /var/log/squid:uid=13,gid=13,mode=0750
       - /var/spool/squid:uid=13,gid=13,mode=0750
+    # The ICMP pinger is disabled in squid.conf, so raw sockets are unused.
+    cap_drop: [NET_RAW]
     security_opt:
       - no-new-privileges:true
     healthcheck:
@@ -911,6 +928,7 @@ services:
       langfuse-web:
         condition: service_healthy
         required: false
+    cap_drop: [NET_RAW]
     networks: [edge, internal, xberg-sandbox]
     restart: unless-stopped
     healthcheck:
@@ -1030,6 +1048,7 @@ services:
         required: false
       bge-m3-vllm:
         condition: service_healthy
+    cap_drop: [NET_RAW]
     networks: [edge, internal, xberg-sandbox]
     restart: unless-stopped
     healthcheck:
@@ -1167,5 +1186,7 @@ services:
   blackbox:
     logging: *default-logging
     image: prom/blackbox-exporter:v0.29.1@sha256:ea1c7aa3ef3f307cd03e85f34abb604478ccb90b567fc690da0cd9776da76b13
+    # Only the http_2xx module is used; ICMP probing is not required.
+    cap_drop: [NET_RAW]
     networks: [internal]
     restart: unless-stopped

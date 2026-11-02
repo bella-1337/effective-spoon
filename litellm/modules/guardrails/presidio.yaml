@@ -7,3 +7,7 @@ guardrails:
       presidio_anonymizer_api_base: http://presidio-anonymizer:3000
       presidio_language: en
       presidio_filter_scope: both
+      # Large prompts are analyzed as concurrent chunks of this size. The
+      # 500 KB default let one 1.5 MB prompt OOM-kill the analyzer for every
+      # caller; 100 KB keeps each spaCy document within the worker memory.
+      presidio_analyze_chunk_size_bytes: 100000

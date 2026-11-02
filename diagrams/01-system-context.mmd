@@ -25,7 +25,7 @@ flowchart TD
     AG["Agent / MCP client<br/>tools via LiteLLM MCP"]:::frontend
   end
   subgraph ST["LiteLLM stack — Docker Compose host"]
-    TR["Traefik<br/>TLS termination · only :80/:443"]:::cloud
+    TR["Traefik<br/>TLS 1.2+ · HSTS · runaway limits"]:::cloud
     LL["LiteLLM gateway<br/>prod / dev profile"]:::backend
     OSD["OpenSearch Dashboards<br/>multi-user observability UI"]:::frontend
     OPT["Optional UIs<br/>Grafana · Langfuse profiles"]:::frontend

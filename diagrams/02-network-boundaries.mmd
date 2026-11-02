@@ -7,7 +7,7 @@ flowchart TD
   %% @mode architecture
   %% @subtitle Each Compose network is a trust zone; only Traefik publishes host ports
   %% @card cyan | Ingress | Only Traefik publishes host ports 80 and 443 | edge members are reachable only through a Traefik host rule | SearXNG, databases, and telemetry have no route from clients
-  %% @card violet | Isolation | Xberg sits alone on xberg-sandbox with LiteLLM and its proxies | Its outbound HTTP goes through Squid, which denies private and non-allowlisted hosts | opensearch-certs runs with no network at all
+  %% @card violet | Isolation | Xberg sits alone on xberg-sandbox with LiteLLM and its proxies | Its outbound HTTPS goes through Squid and its DNS through an allowlist-only resolver | opensearch-certs runs with no network at all
   %% @card rose | Docker socket | Traefik, Alloy, and the image scanner never mount the socket | Each reaches Docker through its own socket proxy on a dedicated network | The proxies allow read-only GET calls; POST is disabled
   %% @tier 0: CLI
   %% @tier 1: TR
@@ -43,7 +43,7 @@ flowchart TD
       XB["Xberg MCP<br/>no Internet, no internal route"]:::backend
     end
     subgraph EGR["egress — the only Internet route for Xberg"]
-      DNS["xberg-dns<br/>DNS relay"]:::security
+      DNS["xberg-dns<br/>allowlist-only resolver"]:::security
       SQ["xberg-egress-proxy<br/>Squid allowlist"]:::security
     end
     subgraph MON["*-monitor networks — read-only Docker access"]

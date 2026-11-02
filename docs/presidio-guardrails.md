@@ -75,6 +75,19 @@ mapping, not arbitrary LiteLLM policies. Exact company/client deny lists or new
 custom entity types require a supported Presidio recognizer implementation and
 representative tests; do not place sensitive production client lists in Git.
 
+For prompts larger than `presidio_analyze_chunk_size_bytes` (100 KB in this
+stack), LiteLLM analyses overlapping chunks concurrently. Do not raise it toward
+LiteLLM's 500 KB default: a single 1.5 MB prompt then exhausted the analyzer's
+2 GiB memory limit and stopped masking for every caller.
+
+MCP tool results returned to the caller of `/mcp-rest/tools/call` are not
+masked: Presidio cannot rewrite Xberg's structured tool output and fails
+closed. Tool results are masked when an agent sends them back to a model,
+because they then pass the `pre_call` guardrail as `tool` messages.
+`litellm/modules/guardrails/prompt-injection.yaml` screens the same tool
+results for indirect prompt injection; see
+[Edge and abuse protection](edge-and-abuse-protection.md).
+
 ### Add another LiteLLM guardrail
 
 Add a new item under `guardrails:` in a file under

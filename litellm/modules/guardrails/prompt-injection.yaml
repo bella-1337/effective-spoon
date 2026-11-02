@@ -1,0 +1,23 @@
+# Indirect prompt-injection screen for MCP tool results. Xberg returns
+# untrusted documents and web pages that a model will treat as context. MASK
+# redacts explicit attack phrases such as "ignore all previous instructions"
+# and returns the rest of the document; broader keyword pairs that also occur
+# in ordinary AI documentation are only logged. Use BLOCK to reject such
+# results instead. The keyword categories are bundled with LiteLLM. User
+# prompts are not screened because coding requests routinely discuss system
+# prompts; docs/edge-and-abuse-protection.md explains how to add pre_call.
+guardrails:
+  - guardrail_name: prompt-injection-tool-output
+    litellm_params:
+      guardrail: litellm_content_filter
+      mode: [post_mcp_call]
+      default_on: true
+      categories:
+        - category: prompt_injection_system_prompt
+          enabled: true
+          action: MASK
+          severity_threshold: medium
+        - category: prompt_injection_jailbreak
+          enabled: true
+          action: MASK
+          severity_threshold: medium
