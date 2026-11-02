@@ -39,7 +39,7 @@ container build.
 Checks that require external services are intentionally deferred for now:
 
 - starting the full Compose stack and waiting for all service health checks;
-- loading the GPU-backed BGE-M3 model or the CPU semantic router model;
+- calling the remote GPU host's BGE-M3 and D3-mini endpoints;
 - calling OpenAI or other provider APIs;
 - downloading vulnerability databases or live CISA feeds;
 - probing a deployed on-prem environment.

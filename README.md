@@ -17,10 +17,10 @@ available only for a private workstation or trusted development network.
 - Docker Engine or Docker Desktop with Docker Compose v2.20.0 or newer
   (required for the top-level `include` model)
 - Python 3.11 or newer for the local CI validation entrypoint
-- An NVIDIA GPU and NVIDIA Container Toolkit for the development profile's
-  BGE-M3 vLLM service while it runs locally; see
-  [Hardware sizing](#hardware-sizing) for the remote-GPU layout
-- A reachable D3-mini Decisions endpoint on a separate GPU host
+- A remote GPU host serving the D3-mini Decisions endpoint (HTTPS) and, for the
+  development profile, the BGE-M3 embedding endpoint (plain HTTP), deployed with
+  the separate [`gpu-host/`](gpu-host/README.md) stack; see
+  [Hardware sizing](#hardware-sizing)
 - About 4.5 GB of additional RAM for OpenSearch, OpenSearch Dashboards, and Data
   Prepper. On Linux hosts, OpenSearch requires `vm.max_map_count` of at least
   262144:
@@ -56,10 +56,11 @@ Validate these figures with a load test before purchasing.
 | --- | --- | --- | --- | --- | --- |
 | **Prod** | Shared services, `prod`, all optional profiles | 24 cores / 48 threads (16 / 32 minimum) | 128 GB (96 GB minimum) | 2 × 2 TB NVMe, RAID 1 | None |
 | **Dev** | Shared services, `prod` and `dev`, all optional profiles | 12 cores / 24 threads (8 / 16 minimum) | 64 GB (48 GB minimum) | 2 × 1 TB NVMe, RAID 1 | None |
-| **Remote GPU** | D3-mini for both environments, BGE-M3 for dev | 16 cores | 64 GB | 1 TB NVMe | 2 GPUs: 24 GB (L4 or A10) for D3-mini, 16–24 GB for BGE-M3 |
+| **Remote GPU** | [`gpu-host/`](gpu-host/README.md): D3-mini for both environments, BGE-M3 for dev | 16 cores | 64 GB | 1 TB NVMe | 1 × 48 GB (L40S, RTX 6000 Ada, or A6000) shared by both models |
 
 Cloud equivalents: prod `m7i.8xlarge` (32 vCPU, 128 GB), dev `m7i.4xlarge`
-(16 vCPU, 64 GB), and two `g6.2xlarge` (one L4 each) for the GPU workloads.
+(16 vCPU, 64 GB), and `g6e.4xlarge` (one 48 GB L40S, 16 vCPU, 128 GB) for the
+GPU host.
 
 ### Prod host budget
 
@@ -113,7 +114,7 @@ On the prod host, set:
 - **Each cap contains one runaway service.** On prod, all memory caps together
   come to about 112 GB, under the 128 GB host, so even every service at its cap
   cannot exhaust host memory. On the dev host they come to about 62 GB, which is
-  nearly the whole 64 GB host. While BGE-M3 still runs locally, add its 6 GB.
+  nearly the whole 64 GB host.
 - **CPU caps are oversubscribed on purpose.** CPU is shared, not lost, so a cap
   only stops one service from taking every core.
 - **Database memory caps include the page cache.** A smaller cap costs cache
@@ -142,30 +143,29 @@ the default resource limits.
 | `grafana`, `langfuse`, `security` | 11.5 GB | 5 |
 | **Total** | **~40 GB** | **~18** |
 
-Moving BGE-M3 off this host saves its 6 GB memory limit, its 2 GB shared
-memory, and the local GPU.
+BGE-M3 runs on the remote GPU host, so the dev host needs no GPU.
 
 ### Remote GPU host
 
-- **D3-mini** is sized for one 16 GB GPU. Its container needs 16 GB of memory
-  and 4 GB of shared memory. Prod's `coding-router` calls it on every request,
-  so keep it on its own GPU, on the same site network, and firewalled to both
-  LiteLLM hosts. If it fails or takes longer than 15 seconds, routing falls
-  back to `gpt-4o`.
-- **BGE-M3** is a small model, about 1.1 GB in fp16. A 16 GB GPU at
-  `BGE_M3_VLLM_GPU_MEMORY_UTILIZATION=0.35` leaves room for batching. Its
-  container needs 6 GB of memory and 2 GB of shared memory. Only dev uses it
-  today. Promoting the semantic cache or RAG to prod adds prod load to this GPU.
-- **One GPU instead of two.** A single 48 GB GPU (L40S or RTX 6000 Ada) can host
-  both models only after benchmarking, with each vLLM process given its own
-  memory fraction.
-- **Separate D3 for dev.** A dev load test against the shared D3-mini can slow
-  prod routing. Add a third GPU if dev should have its own D3-mini instance.
+One 48 GB GPU serves both models through the separate
+[`gpu-host/`](gpu-host/README.md) Compose project:
 
-The dev profile still starts `bge-m3-vllm` locally: `litellm/config.dev.yaml`
-and `XBERG_INDEX_EMBEDDING_API_BASE` point at `http://bge-m3-vllm:8000`. To use
-the remote host, repoint both settings and remove the local service from the
-`dev` profile.
+| Model | Engine | Endpoint | GPU memory (typical / worst) |
+| --- | --- | --- | --- |
+| D3-mini | vLLM Semantic Router model runtime, Nginx TLS proxy | HTTPS, prod and dev | ~12 / ~18 GiB at the 8,192-token input cap |
+| BGE-M3 | Hugging Face Text Embeddings Inference | plain HTTP, dev only | ~2–3 / ~4 GiB |
+
+- **About 23 GiB at worst** leaves more than 20 GB free. Neither engine reserves
+  memory up front, so no per-process fractions are needed.
+- **D3-mini is on prod's request path.** `coding-router` calls it on every
+  request; if it fails or takes longer than 15 seconds, routing falls back to
+  `gpt-4o`. Keep the host on the same site network and firewalled to both
+  LiteLLM hosts.
+- **BGE-M3 uses plain HTTP** with an API key that guards every compute route.
+  Keep it firewalled to the dev host. Promoting the semantic cache or RAG to
+  prod adds prod load to this GPU and requires TLS first.
+- **Dev and prod share D3-mini.** A dev load test can slow prod routing. With
+  the headroom on a 48 GB card, a second D3-mini instance for dev fits too.
 
 ## Getting started
 
@@ -202,6 +202,7 @@ To stop, restart, or remove the stack, see
 | [Databases and pgvector storage](docs/databases-and-pgvector.md) | LiteLLM schema verification, pgvector store, opt-in Xberg auto-indexing |
 | [Maintenance runtime](docs/maintenance-runtime.md) | Installing `uv` for the maintenance scripts and why they use Python |
 | [Image security and supply-chain evidence](docs/image-security.md) | Trivy and CISA KEV image scanning, exceptions, alerts, scheduling, SBOMs, licence evidence, OCI image labels |
+| [Remote GPU host](gpu-host/README.md) | D3-mini and BGE-M3 on one shared GPU: engine choice, memory budget, deployment, network security |
 | [Back up and restore the databases](docs/backup-and-restore.md) | Database backups, restore, and the game-day preflight |
 | [Validate and roll back a LiteLLM image upgrade](docs/upgrades-and-rollback.md) | Maintenance entry point, upgrade compatibility checks, regression suite, rollback |
 

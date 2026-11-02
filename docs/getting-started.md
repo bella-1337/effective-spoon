@@ -298,7 +298,18 @@ curl --silent --output /dev/null --write-out '%{http_code}\n' \
 ```
 
 For either profile, verify the remote D3 integration through LiteLLM rather than
-calling the classifier host directly:
+calling the classifier host directly. For the development profile, also check
+that the remote BGE-M3 endpoint returns a 1,024-dimension embedding:
+
+```sh
+curl --fail --silent "https://$LITELLM_DEV_HOST/v1/embeddings" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"bge-m3","input":"embedding probe"}' |
+  python3 -c 'import json, sys; print(len(json.load(sys.stdin)["data"][0]["embedding"]))'
+```
+
+The D3 check:
 
 ```sh
 curl --fail --silent "https://$LITELLM_DEV_HOST/v1/systemone" \

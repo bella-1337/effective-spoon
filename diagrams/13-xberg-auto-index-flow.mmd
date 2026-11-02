@@ -14,7 +14,7 @@ flowchart TD
   CH["Chunk text (~4,000 chars, max 256)"]
   RED{"Presidio anonymized every chunk?"}
   SKIP(["INDEXING FAILS CLOSED AND IS LOGGED"])
-  EMB["Embed chunks with bge-m3"]
+  EMB["Embed chunks with remote bge-m3"]
   UP["Atomically replace source chunks"]
   E(["INDEXED IN SME-KNOWLEDGE"])
 

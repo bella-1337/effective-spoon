@@ -59,7 +59,7 @@ if [[ ! -f litellm/secrets/litellm-master-key ]]; then
 fi
 
 echo "==> Validating Python syntax and hermetic unit tests"
-python3 -m compileall -q scripts litellm/modules
+python3 -m compileall -q scripts litellm/modules gpu-host
 python3 -m unittest discover -s scripts/tests -v
 
 echo "==> Validating JSON, TOML, and immutable workflow dependencies"

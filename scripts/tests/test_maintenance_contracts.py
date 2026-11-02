@@ -171,6 +171,30 @@ class MaintenanceContractTests(unittest.TestCase):
         )
 
 
+    def test_gpu_host_stack_feeds_the_licence_register(self) -> None:
+        images, failures = contracts.auxiliary_images(contracts.ROOT)
+        self.assertEqual(failures, [])
+        for image in (
+            "ghcr.io/vllm-project/semantic-router/vllm-sr-cuda:latest",
+            "docker.io/nginxinc/nginx-unprivileged:1.29.5-alpine",
+            "ghcr.io/huggingface/text-embeddings-inference:cuda-1.9.4",
+        ):
+            self.assertIn(image, images)
+        revisions = {
+            revision
+            for relative in contracts.GPU_HOST_REVISION_SOURCES
+            for revision in contracts.GPU_HOST_REVISION_RE.findall(
+                (contracts.ROOT / relative).read_text(encoding="utf-8")
+            )
+        }
+        self.assertEqual(
+            revisions,
+            {
+                "5617a9f61b028005a4858fdac845db406aefb181",
+                "a475367de0d8133a3c1a2a0dc12303d89cfa2ab4",
+            },
+        )
+
     def test_shared_compose_fragments_must_match_across_include(self) -> None:
         fragments = "".join(
             f"{key}: &{key.removeprefix('x-')}\n  value: 1\n\n"

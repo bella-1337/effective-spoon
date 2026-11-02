@@ -40,6 +40,9 @@ Map the change across these surfaces:
 - `loki/config.yml`, `alloy/config.alloy`, and `alloy/loki.alloy`;
 - `.env.example`, `.env.optional.example`, `.gitignore`, `README.md`, and the
   guides under `docs/`;
+- `gpu-host/` (the separate remote D3-mini and BGE-M3 stack: `compose.yml`,
+  `deploy.py`, and its Nginx configuration), whose image and model pins the
+  licence register must also cover;
 - the Mermaid diagram sources in `diagrams/*.mmd`.
 
 For every proposed removal, identify:

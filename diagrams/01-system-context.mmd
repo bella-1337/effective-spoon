@@ -8,7 +8,7 @@ flowchart TD
   %% @subtitle Who calls the stack, what runs inside the Docker host, and which services live outside it
   %% @card cyan | Clients | Browsers, SDKs, and agents reach the stack only through Traefik over HTTPS | API clients authenticate to LiteLLM with a virtual key or the master key | Operators use OpenSearch Dashboards, plus Grafana or Langfuse when enabled
   %% @card violet | Inside the stack | LiteLLM is the single gateway for models, search, MCP tools, and guardrails | Presidio, SearXNG, Xberg, PostgreSQL, and telemetry stay on internal networks | Every container log, metric, and trace lands in OpenSearch by default
-  %% @card rose | Outside the stack | OpenAI serves completions; D3-mini runs on a separate GPU host | SearXNG scrapes public engines — review their terms of use | Xberg reaches only allowlisted sites through the Squid egress proxy
+  %% @card rose | Outside the stack | OpenAI serves completions; a separate GPU host runs D3-mini over TLS and dev BGE-M3 embeddings over plain HTTP | SearXNG scrapes public engines — review their terms of use | Xberg reaches only allowlisted sites through the Squid egress proxy
   %% @tier 0: BR API AG
   %% @tier 1: TR
   %% @tier 2: LL OSD OPT
@@ -38,7 +38,7 @@ flowchart TD
   end
   subgraph EX["External services — outside the stack"]
     OAI["OpenAI API<br/>completion provider"]:::external
-    D3["D3-mini GPU host<br/>remote coding classifier"]:::external
+    D3["Remote GPU host<br/>D3-mini classifier · dev BGE-M3"]:::external
     SE["Public search engines<br/>scraped by SearXNG"]:::external
     WEB["Allowlisted websites<br/>security/xberg-egress-allowlist"]:::external
   end
@@ -57,7 +57,7 @@ flowchart TD
   OSD --> OBS
   XB --> SQ
   LL ==>|"HTTPS"| OAI
-  LL -->|"TLS + bearer"| D3
+  LL -->|"D3: TLS · BGE-M3: HTTP"| D3
   SX --> SE
   SQ --> WEB
 

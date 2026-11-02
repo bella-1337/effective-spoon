@@ -127,42 +127,40 @@ a destination, update all of `security/xberg-egress-allowlist.txt`,
 lists that are out of step. See
 [Edge and abuse protection](edge-and-abuse-protection.md).
 
-The development gateway uses `BAAI/bge-m3` in the internal `bge-m3-vllm`
-container to semantically select up to three relevant MCP tools with a minimum
-similarity score of `0.3`.
+The development gateway uses `BAAI/bge-m3` on the remote GPU host (see
+[Remote BGE-M3 embeddings](#remote-bge-m3-embeddings)) to semantically select up
+to three relevant MCP tools with a minimum similarity score of `0.3`.
 This affects MCP tools offered automatically through Chat Completions and the
 Responses API; it does not change MCP permissions or direct
 `/mcp-rest/tools/call` requests. Production keeps semantic filtering disabled
-because the local model containers are intentionally development-only.
+because the embedding model is intentionally development-only.
 
 Both LiteLLM profiles register a remote `vllm-sr/d3-mini` deployment as a native
 Decisions model. The `coding-router` Auto Router sends only the classification
 request to D3, then selects `gpt-4o-mini` for SIMPLE/MEDIUM work and `gpt-4o` for
 COMPLEX/REASONING work. If the classifier is unavailable or times out after 15
-seconds, routing fails safe to `gpt-4o`. BGE-M3 remains an independent local
-pooling service; embeddings never pass through D3.
+seconds, routing fails safe to `gpt-4o`. BGE-M3 is a separate remote pooling
+service; embeddings never pass through D3.
 
-Deploy D3-mini on the separate NVIDIA GPU machine before starting this stack.
-The script requires Docker Compose, one CUDA-capable GPU, a DNS name, an
-operator-provided TLS certificate/key, and a random API key of at least 32
+Deploy D3-mini on the separate NVIDIA GPU host before starting this stack, with
+the [`gpu-host/`](../gpu-host/README.md) Compose project, which also serves
+BGE-M3. It needs Docker Compose, one CUDA-capable GPU, a DNS name, an
+operator-provided TLS certificate and key, and a random API key of at least 32
 characters:
 
 ```sh
-export D3_SERVER_NAME="d3-mini.${STACK_DOMAIN:?set to the STACK_DOMAIN value from .env}"
-export D3_API_KEY="$(openssl rand -hex 32)"
-export D3_TLS_CERT_FILE=/secure/path/d3-mini.crt
-export D3_TLS_KEY_FILE=/secure/path/d3-mini.key
-export D3_CA_CERT_FILE=/secure/path/issuing-ca.crt
-./scripts/deploy-d3-mini.sh
+cd gpu-host
+install -m 600 .env.example .env   # set D3_SERVER_NAME, TLS files, and keys
+./deploy.py
 ```
 
-The deployment uses immutable CUDA runtime and unprivileged Nginx image digests,
-pins the built-in D3-mini model revision, persists model downloads, exposes only
-the three Decisions routes over TLS, and checks a real four-tier decision before
-reporting success. It is sized for a single 16 GB GPU; use `d3-nano` instead if
-the actual GPU cannot provide sufficient runtime headroom. Restrict the remote
-port at the firewall to the LiteLLM host. Copy the endpoint and the same secret
-to `D3_DECISION_API_BASE` and `D3_DECISION_API_KEY` in this stack's `.env`.
+D3-mini runs on the vLLM Semantic Router model runtime behind an unprivileged
+Nginx TLS proxy, both pinned by digest. The model revision is pinned, model
+downloads persist, only the three Decisions routes are published, and the
+deployment checks a real four-tier decision before reporting success. Restrict
+the port at the firewall to the LiteLLM hosts. Copy the endpoint and the same
+secret to `D3_DECISION_API_BASE` and `D3_DECISION_API_KEY` in this stack's
+`.env`.
 Create `D3_DECISION_CA_BUNDLE` as a combined PEM containing the normal public
 root bundle plus the CA that issued D3's certificate. LiteLLM uses that combined
 bundle for both D3 and completion-provider TLS verification.
@@ -193,11 +191,53 @@ bearer credential, TLS 1.2+, and a narrow route allowlist. Neither endpoint logs
 prompt content by default. Validate D3's coding-tier accuracy on representative
 internal prompts before relying on cost savings.
 
+## Remote BGE-M3 embeddings
+
+The development profile's embeddings (MCP tool filtering, the semantic cache,
+the `sme-knowledge` store, and Xberg auto-indexing) come from `BAAI/bge-m3` on
+the remote GPU host. Production does not use BGE-M3. The
+[`gpu-host/`](../gpu-host/README.md) stack serves it with Hugging Face Text
+Embeddings Inference next to D3-mini on the same GPU; that README explains the
+engine choice and the 48 GB memory budget.
+
+TEI's image and the model revision are pinned, the container runs unprivileged
+on a read-only root filesystem, and its API key guards every compute route,
+including `/v1/embeddings` and `/invocations`. Only `/health`, `/ping`,
+`/metrics`, and `/docs` answer without it. Inputs over 8,192 tokens are
+rejected rather than truncated, so a long prompt cannot match a cached answer
+for a shared prefix. The deployment reports success only after an
+unauthenticated request is refused and a real embedding has 1,024 dimensions.
+
+Set `BGE_M3_API_BASE` (for example `http://bge-m3.${STACK_DOMAIN}:8080/v1`) and
+the same `BGE_M3_API_KEY` in the dev host's `.env`. LiteLLM's `hosted_vllm`
+provider is its generic OpenAI-compatible adapter and works with TEI.
+
+### Plain HTTP: accepted risk
+
+By operator decision the endpoint uses plain HTTP, unlike D3, which keeps
+verified TLS. Anyone who can observe or intercept traffic between the dev host
+and the GPU host can read the API key and the embedded text, and can alter
+embeddings. The embedded text includes the user's request text for MCP tool
+filtering, prompts that opt in to the semantic cache, and Xberg chunks, which
+Presidio anonymizes before indexing. Compensating controls:
+
+- only the dev profile calls BGE-M3, and production traffic never does;
+- keep both hosts on the same private network segment, never route the port
+  over the Internet, and firewall it to the LiteLLM dev host;
+- TEI enforces the API key on every compute route;
+- rotate `BGE_M3_API_KEY` if the network is shared or the key may have been
+  observed.
+
+Switch to TLS before promoting BGE-M3 to production
+([D2P-008](dev-to-prod-promotion-register.md#d2p-008---bge-m3-embedding-service))
+or before the network between the hosts becomes untrusted. Only
+`BGE_M3_API_BASE` changes on the LiteLLM side.
+
 ## Development semantic response cache
 
 The development profile uses an authenticated, internal Qdrant service for an
-opt-in semantic response cache. LiteLLM embeds request messages with the local
-`bge-m3` vLLM model and reuses a previous complete response only when cosine
+opt-in semantic response cache. LiteLLM embeds request messages with the remote
+`bge-m3` model and reuses a previous complete response only when cosine
 similarity is at least `0.92`. A cache hit does not call the configured
 generation model.
 
@@ -230,7 +270,7 @@ permission-sensitive RAG, personalized responses, or time-sensitive queries.
 Semantically similar text can have materially different answers, and a false
 match replays the earlier answer without calling the model.
 
-After BGE-M3 vLLM and vLLM Semantic Router are healthy, run the end-to-end verification:
+After the remote BGE-M3 and D3-mini endpoints are healthy, run the end-to-end verification:
 
 ```sh
 ./scripts/verify-semantic-cache.py

@@ -160,13 +160,20 @@ blackbox `/health` probes.
 | `langfuse-clickhouse-logs` | ClickHouse (optional) | Warning-or-higher ClickHouse logs, rotated at 100 MB with three files per channel |
 | `langfuse-minio-data` | MinIO (optional) | Langfuse events and media objects |
 | `langfuse-redis-data` | Redis (optional) | Langfuse queues |
-| `bge-m3-vllm-cache` | vLLM | Downloaded BGE-M3 model artifacts |
 
-The D3-mini model and its cache live on a separate GPU host and are not part of
+The D3-mini model and its cache live on a separate GPU host, deployed by the
+separate [`gpu-host/`](gpu-host/README.md) Compose project, and are not part of
 this Compose project's persistence. That host must expose only authenticated
 Decisions routes over verified TLS and should firewall access to the LiteLLM host.
 Both LiteLLM containers mount a combined CA bundle containing the D3 issuing CA
 and standard public roots, so private-PKI trust does not break provider TLS.
+
+The development BGE-M3 embedding model and its cache live on the same remote GPU
+host, served by Text Embeddings Inference from the same `gpu-host/` project. By
+operator decision that endpoint uses plain HTTP; TEI's API key guards every
+compute route, and only `litellm-dev` calls it. Keep the link on a private network and
+firewall it to the LiteLLM dev host. See
+[Remote BGE-M3 embeddings](docs/search-extraction-and-caching.md#remote-bge-m3-embeddings).
 
 The PostgreSQL default database is `litellm_prod`; `postgres-init` creates
 `litellm_dev`. Do not reintroduce an unused default `litellm` database.

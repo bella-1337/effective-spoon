@@ -268,23 +268,21 @@ and it would let anyone who can reach the hostname create an account.
 
 ## Development model and data services
 
-These variables primarily affect the `dev` profile. Model, dtype, context length,
-or embedding dimension changes must be validated together; incompatible values
-can cause startup failures or corrupt semantic-cache expectations.
+These variables primarily affect the `dev` profile. Embedding model and dimension
+changes must be validated together with the remote BGE-M3 deployment;
+incompatible values can cause startup failures or corrupt semantic-cache
+expectations.
 
-### BGE-M3 vLLM
+### Remote BGE-M3 embeddings
+
+BGE-M3 runs on the remote GPU host. Its model, revision, dtype, context length,
+and container sizing are set by the separate [`gpu-host/`](../gpu-host/README.md) stack;
+see [Remote BGE-M3 embeddings](search-extraction-and-caching.md#remote-bge-m3-embeddings).
 
 | Variable | Default / format | Description and guidance |
 | --- | --- | --- |
-| `BGE_M3_MODEL` | `BAAI/bge-m3`; model identifier or approved local path | Model loaded by vLLM. Review model provenance, license, and remote-code requirements before changing it. |
-| `BGE_M3_REVISION` | `5617a9f61b028005a4858fdac845db406aefb181`; full 40-character Hugging Face commit SHA | Immutable model and tokenizer revision loaded by vLLM, so a cache rebuild cannot silently fetch different weights. Change it only together with `BGE_M3_MODEL` and the model entry in `docs/third-party-licences.md`, after reviewing the licence and file list of the new revision. |
-| `BGE_M3_SERVED_MODEL_NAME` | `bge-m3`; model alias | Name exposed by the internal OpenAI-compatible endpoint. Keep aligned with downstream model references. |
-| `BGE_M3_DTYPE` | `half`; vLLM dtype | Inference precision. Choose a dtype supported by the GPU and model. Lower precision reduces memory but can affect quality. |
-| `BGE_M3_MAX_MODEL_LEN` | `8192`; positive integer | Maximum token length accepted by the embedding server. Larger values increase memory pressure. |
-| `BGE_M3_VLLM_GPU_MEMORY_UTILIZATION` | `0.35`; decimal greater than `0` and at most `1` | Fraction of GPU memory available to vLLM. Increase gradually and leave headroom for the driver and other workloads. |
-| `BGE_M3_SHM_SIZE` | `2gb`; Docker size | Container shared-memory allocation. Increase only when required by runtime errors and available host memory. |
-| `BGE_M3_MEMORY_LIMIT` | `6g`; Docker size | Container memory limit. Set above expected model/runtime use while preserving host headroom. |
-| `BGE_M3_HEALTH_START_PERIOD` | `15m`; Docker duration | Grace period before failed health checks count during model download and load. Increase for cold caches or slow storage. |
+| `BGE_M3_API_BASE` | Required; HTTP base URL ending in `/v1`; example: `http://bge-m3.${STACK_DOMAIN}:8080/v1` | Remote BGE-M3 endpoint on Text Embeddings Inference, used by LiteLLM development and Xberg auto-indexing. LiteLLM appends `/embeddings`. Prod never calls it, but Compose requires a value on every host. Plain HTTP is an accepted development-only risk: keep it on a private network and firewall the port to the LiteLLM dev host. Switching to an `https://` URL needs no other change once the remote host terminates TLS. |
+| `BGE_M3_API_KEY` | Required secret; at least 32 URL-safe random characters | API key enforced by Text Embeddings Inference on the GPU host. Over plain HTTP it is visible to anyone who can observe the link, so rotate it on the GPU host and in `.env` together whenever the network may be shared. |
 
 ### Qdrant and semantic router
 

@@ -79,7 +79,6 @@ volumes:
   opensearch-ca: {}
   opensearch-node-certs: {}
   opensearch-admin-certs: {}
-  bge-m3-vllm-cache: {}
 
 services:
   # Services are grouped along the request path: edge, LiteLLM, guardrails and
@@ -333,8 +332,13 @@ services:
       VECTOR_DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}@vector-postgres:5432/vector_store
       QDRANT_API_BASE: http://qdrant:6333
       QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
+      # BGE-M3 runs on the remote GPU host over plain HTTP by operator decision;
+      # see docs/search-extraction-and-caching.md for the accepted risk.
+      BGE_M3_API_BASE: ${BGE_M3_API_BASE:?Set BGE_M3_API_BASE in .env}
+      BGE_M3_API_KEY: ${BGE_M3_API_KEY:?Set BGE_M3_API_KEY in .env}
       XBERG_INDEX_EMBEDDING_MODEL: ${XBERG_INDEX_EMBEDDING_MODEL:-hosted_vllm/bge-m3}
-      XBERG_INDEX_EMBEDDING_API_BASE: http://bge-m3-vllm:8000
+      XBERG_INDEX_EMBEDDING_API_BASE: ${BGE_M3_API_BASE:?Set BGE_M3_API_BASE in .env}
+      XBERG_INDEX_EMBEDDING_API_KEY: ${BGE_M3_API_KEY:?Set BGE_M3_API_KEY in .env}
       XBERG_AUTO_INDEX_ENABLED: ${XBERG_AUTO_INDEX_ENABLED:-false}
       PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
       PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000
@@ -354,8 +358,6 @@ services:
       langfuse-web:
         condition: service_healthy
         required: false
-      bge-m3-vllm:
-        condition: service_healthy
     cap_drop: [NET_RAW]
     networks: [edge, internal, xberg-sandbox]
     restart: unless-stopped
@@ -762,7 +764,8 @@ services:
     restart: "no"
 
   # ---------------------------------------------------------------------------
-  # Development model plane (dev profile): semantic cache, embeddings, RAG
+  # Development model plane (dev profile): semantic cache and RAG; BGE-M3
+  # embeddings run on the remote GPU host
   # ---------------------------------------------------------------------------
 
   qdrant:
@@ -790,57 +793,6 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
-
-  bge-m3-vllm:
-    logging: *default-logging
-    profiles: [dev]
-    image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
-    command:
-      - --model
-      - ${BGE_M3_MODEL:-BAAI/bge-m3}
-      - --revision
-      - ${BGE_M3_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
-      - --tokenizer-revision
-      - ${BGE_M3_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
-      - --served-model-name
-      - ${BGE_M3_SERVED_MODEL_NAME:-bge-m3}
-      - --runner
-      - pooling
-      - --dtype
-      - ${BGE_M3_DTYPE:-half}
-      - --max-model-len
-      - "${BGE_M3_MAX_MODEL_LEN:-8192}"
-      - --gpu-memory-utilization
-      - ${BGE_M3_VLLM_GPU_MEMORY_UTILIZATION:-0.35}
-    environment:
-      HF_HOME: /root/.cache/huggingface
-      VLLM_CACHE_ROOT: /tmp/vllm
-    volumes:
-      - bge-m3-vllm-cache:/root/.cache/huggingface
-    shm_size: ${BGE_M3_SHM_SIZE:-2gb}
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp:mode=1777
-    deploy:
-      resources:
-        limits:
-          memory: ${BGE_M3_MEMORY_LIMIT:-6g}
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    networks: [internal]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
-      interval: 20s
-      timeout: 10s
-      retries: 15
-      start_period: ${BGE_M3_HEALTH_START_PERIOD:-15m}
 
   litellm-pgvector:
     logging: *default-logging

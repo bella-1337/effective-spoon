@@ -30,11 +30,11 @@ The stack deploys a separate PostgreSQL 16 database with pgvector 0.8.7. Its
 named `pgvector-data` volume starts with an empty `sme-knowledge` store. In the development profile, Xberg extraction indexing is disabled by default.
 When the operator explicitly sets `XBERG_AUTO_INDEX_ENABLED=true`, successful
 Xberg `extract` calls with trusted principal attribution are anonymized through
-Presidio, chunked, and indexed in this store using local `bge-m3` embeddings.
+Presidio, chunked, and indexed in this store using remote `bge-m3` embeddings.
 Docker named volumes grow with stored data; Compose does not preallocate 50 GB.
 Monitor the volume and host filesystem and alert before either is exhausted.
 
-The schema uses 1,024-dimensional vectors for the local multilingual `bge-m3`
+The schema uses 1,024-dimensional vectors for the multilingual `bge-m3`
 embedding model, an HNSW cosine-distance index, JSON metadata filtering,
 cascading deletion by store, and content length constraints. The database is
 only reachable on the internal Compose network. A separate PostgreSQL exporter
@@ -43,7 +43,7 @@ exposes database metrics to Prometheus.
 The development profile builds BerriAI's official `litellm-pgvector` connector
 from commit `5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24`. The connector is internal
 only, authenticates every vector-store request, and uses development LiteLLM to
-embed search queries with the vLLM-backed `bge-m3` model. `sme-knowledge` is declared
+embed search queries with the remote `bge-m3` model. `sme-knowledge` is declared
 in `litellm/config.dev.yaml`, so it appears in the development LiteLLM Vector
 Stores UI and survives proxy database resets because the registration is
 repository-owned configuration.
@@ -90,7 +90,7 @@ an embedding-service or vector-database failure is logged while the original
 Xberg response is still returned to the caller. The task times out after three
 minutes and can be lost if the development proxy stops before it finishes; call
 `extract` again to retry. The callback is enabled only in development because
-the pgvector connector and local `bge-m3` service are development-only.
+the pgvector connector and the remote `bge-m3` service are development-only.
 
 Before production ingestion, select a reviewed component that provides:
 

@@ -42,7 +42,8 @@ model_list:
   - model_name: bge-m3
     litellm_params:
       model: hosted_vllm/bge-m3
-      api_base: http://bge-m3-vllm:8000
+      api_base: os.environ/BGE_M3_API_BASE
+      api_key: os.environ/BGE_M3_API_KEY
 
 vector_store_registry:
   - vector_store_name: SME shared knowledge

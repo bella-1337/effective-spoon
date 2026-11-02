@@ -253,7 +253,6 @@ def static_checks(report: Reporter) -> None:
         "litellm-dev": ["dev"],
         "litellm-pgvector": ["dev"],
         "litellm-demo-data-prod": ["demo"],
-        "bge-m3-vllm": ["dev"],
     }
     prod_env, dev_env = service_environment("litellm-prod"), service_environment("litellm-dev")
     prod_text_model, dev_text_model = json.dumps(service("litellm-prod")), json.dumps(service("litellm-dev"))
@@ -266,7 +265,9 @@ def static_checks(report: Reporter) -> None:
         "litellm_dev" not in prod_text_model, "litellm_prod" not in dev_text_model,
         "hosted_vllm/bge-m3" not in prod_text,
         "test-model" not in prod_text,
-        not service("bge-m3-vllm").get("ports"),
+        "api_base: os.environ/BGE_M3_API_BASE" in dev_text,
+        "api_key: os.environ/BGE_M3_API_KEY" in dev_text,
+        "BGE_M3_API_KEY" not in prod_text_model,
         "vllm-semantic-router" not in compose_text,
         "envoyproxy/envoy" not in compose_text,
     ))
@@ -734,7 +735,9 @@ def main() -> None:
                                                            "-e", "PG_VECTOR_API_BASE=http://upgrade-check-placeholder:8000",
                                                            "-e", "PG_VECTOR_API_KEY=upgrade-check-placeholder",
                                                            "-e", "QDRANT_API_BASE=http://qdrant:6333",
-                                                           "-e", "QDRANT_API_KEY=upgrade-check-placeholder"])
+                                                           "-e", "QDRANT_API_KEY=upgrade-check-placeholder",
+                                                           "-e", "BGE_M3_API_BASE=http://upgrade-check-placeholder:8000",
+                                                           "-e", "BGE_M3_API_KEY=upgrade-check-placeholder"])
         finally:
             if xberg_container:
                 run(["docker", "rm", "-f", xberg_container], check=False, capture=True)

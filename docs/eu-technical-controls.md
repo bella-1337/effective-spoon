@@ -118,6 +118,14 @@ uses verified TLS. Treat the isolated Docker networks as a compensating
 control for local use; enable authenticated internal TLS before using an
 untrusted or multi-host network.
 
+Two links leave the stack host for the remote GPU host. D3-mini uses verified
+TLS. The development-only BGE-M3 endpoint uses plain HTTP with an API key by
+operator decision, so dev request text sent for embedding crosses that network
+unencrypted; see
+[Remote BGE-M3 embeddings](search-extraction-and-caching.md#plain-http-accepted-risk)
+for the compensating controls and the requirement to switch to TLS before
+production use.
+
 ## Required deployment decisions outside this repository
 
 Before operating the stack with personal data, the responsible organisation

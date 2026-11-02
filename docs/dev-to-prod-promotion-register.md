@@ -214,15 +214,22 @@ Promotion plan:
 Tags: `register-added:v1.0.0`, `state:dev-only`,
 `stable-support:not-litellm-only`, `activation:service`.
 
+Dev calls BGE-M3 on the remote GPU host, served by Text Embeddings Inference
+from the `gpu-host/` stack over plain HTTP with an API key. The image and model
+revision are pinned in `gpu-host/compose.yml`.
+
 Promotion plan:
 
-1. Select a local or managed production embedding service.
-2. Pin the service image and model artifact; review provenance and license.
-3. Validate 1,024-dimensional output compatibility and multilingual quality.
-4. Capacity-test GPU memory, concurrency, cold starts, and request limits.
-5. Define availability and failure behavior for cache, vector search, and MCP
+1. Select a production embedding service: a separate instance of the remote
+   deployment or a managed service. Do not share the dev instance.
+2. Serve it over verified TLS, as D3 does; the dev endpoint's plain HTTP is an
+   accepted development-only risk.
+3. Review the pinned image and model artifact provenance and license.
+4. Validate 1,024-dimensional output compatibility and multilingual quality.
+5. Capacity-test GPU memory, concurrency, cold starts, and request limits.
+6. Define availability and failure behavior for cache, vector search, and MCP
    filtering.
-6. Add readiness, latency, GPU, saturation, and error alerts.
+7. Add readiness, latency, GPU, saturation, and error alerts.
 
 ### D2P-009 - Vector-store registry
 
@@ -316,7 +323,7 @@ Tags: `register-added:v1.0.0`, `state:shared`,
 Promotion plan:
 
 1. Deploy the pinned D3-mini CUDA image and model revision on the separate GPU
-   host with `scripts/deploy-d3-mini.sh`.
+   host with the `gpu-host/` stack (`gpu-host/deploy.py`).
 2. Benchmark memory, latency, throughput, and thermal stability on the actual
    16 GB GPU.
 3. Evaluate the four coding tiers on a representative, labeled prompt set.
