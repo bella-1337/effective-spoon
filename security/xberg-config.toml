@@ -1,2 +1,9 @@
+# Xberg extracts untrusted, caller-chosen inputs. Local paths and file:// URIs
+# would expose the container filesystem to any MCP caller or injected prompt,
+# so only uploaded bytes and allowlisted remote URLs are accepted.
+[url]
+allow_local_file_inputs = false
+allow_file_uris = false
+
 [url.crawl.ssrf]
 allowlist = [{ type = "exact", value = "docs.xberg.io" }]

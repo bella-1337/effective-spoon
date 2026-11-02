@@ -2,3 +2,57 @@ tls:
   certificates:
     - certFile: /certs/tls.crt
       keyFile: /certs/tls.key
+  options:
+    # Applies to every websecure router. TLS 1.3 suites are not configurable
+    # and are always AEAD; the TLS 1.2 list excludes CBC and SHA-1 suites and
+    # matches the Mozilla "intermediate" profile, which current corporate
+    # clients support. sniStrict stays off so internal monitors and clients
+    # that connect by IP address still complete the handshake.
+    default:
+      minVersion: VersionTLS12
+      sniStrict: false
+      cipherSuites:
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+        - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+
+http:
+  middlewares:
+    # Attached to the websecure entrypoint in docker-compose.yml, so every
+    # route, including optional Grafana and Langfuse, inherits them.
+    edge-security-headers:
+      headers:
+        # One day: browsers still refuse SSL stripping for daily users, but an
+        # expired or replaced private (mkcert) certificate cannot lock users
+        # out for long.
+        stsSeconds: 86400
+        stsIncludeSubdomains: false
+        contentTypeNosniff: true
+        referrerPolicy: strict-origin-when-cross-origin
+
+    # Runaway-client guards, sized for an internal deployment of about 200
+    # users. The source is the TCP peer, and Traefik ignores client-supplied
+    # X-Forwarded-For, so everyone behind one VPN, NAT, or corporate load
+    # balancer (and every client on Docker Desktop) shares these budgets.
+    # Normal use, including dashboards and parallel coding agents, stays far
+    # below them.
+    edge-rate-limit:
+      rateLimit:
+        average: 500
+        period: 1s
+        burst: 2000
+    edge-in-flight:
+      inFlightReq:
+        amount: 1024
+
+    # Request-body cap for the LiteLLM routers. 100 MiB covers base64 images,
+    # audio, and documents in chat requests. The buffering middleware also
+    # buffers responses, which breaks server-sent event streaming, so LiteLLM
+    # labels route only requests whose body is >= 10 MB or of unknown length
+    # through it. docs/edge-and-abuse-protection.md documents this limit.
+    litellm-body-limit:
+      buffering:
+        maxRequestBodyBytes: 104857600

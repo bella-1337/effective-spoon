@@ -1,6 +1,7 @@
 include:
   - modules/search.yaml
   - modules/guardrails/presidio.yaml
+  - modules/guardrails/prompt-injection.yaml
   - modules/policies/eu-data-protection.yaml
 
 model_list:
@@ -51,6 +52,13 @@ litellm_settings:
   request_timeout: 120
   turn_off_message_logging: true
   store_audit_logs: true
+  # Safety net for keys created without explicit limits, so a runaway script
+  # cannot monopolize the proxy. Sized well above a busy coding agent; set
+  # explicit per-key or team values for shared service keys. Spend is
+  # governed by budgets, so no default token limit is applied.
+  default_key_generate_params:
+    max_parallel_requests: 32
+    rpm_limit: 1200
   callbacks:
     - modules.langfuse_user_attribution.proxy_handler_instance
     - langfuse_otel

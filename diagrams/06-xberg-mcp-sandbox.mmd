@@ -6,9 +6,9 @@ flowchart TD
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @mode architecture
   %% @subtitle LiteLLM is the authentication boundary; Xberg fetches remote documents only through an allowlisting proxy
-  %% @card cyan | Request path | Clients call /mcp-rest/tools/call on LiteLLM, never Xberg directly | Only extract, detect_mime_type, get_version, and list_formats are exposed | Cache mutation and warming tools stay hidden
-  %% @card violet | Sandbox | Xberg has no route to the internal network or the Internet | It has no published host port | In dev, extraction results can feed opt-in pgvector auto-indexing
-  %% @card rose | Egress control | Squid denies private, loopback, link-local, and unlisted hosts | Review every change to security/xberg-egress-allowlist.txt | Xberg is a server-side fetcher — grant MCP access only to trusted keys
+  %% @card cyan | Request path | Clients call /mcp-rest/tools/call on LiteLLM, never Xberg directly | Only extract, detect_mime_type, get_version, and list_formats are exposed | Explicit injection phrases in tool results are redacted before return
+  %% @card violet | Sandbox | Xberg has no route to the internal network or the Internet | Local paths and file:// URIs are disabled; only uploads and allowlisted URLs | In dev, extraction results can feed opt-in pgvector auto-indexing
+  %% @card rose | Egress control | Squid allows HTTPS CONNECT to allowlisted hosts only and denies private ranges | xberg-dns answers NXDOMAIN for every unlisted name, so lookups cannot exfiltrate data | Keep the proxy, DNS, and Xberg allowlists aligned; grant MCP access only to trusted keys
   %% @tier 0: AG
   %% @tier 1: TR
   %% @tier 2: LL
@@ -23,26 +23,26 @@ flowchart TD
   end
   subgraph ST["LiteLLM stack — Docker Compose host"]
     TR["Traefik<br/>HTTPS"]:::cloud
-    LL["LiteLLM gateway<br/>allowed_tools: extract, list_formats …"]:::backend
+    LL["LiteLLM gateway<br/>allowed_tools · tool-output injection screen"]:::backend
     subgraph SBX["xberg-sandbox network"]
       XB["Xberg MCP<br/>Streamable HTTP :8001"]:::backend
     end
     subgraph EGR["egress network"]
-      DNS["xberg-dns<br/>bind9 relay"]:::security
-      SQ["Squid egress proxy<br/>destination allowlist"]:::security
+      DNS["xberg-dns<br/>allowlist-only resolver"]:::security
+      SQ["Squid egress proxy<br/>HTTPS-only allowlist"]:::security
     end
   end
   subgraph EX["External services — outside the stack"]
     PDNS["Public DNS<br/>name resolution"]:::external
     ALW["Allowlisted websites<br/>e.g. docs.xberg.io"]:::external
-    BLK["Other destinations<br/>private · loopback · link-local"]:::external
+    BLK["Other destinations<br/>private · unlisted · plain HTTP"]:::external
   end
 
   AG ==>|"HTTPS + virtual key"| TR
   TR ==> LL
   LL ==>|"MCP tools/call"| XB
-  XB --> DNS
-  XB ==>|"HTTP(S) via proxy"| SQ
+  XB -->|"allowlisted names only"| DNS
+  XB ==>|"HTTPS CONNECT via proxy"| SQ
   DNS --> PDNS
   SQ ==> ALW
   SQ ---|"denied"| BLK

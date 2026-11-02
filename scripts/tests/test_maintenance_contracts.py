@@ -406,5 +406,161 @@ class MaintenanceContractTests(unittest.TestCase):
             )
 
 
+class EdgeAndAbuseContractTests(unittest.TestCase):
+    """Regression guards for the DDoS, MITM, and prompt-injection hardening."""
+
+    REPO = SCRIPTS.parent
+
+    def _copy_policy_files(self, root: Path) -> None:
+        for relative in (
+            "security/xberg-config.toml",
+            "security/xberg-egress-squid.conf",
+            "security/xberg-egress-allowlist.txt",
+            "security/xberg-dns-zones.conf",
+            "security/xberg-dns-deny-root.zone",
+            "litellm/config.prod.yaml",
+            "litellm/config.dev.yaml",
+            "litellm/modules/guardrails/presidio.yaml",
+            "litellm/modules/guardrails/prompt-injection.yaml",
+        ):
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text((self.REPO / relative).read_text(encoding="utf-8"), encoding="utf-8")
+
+    def _replace(self, path: Path, old: str, new: str) -> None:
+        source = path.read_text(encoding="utf-8")
+        self.assertIn(old, source)
+        path.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+    def test_current_policy_files_pass(self) -> None:
+        self.assertEqual(contracts.xberg_sandbox_policy_failures(self.REPO), [])
+        self.assertEqual(contracts.litellm_guardrail_failures(self.REPO), [])
+        dynamic = (self.REPO / "traefik" / "dynamic.yml").read_text(encoding="utf-8")
+        self.assertEqual(contracts.traefik_edge_hardening_failures(dynamic), [])
+
+    def test_traefik_edge_hardening_rejects_weak_tls_and_missing_limits(self) -> None:
+        weak = (
+            "tls:\n  options:\n    default:\n      minVersion: VersionTLS10\n"
+            "      cipherSuites:\n        - TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA\n"
+        )
+        failures = contracts.traefik_edge_hardening_failures(weak)
+        for expected in (
+            "require TLS 1.2",
+            "AEAD-only",
+            "HSTS",
+            "edge-rate-limit",
+            "litellm-body-limit",
+        ):
+            self.assertTrue(any(expected in failure for failure in failures), (expected, failures))
+
+    def test_compose_rejects_removed_edge_controls(self) -> None:
+        large_body_rule = (
+            "Host(`llm.example.test`) && (Method(`POST`)) && "
+            "!HeaderRegexp(`Content-Length`, `^[0-9]{1,7}$`)"
+        )
+        hardened = {
+            "traefik": {
+                "command": [
+                    "--entrypoints.websecure.http.middlewares="
+                    "edge-security-headers@file,edge-rate-limit@file,edge-in-flight@file"
+                ],
+                "cap_drop": ["NET_RAW"],
+            },
+            "litellm-prod": {
+                "cap_drop": ["NET_RAW"],
+                "labels": {
+                    "traefik.http.routers.litellm-prod-large-body.rule": large_body_rule,
+                    "traefik.http.routers.litellm-prod-large-body.middlewares": "litellm-body-limit@file",
+                    "traefik.http.routers.litellm-prod-large-body.service": "litellm-prod",
+                },
+            },
+            "presidio-analyzer": {"environment": {"WORKERS": "2"}},
+            "presidio-anonymizer": {"environment": {"WORKERS": "2"}},
+        }
+        self.assertEqual(contracts.edge_and_abuse_compose_failures(hardened), [])
+
+        regressed = {
+            "traefik": {
+                "command": [
+                    "--entrypoints.websecure.http.middlewares=edge-security-headers@file",
+                    "--entrypoints.websecure.forwardedheaders.insecure=true",
+                ]
+            },
+            "litellm-prod": {"labels": {}},
+            "presidio-analyzer": {"environment": {"WORKERS": "1"}},
+        }
+        failures = contracts.edge_and_abuse_compose_failures(regressed)
+        for expected in (
+            "edge-rate-limit",
+            "forwarded headers",
+            "traefik must drop NET_RAW",
+            "litellm-prod must drop NET_RAW",
+            "large-body",
+            "presidio-analyzer needs at least two workers",
+        ):
+            self.assertTrue(any(expected in failure for failure in failures), (expected, failures))
+
+    def test_xberg_policy_rejects_file_access_plain_http_and_open_dns(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_policy_files(root)
+            self.assertEqual(contracts.xberg_sandbox_policy_failures(root), [])
+
+            security = root / "security"
+            self._replace(security / "xberg-config.toml", "allow_file_uris = false", "allow_file_uris = true")
+            self._replace(
+                security / "xberg-egress-squid.conf",
+                "http_access deny !CONNECT\n",
+                "acl Safe_ports port 80\n",
+            )
+            self._replace(
+                security / "xberg-egress-squid.conf",
+                "http_access deny !allowed_domains\n",
+                "",
+            )
+            self._replace(security / "xberg-dns-zones.conf", "type primary;", "type hint;")
+            (security / "xberg-egress-allowlist.txt").write_text(
+                ".docs.xberg.io\n.example.org\n", encoding="utf-8"
+            )
+
+            failures = contracts.xberg_sandbox_policy_failures(root)
+        for expected in (
+            "local path and file://",
+            "HTTPS CONNECT",
+            "plaintext port 80",
+            "before resolving",
+            "authoritative empty root",
+            "no DNS forward zone: example.org",
+        ):
+            self.assertTrue(any(expected in failure for failure in failures), (expected, failures))
+
+    def test_litellm_guardrails_reject_missing_injection_screen_and_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_policy_files(root)
+            self.assertEqual(contracts.litellm_guardrail_failures(root), [])
+
+            modules = root / "litellm" / "modules" / "guardrails"
+            (modules / "prompt-injection.yaml").unlink()
+            self._replace(
+                modules / "presidio.yaml",
+                "presidio_analyze_chunk_size_bytes: 100000",
+                "presidio_analyze_chunk_size_bytes: 500000",
+            )
+            self._replace(
+                root / "litellm" / "config.prod.yaml",
+                "    max_parallel_requests: 32\n",
+                "",
+            )
+
+            failures = contracts.litellm_guardrail_failures(root)
+        for expected in (
+            "default-on prompt-injection guardrail",
+            "200 KB or less",
+            "config.prod.yaml must set default per-key request limits",
+        ):
+            self.assertTrue(any(expected in failure for failure in failures), (expected, failures))
+
+
 if __name__ == "__main__":
     unittest.main()
