@@ -145,10 +145,12 @@ async def _embed_chunks(chunks: list[str]) -> list[list[float]]:
     vectors: list[list[float]] = []
     model = os.environ["XBERG_INDEX_EMBEDDING_MODEL"]
     api_base = os.environ["XBERG_INDEX_EMBEDDING_API_BASE"]
+    api_key = os.environ.get("XBERG_INDEX_EMBEDDING_API_KEY") or None
     for start in range(0, len(chunks), EMBEDDING_BATCH_SIZE):
         response = await litellm.aembedding(
             model=model,
             api_base=api_base,
+            api_key=api_key,
             input=chunks[start : start + EMBEDDING_BATCH_SIZE],
             timeout=60,
         )

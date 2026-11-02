@@ -174,14 +174,40 @@ ROI changes additionally require rerunning `postgres-init` and
 pseudonyms are indexed.
 Retention changes do not recover data already deleted.
 
+## Resource limits
+
+Docker CPU and memory caps per host. They are limits, not reservations: an idle
+service does not hold its cap, and a service that exceeds its memory cap is
+OOM-killed and restarted. Memory caps include the page cache the container
+uses, so a tight database cap mainly costs cache hits. Every long-running
+service without its own sizing variable belongs to one tier. One-shot setup
+jobs are not capped. The defaults suit the dev host; the README lists the
+[prod host values](../README.md#resource-limits).
+
+| Variable | Default / format | Description and guidance |
+| --- | --- | --- |
+| `RESOURCE_TINY_CPU_LIMIT` | `0.5`; positive decimal CPUs | Socket proxies, PostgreSQL and pgvector exporters, node-exporter, and blackbox. |
+| `RESOURCE_TINY_MEMORY_LIMIT` | `256m`; Docker size | Memory cap for the tiny tier. These services idle below 50 MiB. |
+| `RESOURCE_SMALL_CPU_LIMIT` | `1`; positive decimal CPUs | Traefik, Presidio Anonymizer, SearXNG, the Xberg egress proxy, `opensearch-bridge`, cAdvisor, `litellm-pgvector`, Grafana, and Langfuse Redis and MinIO. Raise for Traefik when TLS handshakes throttle at peak. |
+| `RESOURCE_SMALL_MEMORY_LIMIT` | `1g`; Docker size | Memory cap for the small tier. Raise with `PRESIDIO_ANONYMIZER_WORKERS` (about 80 MiB each). |
+| `RESOURCE_MEDIUM_CPU_LIMIT` | `2`; positive decimal CPUs | Prometheus, Alloy, OpenSearch Dashboards, Loki, `alloy-loki`, and Langfuse web and worker. Also caps Data Prepper CPU. |
+| `RESOURCE_MEDIUM_MEMORY_LIMIT` | `2g`; Docker size | Memory cap for the medium tier. Prometheus memory grows with active series; Alloy idles at about 0.5 GiB. |
+| `RESOURCE_DATABASE_CPU_LIMIT` | `2`; positive decimal CPUs | PostgreSQL, vector-postgres, Langfuse PostgreSQL, and ClickHouse. Also caps OpenSearch CPU. |
+| `RESOURCE_DATABASE_MEMORY_LIMIT` | `4g`; Docker size | Memory cap for each database in the tier. ClickHouse sizes its own memory and caches from this cap. Larger values let the databases keep more data in cache. |
+| `LITELLM_CPU_LIMIT` | `2`; positive decimal CPUs | Cap for each LiteLLM proxy (`litellm-prod` and `litellm-dev`). LiteLLM recommends 1 CPU per worker; the proxy runs one worker. |
+| `LITELLM_MEMORY_LIMIT` | `4g`; Docker size | Memory cap for each LiteLLM proxy. LiteLLM recommends at least 4 GiB per worker: the Prisma query engine keeps its largest-ever allocation, and the 2026-11 probe grew the proxy to 2.6 GiB with four large unauthenticated bodies. |
+
+Recreate the affected services after changing a value. Check `docker stats`
+after a change and leave headroom above observed peaks.
+
 ## OpenSearch observability
 
 | Variable | Default / format | Description and guidance |
 | --- | --- | --- |
 | `OPENSEARCH_JAVA_HEAP` | `1g`; JVM size | Heap for the single OpenSearch node (`-Xms` and `-Xmx`). Keep it at or below half of `OPENSEARCH_MEMORY_LIMIT`. |
-| `OPENSEARCH_MEMORY_LIMIT` | `3g`; Docker size | Container memory limit for OpenSearch. |
+| `OPENSEARCH_MEMORY_LIMIT` | `3g`; Docker size | Container memory limit for OpenSearch. Its CPU cap is `RESOURCE_DATABASE_CPU_LIMIT`. |
 | `DATA_PREPPER_JAVA_OPTS` | `-Xms256m -Xmx512m`; JVM options | Data Prepper JVM options. |
-| `DATA_PREPPER_MEMORY_LIMIT` | `1g`; Docker size | Container memory limit for Data Prepper. |
+| `DATA_PREPPER_MEMORY_LIMIT` | `2g`; Docker size | Container memory limit for Data Prepper. Keep it at least 1 GiB above the `-Xmx` heap for off-heap buffers; Data Prepper uses about 1 GiB with the default heap. Its CPU cap is `RESOURCE_MEDIUM_CPU_LIMIT`. |
 | `OPENSEARCH_LOG_RETENTION_DAYS` | `7`; days | ISM deletes `litellm-logs-*` daily indices after this age (matches Loki). |
 | `OPENSEARCH_METRICS_RETENTION_DAYS` | `15`; days | ISM deletes `litellm-metrics-*` and `litellm-alert-state-*` after this age (matches Prometheus). |
 | `OPENSEARCH_USAGE_RETENTION_DAYS` | `180`; days | `opensearch-bridge` deletes spend, provider-error, and audit copies older than this (matches LiteLLM's spend-log cleanup). It is also the initial backfill window. |
@@ -242,23 +268,21 @@ and it would let anyone who can reach the hostname create an account.
 
 ## Development model and data services
 
-These variables primarily affect the `dev` profile. Model, dtype, context length,
-or embedding dimension changes must be validated together; incompatible values
-can cause startup failures or corrupt semantic-cache expectations.
+These variables primarily affect the `dev` profile. Embedding model and dimension
+changes must be validated together with the remote BGE-M3 deployment;
+incompatible values can cause startup failures or corrupt semantic-cache
+expectations.
 
-### BGE-M3 vLLM
+### Remote BGE-M3 embeddings
+
+BGE-M3 runs on the remote GPU host. Its model, revision, dtype, context length,
+and container sizing are set by the separate [`gpu-host/`](../gpu-host/README.md) stack;
+see [Remote BGE-M3 embeddings](search-extraction-and-caching.md#remote-bge-m3-embeddings).
 
 | Variable | Default / format | Description and guidance |
 | --- | --- | --- |
-| `BGE_M3_MODEL` | `BAAI/bge-m3`; model identifier or approved local path | Model loaded by vLLM. Review model provenance, license, and remote-code requirements before changing it. |
-| `BGE_M3_REVISION` | `5617a9f61b028005a4858fdac845db406aefb181`; full 40-character Hugging Face commit SHA | Immutable model and tokenizer revision loaded by vLLM, so a cache rebuild cannot silently fetch different weights. Change it only together with `BGE_M3_MODEL` and the model entry in `docs/third-party-licences.md`, after reviewing the licence and file list of the new revision. |
-| `BGE_M3_SERVED_MODEL_NAME` | `bge-m3`; model alias | Name exposed by the internal OpenAI-compatible endpoint. Keep aligned with downstream model references. |
-| `BGE_M3_DTYPE` | `half`; vLLM dtype | Inference precision. Choose a dtype supported by the GPU and model. Lower precision reduces memory but can affect quality. |
-| `BGE_M3_MAX_MODEL_LEN` | `8192`; positive integer | Maximum token length accepted by the embedding server. Larger values increase memory pressure. |
-| `BGE_M3_VLLM_GPU_MEMORY_UTILIZATION` | `0.35`; decimal greater than `0` and at most `1` | Fraction of GPU memory available to vLLM. Increase gradually and leave headroom for the driver and other workloads. |
-| `BGE_M3_SHM_SIZE` | `2gb`; Docker size | Container shared-memory allocation. Increase only when required by runtime errors and available host memory. |
-| `BGE_M3_MEMORY_LIMIT` | `6g`; Docker size | Container memory limit. Set above expected model/runtime use while preserving host headroom. |
-| `BGE_M3_HEALTH_START_PERIOD` | `15m`; Docker duration | Grace period before failed health checks count during model download and load. Increase for cold caches or slow storage. |
+| `BGE_M3_API_BASE` | Required; HTTPS base URL ending in `/v1`; example: `https://bge-m3.${STACK_DOMAIN}:9443/v1` | Remote BGE-M3 endpoint behind the GPU host's TLS proxy, used by LiteLLM development and Xberg auto-indexing. LiteLLM appends `/embeddings` and verifies the certificate against `GPU_HOST_CA_BUNDLE`. The hostname must be in the GPU host's certificate. Prod never calls it, but Compose requires a value on every host. |
+| `BGE_M3_API_KEY` | Required secret; at least 32 URL-safe random characters | API key enforced by Text Embeddings Inference on the GPU host. Rotate it on the GPU host and in `.env` together. |
 
 ### Qdrant and semantic router
 
@@ -269,7 +293,7 @@ can cause startup failures or corrupt semantic-cache expectations.
 | `QDRANT_MEMORY_LIMIT` | `2g`; Docker size | Memory limit for Qdrant. Keep enough headroom for indexes and query peaks. |
 | `D3_DECISION_API_BASE` | Required; HTTPS base URL; example: `https://d3-mini.${STACK_DOMAIN}:8443` | Operator-controlled remote D3-mini endpoint, without `/v1/systemone`. LiteLLM appends the path. Allowlist this destination in network policy and use a certificate trusted by the LiteLLM host. |
 | `D3_DECISION_API_KEY` | Required secret, at least 32 random characters | Bearer credential shared only by LiteLLM and the remote D3 listener. Rotate it independently of LiteLLM client keys. |
-| `D3_DECISION_CA_BUNDLE` | Required host path to a PEM bundle | CA bundle mounted into both LiteLLM containers. It must include the CA that issued the D3 certificate **and** the normal public roots needed by completion providers; setting `SSL_CERT_FILE` to a private CA alone would break those providers. |
+| `GPU_HOST_CA_BUNDLE` | Required host path to a PEM bundle; example: `./traefik/certs/gpu-host-ca-bundle.pem` | Bundle mounted into both LiteLLM containers as `SSL_CERT_FILE`. Build it with `scripts/build-gpu-host-ca-bundle.py --root-ca rootCA.pem` from the GPU host's mkcert CA. It must hold that CA **and** the normal public roots needed by completion providers; a private CA alone would break those providers. Rebuild it and recreate both proxies when the GPU host's CA changes. Replaces `D3_DECISION_CA_BUNDLE`. |
 
 ### Presidio, Xberg, and pgvector connector
 
@@ -277,6 +301,7 @@ can cause startup failures or corrupt semantic-cache expectations.
 | --- | --- | --- |
 | `PRESIDIO_NLP_ENGINE` | `spacy`; Presidio engine name | NLP engine used by Presidio Analyzer. A different engine requires compatible analyzer configuration and image support. |
 | `PRESIDIO_SUPPORTED_LANGUAGES` | `en`; comma-separated language codes supported by the image | Languages exposed by Presidio. Adding a language also requires compatible NLP models and recognizers. |
+| `PRESIDIO_ANALYZER_CPU_LIMIT` | `2`; positive decimal CPUs | CPU limit for Presidio Analyzer, which scans every guarded prompt. Keep it at least equal to `PRESIDIO_ANALYZER_WORKERS`. |
 | `PRESIDIO_ANALYZER_MEMORY_LIMIT` | `2g`; Docker size | Memory limit for Presidio Analyzer. Increase when adding models or languages, and by about 0.5 GiB for each analyzer worker above two. |
 | `PRESIDIO_ANALYZER_WORKERS` | `2`; integer >= 2 | Synchronous gunicorn workers for Presidio Analyzer. One worker lets a single large prompt stall PII masking for every caller. Each worker loads the spaCy model; raise `PRESIDIO_ANALYZER_MEMORY_LIMIT` with it. See [Edge and abuse protection](edge-and-abuse-protection.md). |
 | `PRESIDIO_ANONYMIZER_WORKERS` | `2`; integer >= 2 | Synchronous gunicorn workers for Presidio Anonymizer (about 80 MiB each). Keep at least two so an oversized request cannot block masking until gunicorn's 30-second worker timeout. |

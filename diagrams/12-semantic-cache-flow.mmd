@@ -8,7 +8,7 @@ flowchart TD
 
   S(["DEV CHAT COMPLETION"])
   OPT{"cache.use-cache is true?"}
-  EMB["Embed messages with local bge-m3"]
+  EMB["Embed messages with remote bge-m3"]
   Q["Search Qdrant in the end-user scope"]
   HIT{"Similarity at least 0.92?"}
   REP["Replay cached response with similarity header"]

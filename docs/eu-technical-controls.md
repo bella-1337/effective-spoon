@@ -118,6 +118,12 @@ uses verified TLS. Treat the isolated Docker networks as a compensating
 control for local use; enable authenticated internal TLS before using an
 untrusted or multi-host network.
 
+Two links leave the stack host for the remote GPU host, D3-mini and the
+development-only BGE-M3 endpoint. Both use verified TLS with a certificate from
+the GPU host's dedicated mkcert CA, which LiteLLM trusts through
+`GPU_HOST_CA_BUNDLE`, plus a separate API key each; see the
+[GPU host guide](../gpu-host/README.md).
+
 ## Required deployment decisions outside this repository
 
 Before operating the stack with personal data, the responsible organisation

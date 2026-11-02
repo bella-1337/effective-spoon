@@ -439,9 +439,6 @@ WHERE vector_store_id = 'sme-knowledge'
 
     def check_dev_vllm_embedding(self) -> int:
         if not self.dev_running: return self.skip("dev-vllm-embedding: litellm-dev is not running")
-        if not service_is_running("bge-m3-vllm"):
-            self.fail_("dev-vllm-embedding: required bge-m3-vllm service is not running")
-            return 1
         headers = self.auth_headers()
         if not headers: self.fail_("dev-vllm-embedding: could not read LITELLM_MASTER_KEY"); return 1
         dimensions = 0

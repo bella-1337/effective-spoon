@@ -315,11 +315,11 @@ the read-only `LiteLLM_ManagementROIConfig` table.
 
 ## Demonstration data and telemetry stores
 
-D3 classifier calls flow through LiteLLM and therefore use the normal LiteLLM
-request, failure, latency, spend-log, and trace surfaces. The external GPU host
-is intentionally not scraped across the trust boundary by this Compose stack;
-its owner must monitor GPU memory, utilization, temperature, process readiness,
-and TLS certificate expiry.
+D3 classifier and dev BGE-M3 embedding calls flow through LiteLLM and therefore
+use the normal LiteLLM request, failure, latency, spend-log, and trace surfaces.
+The external GPU host is intentionally not scraped across the trust boundary by
+this Compose stack; its owner must monitor GPU memory, utilization, temperature,
+process readiness, and D3's TLS certificate expiry.
 
 The development profile automatically seeds two persistent demonstration teams
 and four users after its database schema is ready. Production seeds the same

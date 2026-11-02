@@ -42,7 +42,7 @@ dashed boxes are decisions.
 | [Langfuse profile](04-langfuse-profile.html) | [04-langfuse-profile.mmd](04-langfuse-profile.mmd) | The optional Langfuse services and the `langfuse_otel` trace path |
 | [Grafana profile](05-grafana-profile.html) | [05-grafana-profile.mmd](05-grafana-profile.mmd) | The optional Grafana, Loki, and `alloy-loki` services and their read-only data sources |
 | [Xberg MCP sandbox](06-xberg-mcp-sandbox.html) | [06-xberg-mcp-sandbox.mmd](06-xberg-mcp-sandbox.mmd) | MCP extraction through LiteLLM, the sandbox network, and allowlisted egress |
-| [Development model plane](07-dev-model-plane.html) | [07-dev-model-plane.mmd](07-dev-model-plane.mmd) | The dev-only Qdrant cache, BGE-M3 embeddings, and pgvector knowledge store |
+| [Development model plane](07-dev-model-plane.html) | [07-dev-model-plane.mmd](07-dev-model-plane.mmd) | The dev-only Qdrant cache, remote BGE-M3 embeddings, and pgvector knowledge store |
 | [Image-security monitor](08-image-security.html) | [08-image-security.mmd](08-image-security.mmd) | Trivy and CISA KEV scanning, private evidence, and the alert path |
 | [Data layer and backups](09-data-layer.html) | [09-data-layer.mmd](09-data-layer.mmd) | Database owners, read-only readers, and the backup path to off-host storage |
 | [Production profile](21-prod-profile.html) | [21-prod-profile.mmd](21-prod-profile.mmd) | Everything the `prod` profile runs, with its clients and external providers |

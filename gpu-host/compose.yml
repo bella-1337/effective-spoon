@@ -1,0 +1,139 @@
+# Remote GPU host: D3-mini decisions and BGE-M3 embeddings sharing one GPU,
+# both published only through the TLS proxy with a certificate from this host's
+# dedicated mkcert CA. Deploy with ./deploy.py, which renders the secrets under
+# state/ and passes state/compose.env.
+name: ${COMPOSE_PROJECT_NAME:-gpu-models}
+
+x-hardening: &hardening
+  user: "${HOST_UID:?Run ./deploy.py to render state/compose.env}:${HOST_GID:?Run ./deploy.py to render state/compose.env}"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # D3-mini runs on the vLLM Semantic Router model runtime, the only engine that
+  # serves its Decisions API. It allocates GPU memory on demand.
+  d3-mini:
+    <<: *hardening
+    logging: *logging
+    image: ghcr.io/vllm-project/semantic-router/vllm-sr-cuda:latest@sha256:2fbea0e18f86d0d94c5bf4084019bbd0acbc9dc20919367baba8befd8e27fd63
+    command: ["/config/config.yaml"]
+    environment:
+      VLLM_SR_GATEWAY: standalone
+      HF_HOME: /app/models
+      HOME: /tmp
+    volumes:
+      - ./state/d3/config.yaml:/config/config.yaml:ro
+      - ./state/d3/models:/app/models
+      - ./state/d3/runtime:/app/.vllm-sr
+    tmpfs:
+      - /tmp:mode=1777
+    shm_size: ${D3_SHM_SIZE:-4gb}
+    deploy:
+      resources:
+        limits:
+          memory: ${D3_MEMORY_LIMIT:-16g}
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${GPU_DEVICE_ID:-0}"]
+              capabilities: [gpu]
+    networks: [d3]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8899/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 120
+      start_period: 30s
+
+  # BGE-M3 on Hugging Face Text Embeddings Inference. Its API key guards every
+  # compute route; only /health, /ping, /metrics, and /docs answer without it,
+  # and the TLS proxy publishes only /v1/embeddings and /health.
+  bge-m3:
+    <<: *hardening
+    logging: *logging
+    image: ghcr.io/huggingface/text-embeddings-inference:cuda-1.9.4@sha256:c831a5cedb89d62f7b0fdb59e2d73e8c30e10c1d5006897640e2ce58a71cedba
+    command:
+      - --model-id
+      - BAAI/bge-m3
+      - --revision
+      - 5617a9f61b028005a4858fdac845db406aefb181
+      - --served-model-name
+      - bge-m3
+      - --port
+      - "8080"
+      - --max-batch-tokens
+      - "${BGE_M3_MAX_BATCH_TOKENS:-16384}"
+      - --max-client-batch-size
+      - "${BGE_M3_MAX_CLIENT_BATCH_SIZE:-64}"
+      - --payload-limit
+      - "8000000"
+      # Reject inputs over 8,192 tokens instead of embedding a truncated prefix,
+      # which could produce false semantic-cache matches.
+      - --auto-truncate
+      - "false"
+      - --json-output
+    env_file:
+      - ./state/bge-m3.env
+    environment:
+      HUGGINGFACE_HUB_CACHE: /data
+      HOME: /tmp
+    volumes:
+      - ./state/bge-m3/data:/data
+    tmpfs:
+      - /tmp:mode=1777
+    deploy:
+      resources:
+        limits:
+          memory: ${BGE_M3_MEMORY_LIMIT:-8g}
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${GPU_DEVICE_ID:-0}"]
+              capabilities: [gpu]
+    networks: [bge-m3]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 15m
+
+  # Terminates TLS for both models and publishes only their allowlisted routes:
+  # D3-mini on D3_PUBLIC_PORT and BGE-M3 on BGE_M3_PUBLIC_PORT. Upstreams are
+  # resolved per request, so neither model's start-up blocks the other.
+  tls:
+    <<: *hardening
+    logging: *logging
+    image: docker.io/nginxinc/nginx-unprivileged:1.29.5-alpine@sha256:42a7d7f2ee23e9f5a1dcdf3647ba5c585bbd18f79e79cd817e70e8cd61c55779
+    ports:
+      - "${D3_BIND_ADDRESS:-0.0.0.0}:${D3_PUBLIC_PORT:-8443}:8443"
+      - "${BGE_M3_BIND_ADDRESS:-0.0.0.0}:${BGE_M3_PUBLIC_PORT:-9443}:9443"
+    volumes:
+      - ./nginx/tls.conf:/etc/nginx/nginx.conf:ro
+      - ./state/tls:/run/secrets:ro
+    tmpfs:
+      - /tmp:mode=1777
+      - /var/cache/nginx:mode=0750
+    networks: [d3, bge-m3]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8443"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+
+networks:
+  d3:
+    driver: bridge
+  bge-m3:
+    driver: bridge

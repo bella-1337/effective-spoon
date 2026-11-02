@@ -74,7 +74,6 @@ Licence categories: **permissive** (MIT, Apache-2.0, BSD, PostgreSQL, PSF),
 | `ubuntu/bind9:9.20-26.04_stable` | `xberg-dns` (prod, dev) | BIND 9: MPL-2.0; Ubuntu base packages under their own licences | Weak copyleft | Unmodified internal use creates no MPL obligation. |
 | `ubuntu/squid:6.13-25.04_edge` | `xberg-egress-proxy` (core) | Squid: GPL-2.0-or-later; Ubuntu base packages under their own licences | Strong copyleft | Unmodified internal use creates no GPL obligation. The `edge` track is not a long-term-support channel; this is a support concern, not a licence one. |
 | `qdrant/qdrant:v1.20.0` | `qdrant` (dev) | Apache-2.0 | Permissive | None. |
-| `vllm/vllm-openai:v0.32.0` | `bge-m3-vllm` (dev) | vLLM: Apache-2.0; bundles NVIDIA CUDA runtime libraries under the NVIDIA CUDA EULA | Permissive, with proprietary redistributable runtime | Using the bundled CUDA libraries is permitted without a fee. Re-review before redistributing the image. |
 
 ## Build and auxiliary images
 
@@ -87,8 +86,9 @@ stack is built, scanned, or extended.
 | `ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm-slim` | Base of `opensearch/tools/Dockerfile` and `security/image-monitor.Dockerfile` | uv: MIT OR Apache-2.0; Python: PSF-2.0; Debian packages under their own licences | Permissive base, mixed OS packages | None for internal use. |
 | `docker:29.9.2-cli` | Docker CLI and buildx copied into `security/image-monitor.Dockerfile` | Apache-2.0 | Permissive | None. |
 | `aquasec/trivy:0.76.1` | Trivy copied into the monitor image; also run directly by host-mode scans | Apache-2.0 | Permissive | Trivy vulnerability and Java databases are downloaded at scan time under Aqua's database terms; internal use is permitted. |
-| `ghcr.io/vllm-project/semantic-router/vllm-sr-cuda:latest` | `scripts/deploy-d3-mini.sh` (remote D3 host) | Apache-2.0; bundles NVIDIA CUDA runtime libraries under the NVIDIA CUDA EULA | Permissive, with proprietary redistributable runtime | Same CUDA note as vLLM. Pinned by digest despite the `latest` tag. |
-| `docker.io/nginxinc/nginx-unprivileged:1.29.5-alpine` | `scripts/deploy-d3-mini.sh` (TLS terminator) | nginx: BSD-2-Clause; Alpine packages under their own licences | Permissive | None. |
+| `ghcr.io/huggingface/text-embeddings-inference:cuda-1.9.4` | `gpu-host/compose.yml` (`bge-m3`, remote GPU host) | Text Embeddings Inference: Apache-2.0; bundles NVIDIA CUDA runtime libraries under the NVIDIA CUDA EULA | Permissive, with proprietary redistributable runtime | Using the bundled CUDA libraries is permitted without a fee. Re-review before redistributing the image. |
+| `ghcr.io/vllm-project/semantic-router/vllm-sr-cuda:latest` | `gpu-host/compose.yml` (`d3-mini`, remote GPU host) | Apache-2.0; bundles NVIDIA CUDA runtime libraries under the NVIDIA CUDA EULA | Permissive, with proprietary redistributable runtime | Same CUDA note as Text Embeddings Inference. Pinned by digest despite the `latest` tag. |
+| `docker.io/nginxinc/nginx-unprivileged:1.29.5-alpine` | `gpu-host/compose.yml` (`d3-tls`, D3 TLS terminator) | nginx: BSD-2-Clause; Alpine packages under their own licences | Permissive | None. |
 
 ## Models
 
@@ -97,8 +97,8 @@ Each model is pinned to an immutable revision.
 
 | Model | Revision | Used by | Licence | Notes |
 | --- | --- | --- | --- | --- |
-| `BAAI/bge-m3` | `5617a9f61b028005a4858fdac845db406aefb181` | `bge-m3-vllm` (dev), via `BGE_M3_REVISION` | MIT | This revision ships `pytorch_model.bin` (pickle format) rather than safetensors; load it only from the pinned revision. |
-| `vllm-sr/d3-mini` | `a475367de0d8133a3c1a2a0dc12303d89cfa2ab4` (tag `v3.1.0`) | `scripts/deploy-d3-mini.sh` | Apache-2.0 | Fine-tuned from Qwen3.5-4B (Apache-2.0). Newer revisions exist; re-review the model card when updating the pin. |
+| `BAAI/bge-m3` | `5617a9f61b028005a4858fdac845db406aefb181` | `gpu-host/compose.yml` (`bge-m3`) | MIT | This revision ships `pytorch_model.bin` (pickle format) rather than safetensors; load it only from the pinned revision. Text Embeddings Inference reads it with its own pickle parser, without executing Python code. |
+| `vllm-sr/d3-mini` | `a475367de0d8133a3c1a2a0dc12303d89cfa2ab4` (tag `v3.1.0`) | `gpu-host/deploy.py` | Apache-2.0 | Fine-tuned from Qwen3.5-4B (Apache-2.0). Newer revisions exist; re-review the model card when updating the pin. |
 | `spacy/en_core_web_lg` | Bundled in `mcr.microsoft.com/presidio-analyzer:2.2.362` at build time | `presidio-analyzer` | MIT | Trained partly on OntoNotes 5, which Explosion licenses commercially; the released model package is MIT. |
 
 ## Repository Python dependencies

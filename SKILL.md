@@ -40,6 +40,9 @@ Map the change across these surfaces:
 - `loki/config.yml`, `alloy/config.alloy`, and `alloy/loki.alloy`;
 - `.env.example`, `.env.optional.example`, `.gitignore`, `README.md`, and the
   guides under `docs/`;
+- `gpu-host/` (the separate remote D3-mini and BGE-M3 stack: `compose.yml`,
+  `deploy.py`, and its Nginx configuration), whose image and model pins the
+  licence register must also cover;
 - the Mermaid diagram sources in `diagrams/*.mmd`.
 
 For every proposed removal, identify:
@@ -53,6 +56,15 @@ For every proposed removal, identify:
 ### 2. Implement coherently
 
 Use stable, explicit configuration and update all connected surfaces.
+
+Place a new core service in the matching section of `docker-compose.yml` and a
+new optional service under its profile in `compose.optional.yml`. Give every
+long-running service a resource tier (`deploy: *resources-...`). When editing a
+shared fragment (`x-default-logging`, `x-own-image-labels`, `x-resources-*`),
+change both files identically. Scripts that inspect service settings must
+read the rendered model (`docker compose config --format json`); only
+source-level contracts, such as hard-coded hostname fallbacks and fragment
+sync, read the file text.
 
 Example: changing a Presidio endpoint requires all of the following:
 

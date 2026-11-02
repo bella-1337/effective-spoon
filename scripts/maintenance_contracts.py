@@ -58,8 +58,13 @@ LOCAL_BUILD_DOCKERFILES = (
     Path("security") / "image-monitor.Dockerfile",
 )
 DOCKERFILE_FROM_RE = re.compile(r"^FROM\s+(?:--platform=\S+\s+)?(\S+)", re.MULTILINE | re.IGNORECASE)
-D3_IMAGE_RE = re.compile(r"^D3_[A-Z_]*IMAGE='([^']+)'", re.MULTILINE)
-D3_REVISION_RE = re.compile(r"^D3_MODEL_REVISION='([0-9a-f]{40})'", re.MULTILINE)
+# The remote GPU host stack pins its images in gpu-host/compose.yml and its
+# model revisions there and in gpu-host/deploy.py; the licence register must
+# cover them like the main stack's images.
+GPU_HOST_COMPOSE = Path("gpu-host") / "compose.yml"
+GPU_HOST_REVISION_SOURCES = (GPU_HOST_COMPOSE, Path("gpu-host") / "deploy.py")
+GPU_HOST_IMAGE_RE = re.compile(r"^\s*image:\s*(\S+)\s*$", re.MULTILINE)
+GPU_HOST_REVISION_RE = re.compile(r"revision\W+([0-9a-f]{40})\b", re.IGNORECASE)
 TRIVY_IMAGE_RE = re.compile(r'^\s*"(aquasec/trivy:[^"@]+)"', re.MULTILINE)
 OWN_IMAGE_REQUIRED_LABELS = (
     "vendor",
@@ -358,11 +363,11 @@ def auxiliary_images(root: Path) -> tuple[set[str], list[str]]:
             continue
         for reference in DOCKERFILE_FROM_RE.findall(path.read_text(encoding="utf-8")):
             images.add(image_without_digest(reference))
-    deploy_d3 = root / "scripts" / "deploy-d3-mini.sh"
-    if deploy_d3.is_file() and not deploy_d3.is_symlink():
+    gpu_compose = root / GPU_HOST_COMPOSE
+    if gpu_compose.is_file() and not gpu_compose.is_symlink():
         images.update(
             image_without_digest(reference)
-            for reference in D3_IMAGE_RE.findall(deploy_d3.read_text(encoding="utf-8"))
+            for reference in GPU_HOST_IMAGE_RE.findall(gpu_compose.read_text(encoding="utf-8"))
         )
     monitor = root / "scripts" / "monitor-image-vulnerabilities.py"
     if monitor.is_file() and not monitor.is_symlink():
@@ -467,9 +472,10 @@ def licence_register_failures(
         for image in sorted(listed - required)
     )
     revisions = compose_model_revisions(services)
-    deploy_d3 = root / "scripts" / "deploy-d3-mini.sh"
-    if deploy_d3.is_file() and not deploy_d3.is_symlink():
-        revisions.update(D3_REVISION_RE.findall(deploy_d3.read_text(encoding="utf-8")))
+    for relative in GPU_HOST_REVISION_SOURCES:
+        source_file = root / relative
+        if source_file.is_file() and not source_file.is_symlink():
+            revisions.update(GPU_HOST_REVISION_RE.findall(source_file.read_text(encoding="utf-8")))
     failures.extend(
         f"Licence register does not record pinned model revision {revision}"
         for revision in sorted(revisions)
@@ -564,6 +570,48 @@ def brand_asset_failures(root: Path, env_examples: Mapping[str, str]) -> list[st
     for svg in sorted(directory.rglob("*.svg")):
         if UNSAFE_SVG_RE.search(svg.read_text(encoding="utf-8")):
             failures.append(f"Brand SVG contains scriptable content: {svg.relative_to(root)}")
+    return failures
+
+
+# YAML anchors cannot cross the Compose include boundary, so these top-level
+# fragments are duplicated in compose.optional.yml and must stay identical.
+SHARED_COMPOSE_FRAGMENTS = (
+    "x-own-image-labels",
+    "x-default-logging",
+    "x-resources-tiny",
+    "x-resources-small",
+    "x-resources-medium",
+    "x-resources-database",
+)
+
+
+def top_level_block(source: str, key: str) -> str | None:
+    lines = source.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith(f"{key}:"):
+            block = [line]
+            for following in lines[index + 1:]:
+                if following and not following[0].isspace():
+                    break
+                block.append(following)
+            return "\n".join(block).rstrip()
+    return None
+
+
+def shared_compose_fragment_failures(core_source: str, optional_source: str) -> list[str]:
+    """Keep the fragments duplicated across the include boundary in sync."""
+    failures: list[str] = []
+    for key in SHARED_COMPOSE_FRAGMENTS:
+        core = top_level_block(core_source, key)
+        optional = top_level_block(optional_source, key)
+        if core is None or optional is None:
+            missing = "docker-compose.yml" if core is None else "compose.optional.yml"
+            failures.append(f"Shared Compose fragment {key} is missing from {missing}")
+        elif core != optional:
+            failures.append(
+                f"Shared Compose fragment {key} differs between docker-compose.yml "
+                "and compose.optional.yml"
+            )
     return failures
 
 
@@ -900,6 +948,9 @@ def validate_repository_contracts(root: Path = ROOT) -> list[str]:
                 )
             }
 
+        failures.extend(
+            shared_compose_fragment_failures(compose_source, optional_compose_source)
+        )
         failures.extend(brand_asset_failures(root, env_values(core_env_example)))
         failures.extend(
             public_hostname_source_failures(

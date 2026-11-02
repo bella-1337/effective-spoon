@@ -29,6 +29,35 @@ x-default-logging: &default-logging
     max-size: "${LOG_MAX_SIZE:-10m}"
     max-file: "${LOG_MAX_FILE:-3}"
 
+# Resource tiers. Long-running services without a dedicated sizing variable use
+# one of these caps; .env sets the values per host. They are limits, not
+# reservations, so idle services do not hold the memory.
+x-resources-tiny: &resources-tiny
+  resources:
+    limits:
+      cpus: "${RESOURCE_TINY_CPU_LIMIT:-0.5}"
+      memory: ${RESOURCE_TINY_MEMORY_LIMIT:-256m}
+x-resources-small: &resources-small
+  resources:
+    limits:
+      cpus: "${RESOURCE_SMALL_CPU_LIMIT:-1}"
+      memory: ${RESOURCE_SMALL_MEMORY_LIMIT:-1g}
+x-resources-medium: &resources-medium
+  resources:
+    limits:
+      cpus: "${RESOURCE_MEDIUM_CPU_LIMIT:-2}"
+      memory: ${RESOURCE_MEDIUM_MEMORY_LIMIT:-2g}
+x-resources-database: &resources-database
+  resources:
+    limits:
+      cpus: "${RESOURCE_DATABASE_CPU_LIMIT:-2}"
+      memory: ${RESOURCE_DATABASE_MEMORY_LIMIT:-4g}
+x-resources-litellm: &resources-litellm
+  resources:
+    limits:
+      cpus: "${LITELLM_CPU_LIMIT:-2}"
+      memory: ${LITELLM_MEMORY_LIMIT:-4g}
+
 networks:
   traefik-monitor:
     internal: true
@@ -50,9 +79,16 @@ volumes:
   opensearch-ca: {}
   opensearch-node-certs: {}
   opensearch-admin-certs: {}
-  bge-m3-vllm-cache: {}
 
 services:
+  # Services are grouped along the request path: edge, LiteLLM, guardrails and
+  # tools, data stores, the dev model plane, then observability. Optional
+  # Grafana, Langfuse, and image-security services live in compose.optional.yml.
+
+  # ---------------------------------------------------------------------------
+  # Edge: TLS termination and routing
+  # ---------------------------------------------------------------------------
+
   traefik:
     logging: *default-logging
     image: traefik:v3.7.17@sha256:30ff62491aacdb862ceb8c9edcf2627da638d7deafdd4b6dab32fe34f8aa3e90
@@ -102,6 +138,7 @@ services:
     cap_drop: [NET_RAW]
     networks: [edge, internal, traefik-monitor]
     restart: unless-stopped
+    deploy: *resources-small
 
   traefik-docker-proxy:
     logging: *default-logging
@@ -127,257 +164,245 @@ services:
       timeout: 3s
       retries: 12
     restart: unless-stopped
+    deploy: *resources-tiny
 
-  postgres:
+  # ---------------------------------------------------------------------------
+  # LiteLLM proxies (prod and dev profiles) and demo data
+  # ---------------------------------------------------------------------------
+
+  litellm-prod:
     logging: *default-logging
-    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
-    environment:
-      POSTGRES_DB: litellm_prod
-      POSTGRES_USER: ${PG_USER:-litellm}
-      POSTGRES_PASSWORD: ${PG_PASSWORD:?Set PG_PASSWORD in .env}
+    profiles: [prod]
+    image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml
+        exec /app/docker/prod_entrypoint.sh --config=/app/runtime-config.yaml --port=4000
     volumes:
-      - pg-data:/var/lib/postgresql/data
-    networks: [internal]
+      - ./litellm/config.prod.yaml:/app/config.yaml:ro
+      - ./litellm/modules:/app/modules:ro
+      - ${BRAND_ASSETS_DIR:-./branding/foo-bar}:/app/branding:ro
+      - ${GPU_HOST_CA_BUNDLE:?Set GPU_HOST_CA_BUNDLE in .env}:/etc/ssl/certs/gpu-host-ca-bundle.pem:ro
+    environment:
+      # LiteLLM-native branding. Logo and favicon accept a local PNG/JPEG/WEBP/ICO
+      # path under /app/branding or an https:// URL; the rest are LiteLLM
+      # Enterprise options and are passed only when set in .env.
+      UI_LOGO_PATH: ${UI_LOGO_PATH:-/app/branding/logo.png}
+      UI_LOGO_PATH_DARK: ${UI_LOGO_PATH_DARK:-/app/branding/logo-dark.png}
+      LITELLM_FAVICON_URL: ${LITELLM_FAVICON_URL:-/app/branding/favicon.png}
+      DOCS_TITLE:
+      DOCS_DESCRIPTION:
+      EMAIL_LOGO_URL:
+      EMAIL_SUPPORT_CONTACT:
+      EMAIL_SIGNATURE:
+      EMAIL_SUBJECT_INVITATION:
+      EMAIL_SUBJECT_KEY_CREATED:
+      EMAIL_SUBJECT_KEY_ROTATED:
+      DATABASE_URL: postgresql://${PG_USER:-litellm}:${PG_PASSWORD:?Set PG_PASSWORD in .env}@postgres:5432/litellm_prod
+      STORE_MODEL_IN_DB: "${LITELLM_STORE_MODEL_IN_DB:-True}"
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
+      D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
+      # Public roots plus the GPU host mkcert CA (D3-mini and BGE-M3 over TLS).
+      SSL_CERT_FILE: /etc/ssl/certs/gpu-host-ca-bundle.pem
+      LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
+      # Request and service spans also go to OpenSearch Trace Analytics through
+      # Data Prepper; Langfuse keeps its own exporter.
+      OTEL_EXPORTER: ${LITELLM_OTEL_TRACE_EXPORTER:-otlp_grpc}
+      OTEL_ENDPOINT: http://data-prepper:21890
+      OTEL_SERVICE_NAME: litellm-prod
+      OTEL_ENVIRONMENT_NAME: production
+      LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""
+      LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""
+      LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: ${OTEL_GENAI_CAPTURE_MESSAGE_CONTENT:-no_content}
+      OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: "${OTEL_PYTHON_FASTAPI_EXCLUDED_URLS:-.*}"
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:-}
+      LANGFUSE_HOST: http://langfuse-web:3000
+      PROXY_BASE_URL: https://${LITELLM_PROD_HOST:?Set LITELLM_PROD_HOST in .env}
+      FORWARDED_ALLOW_IPS: "${LITELLM_FORWARDED_ALLOW_IPS:-*}"
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
+      presidio-analyzer:
+        condition: service_healthy
+      presidio-anonymizer:
+        condition: service_healthy
+      langfuse-web:
+        condition: service_healthy
+        required: false
+    cap_drop: [NET_RAW]
+    networks: [edge, internal, xberg-sandbox]
     restart: unless-stopped
+    deploy: *resources-litellm
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 18
+      start_period: 30s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.litellm-prod.rule=Host(`${LITELLM_PROD_HOST:?Set LITELLM_PROD_HOST in .env}`)
+      - traefik.http.routers.litellm-prod.entrypoints=websecure
+      - traefik.http.routers.litellm-prod.tls=true
+      - traefik.http.services.litellm-prod.loadbalancer.server.port=4000
 
-  postgres-init:
+  litellm-demo-data-prod:
     logging: *default-logging
+    profiles: [demo]
     image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     environment:
       PGHOST: postgres
+      PGDATABASE: litellm_prod
       PGUSER: ${PG_USER:-litellm}
       PGPASSWORD: ${PG_PASSWORD:?Set PG_PASSWORD in .env}
-      OPENSEARCH_DATABASE_PASSWORD: ${OPENSEARCH_DATABASE_PASSWORD:?Set OPENSEARCH_DATABASE_PASSWORD in .env}
-      PG_EXPORTER_PASSWORD: ${PG_EXPORTER_PASSWORD:?Set PG_EXPORTER_PASSWORD in .env}
-      ROI_MINUTES_SAVED_PER_REQUEST: "${ROI_MINUTES_SAVED_PER_REQUEST:-15}"
-      ROI_MINUTES_SAVED_PER_SESSION: "${ROI_MINUTES_SAVED_PER_SESSION:-0}"
-      ROI_LOADED_HOURLY_COST: "${ROI_LOADED_HOURLY_COST:-75}"
-      ROI_VALUE_REALIZATION_FACTOR: "${ROI_VALUE_REALIZATION_FACTOR:-0.25}"
-      ROI_CURRENCY: "${ROI_CURRENCY:-USD}"
-    command:
-      - /bin/sh
-      - -ec
-      - |
-        psql --dbname postgres --set ON_ERROR_STOP=1 <<'SQL'
-        \getenv opensearch_password OPENSEARCH_DATABASE_PASSWORD
-        \getenv exporter_password PG_EXPORTER_PASSWORD
-        SELECT format('CREATE ROLE opensearch_ro LOGIN PASSWORD %L', :'opensearch_password')
-        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'opensearch_ro') \gexec
-        SELECT format('ALTER ROLE opensearch_ro PASSWORD %L', :'opensearch_password') \gexec
-        SELECT format('CREATE ROLE litellm_exporter LOGIN PASSWORD %L', :'exporter_password')
-        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'litellm_exporter') \gexec
-        SELECT format('ALTER ROLE litellm_exporter PASSWORD %L', :'exporter_password') \gexec
-        GRANT pg_monitor TO litellm_exporter;
-        GRANT CONNECT ON DATABASE postgres TO litellm_exporter;
-        SQL
-        for db in litellm_prod litellm_dev; do
-          exists="$$(psql --dbname postgres --tuples-only --no-align --command "SELECT 1 FROM pg_database WHERE datname='$${db}'")"
-          if [ "$${exists}" != "1" ]; then
-            psql --dbname postgres --command "CREATE DATABASE \"$${db}\""
-          fi
-          psql --dbname "$${db}" --set ON_ERROR_STOP=1 <<'SQL'
-        \getenv roi_request_minutes ROI_MINUTES_SAVED_PER_REQUEST
-        \getenv roi_session_minutes ROI_MINUTES_SAVED_PER_SESSION
-        \getenv roi_hourly_cost ROI_LOADED_HOURLY_COST
-        \getenv roi_realization ROI_VALUE_REALIZATION_FACTOR
-        \getenv roi_currency ROI_CURRENCY
-        CREATE TABLE IF NOT EXISTS "LiteLLM_ManagementROIConfig" (
-          singleton smallint PRIMARY KEY DEFAULT 1 CHECK (singleton = 1),
-          minutes_saved_per_request numeric NOT NULL CHECK (minutes_saved_per_request BETWEEN 0 AND 1440),
-          minutes_saved_per_session numeric NOT NULL CHECK (minutes_saved_per_session BETWEEN 0 AND 10080),
-          loaded_hourly_cost numeric NOT NULL CHECK (loaded_hourly_cost BETWEEN 0 AND 10000),
-          value_realization_factor numeric NOT NULL CHECK (value_realization_factor BETWEEN 0 AND 1),
-          currency varchar(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
-          updated_at timestamptz NOT NULL DEFAULT NOW()
-        );
-        REVOKE ALL ON TABLE "LiteLLM_ManagementROIConfig" FROM PUBLIC;
-        INSERT INTO "LiteLLM_ManagementROIConfig" (
-          singleton,
-          minutes_saved_per_request,
-          minutes_saved_per_session,
-          loaded_hourly_cost,
-          value_realization_factor,
-          currency,
-          updated_at
-        ) VALUES (
-          1,
-          :'roi_request_minutes'::numeric,
-          :'roi_session_minutes'::numeric,
-          :'roi_hourly_cost'::numeric,
-          :'roi_realization'::numeric,
-          :'roi_currency',
-          NOW()
-        )
-        ON CONFLICT (singleton) DO UPDATE SET
-          minutes_saved_per_request = EXCLUDED.minutes_saved_per_request,
-          minutes_saved_per_session = EXCLUDED.minutes_saved_per_session,
-          loaded_hourly_cost = EXCLUDED.loaded_hourly_cost,
-          value_realization_factor = EXCLUDED.value_realization_factor,
-          currency = EXCLUDED.currency,
-          updated_at = EXCLUDED.updated_at;
-        SQL
-          psql --dbname "$${db}" --set ON_ERROR_STOP=1 --set database_name="$${db}" <<'SQL'
-        GRANT CONNECT ON DATABASE :"database_name" TO opensearch_ro;
-        GRANT USAGE ON SCHEMA public TO opensearch_ro;
-        GRANT SELECT ON ALL TABLES IN SCHEMA public TO opensearch_ro;
-        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO opensearch_ro;
-        SQL
-        done
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks: [internal]
-    restart: "no"
-
-  vector-postgres:
-    logging: *default-logging
-    image: pgvector/pgvector:0.8.7-pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
-    environment:
-      POSTGRES_DB: vector_store
-      POSTGRES_USER: vector
-      POSTGRES_PASSWORD: ${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}
-    volumes:
-      - pgvector-data:/var/lib/postgresql/data
-      - ./pgvector/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
-    networks: [internal]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  qdrant:
-    logging: *default-logging
-    profiles: [dev]
-    image: qdrant/qdrant:v1.20.0@sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
-    environment:
-      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
-      QDRANT__TELEMETRY_DISABLED: "true"
-    tmpfs:
-      - /qdrant/storage:rw,noexec,nosuid,size=${QDRANT_STORAGE_SIZE:-1g}
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          cpus: "${QDRANT_CPU_LIMIT:-1}"
-          memory: ${QDRANT_MEMORY_LIMIT:-2g}
-    networks: [internal]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "bash", "-ec", ": >/dev/tcp/127.0.0.1/6333"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-
-  bge-m3-vllm:
-    logging: *default-logging
-    profiles: [dev]
-    image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
-    command:
-      - --model
-      - ${BGE_M3_MODEL:-BAAI/bge-m3}
-      - --revision
-      - ${BGE_M3_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
-      - --tokenizer-revision
-      - ${BGE_M3_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
-      - --served-model-name
-      - ${BGE_M3_SERVED_MODEL_NAME:-bge-m3}
-      - --runner
-      - pooling
-      - --dtype
-      - ${BGE_M3_DTYPE:-half}
-      - --max-model-len
-      - "${BGE_M3_MAX_MODEL_LEN:-8192}"
-      - --gpu-memory-utilization
-      - ${BGE_M3_VLLM_GPU_MEMORY_UTILIZATION:-0.35}
-    environment:
-      HF_HOME: /root/.cache/huggingface
-      VLLM_CACHE_ROOT: /tmp/vllm
-    volumes:
-      - bge-m3-vllm-cache:/root/.cache/huggingface
-    shm_size: ${BGE_M3_SHM_SIZE:-2gb}
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp:mode=1777
-    deploy:
-      resources:
-        limits:
-          memory: ${BGE_M3_MEMORY_LIMIT:-6g}
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    networks: [internal]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
-      interval: 20s
-      timeout: 10s
-      retries: 15
-      start_period: ${BGE_M3_HEALTH_START_PERIOD:-15m}
-
-  pgvector-migrate:
-    logging: *default-logging
-    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
-    environment:
-      PGHOST: vector-postgres
-      PGDATABASE: vector_store
-      PGUSER: vector
-      PGPASSWORD: ${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}
     command:
       - psql
       - --no-psqlrc
       - --set
       - ON_ERROR_STOP=1
       - --file
-      - /migrations/20-litellm-pgvector.sql
+      - /seed/demo-data.sql
     volumes:
-      - ./pgvector/migrate.sql:/migrations/20-litellm-pgvector.sql:ro
+      - ./litellm/demo-data.sql:/seed/demo-data.sql:ro
     depends_on:
-      vector-postgres:
+      litellm-prod:
         condition: service_healthy
     networks: [internal]
     restart: "no"
 
-  pgvector-access-init:
+  litellm-dev:
     logging: *default-logging
+    profiles: [dev]
+    image: ghcr.io/berriai/litellm:v1.107.0-dev.3@sha256:e7f68da02ed3ec52f0b8d386dbb278a0aa06dbc879f5ddda5a3cf87b2bff194c
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml
+        exec /app/docker/prod_entrypoint.sh --config=/app/runtime-config.yaml --port=4000
+    volumes:
+      - ./litellm/config.dev.yaml:/app/config.yaml:ro
+      - ./litellm/modules:/app/modules:ro
+      - ${BRAND_ASSETS_DIR:-./branding/foo-bar}:/app/branding:ro
+      - ${GPU_HOST_CA_BUNDLE:?Set GPU_HOST_CA_BUNDLE in .env}:/etc/ssl/certs/gpu-host-ca-bundle.pem:ro
+    environment:
+      # LiteLLM-native branding. Logo and favicon accept a local PNG/JPEG/WEBP/ICO
+      # path under /app/branding or an https:// URL; the rest are LiteLLM
+      # Enterprise options and are passed only when set in .env.
+      UI_LOGO_PATH: ${UI_LOGO_PATH:-/app/branding/logo.png}
+      UI_LOGO_PATH_DARK: ${UI_LOGO_PATH_DARK:-/app/branding/logo-dark.png}
+      LITELLM_FAVICON_URL: ${LITELLM_FAVICON_URL:-/app/branding/favicon.png}
+      DOCS_TITLE:
+      DOCS_DESCRIPTION:
+      EMAIL_LOGO_URL:
+      EMAIL_SUPPORT_CONTACT:
+      EMAIL_SIGNATURE:
+      EMAIL_SUBJECT_INVITATION:
+      EMAIL_SUBJECT_KEY_CREATED:
+      EMAIL_SUBJECT_KEY_ROTATED:
+      DATABASE_URL: postgresql://${PG_USER:-litellm}:${PG_PASSWORD:?Set PG_PASSWORD in .env}@postgres:5432/litellm_dev
+      STORE_MODEL_IN_DB: "${LITELLM_STORE_MODEL_IN_DB:-True}"
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
+      D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
+      # Public roots plus the GPU host mkcert CA (D3-mini and BGE-M3 over TLS).
+      SSL_CERT_FILE: /etc/ssl/certs/gpu-host-ca-bundle.pem
+      LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
+      # Request and service spans also go to OpenSearch Trace Analytics through
+      # Data Prepper; Langfuse keeps its own exporter.
+      OTEL_EXPORTER: ${LITELLM_OTEL_TRACE_EXPORTER:-otlp_grpc}
+      OTEL_ENDPOINT: http://data-prepper:21890
+      OTEL_SERVICE_NAME: litellm-dev
+      OTEL_ENVIRONMENT_NAME: development
+      LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""
+      LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""
+      LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: ${OTEL_GENAI_CAPTURE_MESSAGE_CONTENT:-no_content}
+      OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: "${OTEL_PYTHON_FASTAPI_EXCLUDED_URLS:-.*}"
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:-}
+      LANGFUSE_HOST: http://langfuse-web:3000
+      PG_VECTOR_API_BASE: http://litellm-pgvector:8000
+      PG_VECTOR_API_KEY: ${PG_VECTOR_API_KEY:?Set PG_VECTOR_API_KEY in .env}
+      VECTOR_DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}@vector-postgres:5432/vector_store
+      QDRANT_API_BASE: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
+      # BGE-M3 runs on the remote GPU host behind its TLS proxy (gpu-host/).
+      BGE_M3_API_BASE: ${BGE_M3_API_BASE:?Set BGE_M3_API_BASE in .env}
+      BGE_M3_API_KEY: ${BGE_M3_API_KEY:?Set BGE_M3_API_KEY in .env}
+      XBERG_INDEX_EMBEDDING_MODEL: ${XBERG_INDEX_EMBEDDING_MODEL:-hosted_vllm/bge-m3}
+      XBERG_INDEX_EMBEDDING_API_BASE: ${BGE_M3_API_BASE:?Set BGE_M3_API_BASE in .env}
+      XBERG_INDEX_EMBEDDING_API_KEY: ${BGE_M3_API_KEY:?Set BGE_M3_API_KEY in .env}
+      XBERG_AUTO_INDEX_ENABLED: ${XBERG_AUTO_INDEX_ENABLED:-false}
+      PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
+      PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000
+      PROXY_BASE_URL: https://${LITELLM_DEV_HOST:?Set LITELLM_DEV_HOST in .env}
+      FORWARDED_ALLOW_IPS: "${LITELLM_FORWARDED_ALLOW_IPS:-*}"
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
+      presidio-analyzer:
+        condition: service_started
+      presidio-anonymizer:
+        condition: service_started
+      xberg:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      langfuse-web:
+        condition: service_healthy
+        required: false
+    cap_drop: [NET_RAW]
+    networks: [edge, internal, xberg-sandbox]
+    restart: unless-stopped
+    deploy: *resources-litellm
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.litellm-dev.rule=Host(`${LITELLM_DEV_HOST:?Set LITELLM_DEV_HOST in .env}`)
+      - traefik.http.routers.litellm-dev.entrypoints=websecure
+      - traefik.http.routers.litellm-dev.tls=true
+      - traefik.http.services.litellm-dev.loadbalancer.server.port=4000
+
+  litellm-demo-data-dev:
+    logging: *default-logging
+    profiles: [dev]
     image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     environment:
-      PGHOST: vector-postgres
-      PGDATABASE: vector_store
-      PGUSER: vector
-      PGPASSWORD: ${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}
-      PG_VECTOR_EXPORTER_PASSWORD: ${PG_VECTOR_EXPORTER_PASSWORD:?Set PG_VECTOR_EXPORTER_PASSWORD in .env}
+      PGHOST: postgres
+      PGDATABASE: litellm_dev
+      PGUSER: ${PG_USER:-litellm}
+      PGPASSWORD: ${PG_PASSWORD:?Set PG_PASSWORD in .env}
     command:
-      - /bin/sh
-      - -ec
-      - |
-        psql --set ON_ERROR_STOP=1 <<'SQL'
-        \getenv exporter_password PG_VECTOR_EXPORTER_PASSWORD
-        SELECT format('CREATE ROLE vector_exporter LOGIN PASSWORD %L', :'exporter_password')
-        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'vector_exporter') \gexec
-        SELECT format('ALTER ROLE vector_exporter PASSWORD %L', :'exporter_password') \gexec
-        GRANT pg_monitor TO vector_exporter;
-        GRANT CONNECT ON DATABASE vector_store TO vector_exporter;
-        SQL
+      - psql
+      - --no-psqlrc
+      - --set
+      - ON_ERROR_STOP=1
+      - --file
+      - /seed/demo-data.sql
+    volumes:
+      - ./litellm/demo-data.sql:/seed/demo-data.sql:ro
     depends_on:
-      pgvector-migrate:
-        condition: service_completed_successfully
+      litellm-dev:
+        condition: service_healthy
     networks: [internal]
     restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Guardrails and tools: Presidio, SearXNG, and the Xberg MCP sandbox
+  # ---------------------------------------------------------------------------
 
   presidio-analyzer:
     logging: *default-logging
@@ -394,6 +419,7 @@ services:
     deploy:
       resources:
         limits:
+          cpus: "${PRESIDIO_ANALYZER_CPU_LIMIT:-2}"
           memory: ${PRESIDIO_ANALYZER_MEMORY_LIMIT:-2g}
     networks: [internal]
     restart: unless-stopped
@@ -413,6 +439,7 @@ services:
       WORKERS: ${PRESIDIO_ANONYMIZER_WORKERS:-2}
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-small
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=5)"]
       interval: 10s
@@ -434,6 +461,7 @@ services:
     # never routed by Traefik. Outbound engine queries use the internal bridge.
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-small
 
   xberg:
     logging: *default-logging
@@ -554,6 +582,271 @@ services:
       timeout: 5s
       retries: 12
     restart: unless-stopped
+    deploy: *resources-small
+
+  # ---------------------------------------------------------------------------
+  # Data stores: LiteLLM PostgreSQL and the shared pgvector store
+  # ---------------------------------------------------------------------------
+
+  postgres:
+    logging: *default-logging
+    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    environment:
+      POSTGRES_DB: litellm_prod
+      POSTGRES_USER: ${PG_USER:-litellm}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?Set PG_PASSWORD in .env}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    networks: [internal]
+    restart: unless-stopped
+    deploy: *resources-database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-init:
+    logging: *default-logging
+    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    environment:
+      PGHOST: postgres
+      PGUSER: ${PG_USER:-litellm}
+      PGPASSWORD: ${PG_PASSWORD:?Set PG_PASSWORD in .env}
+      OPENSEARCH_DATABASE_PASSWORD: ${OPENSEARCH_DATABASE_PASSWORD:?Set OPENSEARCH_DATABASE_PASSWORD in .env}
+      PG_EXPORTER_PASSWORD: ${PG_EXPORTER_PASSWORD:?Set PG_EXPORTER_PASSWORD in .env}
+      ROI_MINUTES_SAVED_PER_REQUEST: "${ROI_MINUTES_SAVED_PER_REQUEST:-15}"
+      ROI_MINUTES_SAVED_PER_SESSION: "${ROI_MINUTES_SAVED_PER_SESSION:-0}"
+      ROI_LOADED_HOURLY_COST: "${ROI_LOADED_HOURLY_COST:-75}"
+      ROI_VALUE_REALIZATION_FACTOR: "${ROI_VALUE_REALIZATION_FACTOR:-0.25}"
+      ROI_CURRENCY: "${ROI_CURRENCY:-USD}"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        psql --dbname postgres --set ON_ERROR_STOP=1 <<'SQL'
+        \getenv opensearch_password OPENSEARCH_DATABASE_PASSWORD
+        \getenv exporter_password PG_EXPORTER_PASSWORD
+        SELECT format('CREATE ROLE opensearch_ro LOGIN PASSWORD %L', :'opensearch_password')
+        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'opensearch_ro') \gexec
+        SELECT format('ALTER ROLE opensearch_ro PASSWORD %L', :'opensearch_password') \gexec
+        SELECT format('CREATE ROLE litellm_exporter LOGIN PASSWORD %L', :'exporter_password')
+        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'litellm_exporter') \gexec
+        SELECT format('ALTER ROLE litellm_exporter PASSWORD %L', :'exporter_password') \gexec
+        GRANT pg_monitor TO litellm_exporter;
+        GRANT CONNECT ON DATABASE postgres TO litellm_exporter;
+        SQL
+        for db in litellm_prod litellm_dev; do
+          exists="$$(psql --dbname postgres --tuples-only --no-align --command "SELECT 1 FROM pg_database WHERE datname='$${db}'")"
+          if [ "$${exists}" != "1" ]; then
+            psql --dbname postgres --command "CREATE DATABASE \"$${db}\""
+          fi
+          psql --dbname "$${db}" --set ON_ERROR_STOP=1 <<'SQL'
+        \getenv roi_request_minutes ROI_MINUTES_SAVED_PER_REQUEST
+        \getenv roi_session_minutes ROI_MINUTES_SAVED_PER_SESSION
+        \getenv roi_hourly_cost ROI_LOADED_HOURLY_COST
+        \getenv roi_realization ROI_VALUE_REALIZATION_FACTOR
+        \getenv roi_currency ROI_CURRENCY
+        CREATE TABLE IF NOT EXISTS "LiteLLM_ManagementROIConfig" (
+          singleton smallint PRIMARY KEY DEFAULT 1 CHECK (singleton = 1),
+          minutes_saved_per_request numeric NOT NULL CHECK (minutes_saved_per_request BETWEEN 0 AND 1440),
+          minutes_saved_per_session numeric NOT NULL CHECK (minutes_saved_per_session BETWEEN 0 AND 10080),
+          loaded_hourly_cost numeric NOT NULL CHECK (loaded_hourly_cost BETWEEN 0 AND 10000),
+          value_realization_factor numeric NOT NULL CHECK (value_realization_factor BETWEEN 0 AND 1),
+          currency varchar(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+          updated_at timestamptz NOT NULL DEFAULT NOW()
+        );
+        REVOKE ALL ON TABLE "LiteLLM_ManagementROIConfig" FROM PUBLIC;
+        INSERT INTO "LiteLLM_ManagementROIConfig" (
+          singleton,
+          minutes_saved_per_request,
+          minutes_saved_per_session,
+          loaded_hourly_cost,
+          value_realization_factor,
+          currency,
+          updated_at
+        ) VALUES (
+          1,
+          :'roi_request_minutes'::numeric,
+          :'roi_session_minutes'::numeric,
+          :'roi_hourly_cost'::numeric,
+          :'roi_realization'::numeric,
+          :'roi_currency',
+          NOW()
+        )
+        ON CONFLICT (singleton) DO UPDATE SET
+          minutes_saved_per_request = EXCLUDED.minutes_saved_per_request,
+          minutes_saved_per_session = EXCLUDED.minutes_saved_per_session,
+          loaded_hourly_cost = EXCLUDED.loaded_hourly_cost,
+          value_realization_factor = EXCLUDED.value_realization_factor,
+          currency = EXCLUDED.currency,
+          updated_at = EXCLUDED.updated_at;
+        SQL
+          psql --dbname "$${db}" --set ON_ERROR_STOP=1 --set database_name="$${db}" <<'SQL'
+        GRANT CONNECT ON DATABASE :"database_name" TO opensearch_ro;
+        GRANT USAGE ON SCHEMA public TO opensearch_ro;
+        GRANT SELECT ON ALL TABLES IN SCHEMA public TO opensearch_ro;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO opensearch_ro;
+        SQL
+        done
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+    restart: "no"
+
+  vector-postgres:
+    logging: *default-logging
+    image: pgvector/pgvector:0.8.7-pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
+    environment:
+      POSTGRES_DB: vector_store
+      POSTGRES_USER: vector
+      POSTGRES_PASSWORD: ${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}
+    volumes:
+      - pgvector-data:/var/lib/postgresql/data
+      - ./pgvector/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    networks: [internal]
+    restart: unless-stopped
+    deploy: *resources-database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgvector-migrate:
+    logging: *default-logging
+    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    environment:
+      PGHOST: vector-postgres
+      PGDATABASE: vector_store
+      PGUSER: vector
+      PGPASSWORD: ${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}
+    command:
+      - psql
+      - --no-psqlrc
+      - --set
+      - ON_ERROR_STOP=1
+      - --file
+      - /migrations/20-litellm-pgvector.sql
+    volumes:
+      - ./pgvector/migrate.sql:/migrations/20-litellm-pgvector.sql:ro
+    depends_on:
+      vector-postgres:
+        condition: service_healthy
+    networks: [internal]
+    restart: "no"
+
+  pgvector-access-init:
+    logging: *default-logging
+    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    environment:
+      PGHOST: vector-postgres
+      PGDATABASE: vector_store
+      PGUSER: vector
+      PGPASSWORD: ${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}
+      PG_VECTOR_EXPORTER_PASSWORD: ${PG_VECTOR_EXPORTER_PASSWORD:?Set PG_VECTOR_EXPORTER_PASSWORD in .env}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        psql --set ON_ERROR_STOP=1 <<'SQL'
+        \getenv exporter_password PG_VECTOR_EXPORTER_PASSWORD
+        SELECT format('CREATE ROLE vector_exporter LOGIN PASSWORD %L', :'exporter_password')
+        WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'vector_exporter') \gexec
+        SELECT format('ALTER ROLE vector_exporter PASSWORD %L', :'exporter_password') \gexec
+        GRANT pg_monitor TO vector_exporter;
+        GRANT CONNECT ON DATABASE vector_store TO vector_exporter;
+        SQL
+    depends_on:
+      pgvector-migrate:
+        condition: service_completed_successfully
+    networks: [internal]
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Development model plane (dev profile): semantic cache and RAG; BGE-M3
+  # embeddings run on the remote GPU host
+  # ---------------------------------------------------------------------------
+
+  qdrant:
+    logging: *default-logging
+    profiles: [dev]
+    image: qdrant/qdrant:v1.20.0@sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
+      QDRANT__TELEMETRY_DISABLED: "true"
+    tmpfs:
+      - /qdrant/storage:rw,noexec,nosuid,size=${QDRANT_STORAGE_SIZE:-1g}
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "${QDRANT_CPU_LIMIT:-1}"
+          memory: ${QDRANT_MEMORY_LIMIT:-2g}
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-ec", ": >/dev/tcp/127.0.0.1/6333"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  litellm-pgvector:
+    logging: *default-logging
+    profiles: [dev]
+    image: litellm-pgvector:5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
+    build:
+      context: .
+      dockerfile: pgvector/Dockerfile
+      additional_contexts:
+        upstream: https://github.com/BerriAI/litellm-pgvector.git#5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
+      labels:
+        <<: *own-image-labels
+        org.opencontainers.image.title: litellm-pgvector
+        org.opencontainers.image.description: LiteLLM pgvector vector-store connector built from the pinned upstream commit
+        org.opencontainers.image.version: 5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
+        org.opencontainers.image.base.name: python:3.11.18-slim-bookworm
+        org.opencontainers.image.source: https://github.com/BerriAI/litellm-pgvector
+        org.opencontainers.image.url: https://github.com/BerriAI/litellm-pgvector
+        org.opencontainers.image.revision: 5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
+        org.opencontainers.image.licenses: MIT
+    environment:
+      DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}@vector-postgres:5432/vector_store?schema=public
+      SERVER_API_KEY: ${PG_VECTOR_API_KEY:?Set PG_VECTOR_API_KEY in .env}
+      HOST: 0.0.0.0
+      PORT: "8000"
+      EMBEDDING__MODEL: ${PGVECTOR_EMBEDDING_MODEL:-openai/bge-m3}
+      EMBEDDING__BASE_URL: http://litellm-dev:4000
+      EMBEDDING__API_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
+      EMBEDDING__DIMENSIONS: "${PGVECTOR_EMBEDDING_DIMENSIONS:-1024}"
+    depends_on:
+      pgvector-migrate:
+        condition: service_completed_successfully
+      litellm-dev:
+        condition: service_started
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    networks: [internal]
+    restart: unless-stopped
+    deploy: *resources-small
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Observability: metrics and exporters
+  # ---------------------------------------------------------------------------
 
   prometheus:
     logging: *default-logging
@@ -572,6 +865,7 @@ services:
         condition: service_completed_successfully
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-medium
 
   prometheus-secrets-init:
     logging: *default-logging
@@ -595,6 +889,70 @@ services:
     networks: [internal]
     restart: "no"
 
+  postgres-exporter:
+    logging: *default-logging
+    image: prometheuscommunity/postgres-exporter:v0.20.1@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
+    environment:
+      DATA_SOURCE_NAME: postgresql://litellm_exporter:${PG_EXPORTER_PASSWORD:?Set PG_EXPORTER_PASSWORD in .env}@postgres:5432/postgres?sslmode=disable
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
+    networks: [internal]
+    restart: unless-stopped
+    deploy: *resources-tiny
+
+  pgvector-exporter:
+    logging: *default-logging
+    image: prometheuscommunity/postgres-exporter:v0.20.1@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
+    environment:
+      DATA_SOURCE_NAME: postgresql://vector_exporter:${PG_VECTOR_EXPORTER_PASSWORD:?Set PG_VECTOR_EXPORTER_PASSWORD in .env}@vector-postgres:5432/vector_store?sslmode=disable
+    depends_on:
+      pgvector-access-init:
+        condition: service_completed_successfully
+    networks: [internal]
+    restart: unless-stopped
+    deploy: *resources-tiny
+
+  node-exporter:
+    logging: *default-logging
+    image: prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --collector.textfile.directory=/textfile
+    volumes:
+      - /:/host:ro
+      - ./security-metrics:/textfile:ro
+    networks: [internal]
+    restart: unless-stopped
+    deploy: *resources-tiny
+
+  cadvisor:
+    logging: *default-logging
+    image: gcr.io/cadvisor/cadvisor:v0.55.1@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks: [internal]
+    restart: unless-stopped
+    deploy: *resources-small
+
+  blackbox:
+    logging: *default-logging
+    image: prom/blackbox-exporter:v0.29.1@sha256:ea1c7aa3ef3f307cd03e85f34abb604478ccb90b567fc690da0cd9776da76b13
+    # Only the http_2xx module is used; ICMP probing is not required.
+    cap_drop: [NET_RAW]
+    networks: [internal]
+    restart: unless-stopped
+    deploy: *resources-tiny
+
+  # ---------------------------------------------------------------------------
+  # Observability: logs, traces, and OpenSearch
+  # ---------------------------------------------------------------------------
+
   alloy:
     logging: *default-logging
     image: grafana/alloy:v1.21.3@sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
@@ -612,6 +970,7 @@ services:
         condition: service_healthy
     networks: [internal, alloy-monitor]
     restart: unless-stopped
+    deploy: *resources-medium
 
   alloy-docker-proxy:
     logging: *default-logging
@@ -636,6 +995,7 @@ services:
       timeout: 3s
       retries: 12
     restart: unless-stopped
+    deploy: *resources-tiny
 
   opensearch-certs:
     logging: *default-logging
@@ -690,6 +1050,7 @@ services:
     deploy:
       resources:
         limits:
+          cpus: "${RESOURCE_DATABASE_CPU_LIMIT:-2}"
           memory: ${OPENSEARCH_MEMORY_LIMIT:-3g}
     depends_on:
       opensearch-certs:
@@ -753,6 +1114,7 @@ services:
       - no-new-privileges:true
     networks: [edge, internal]
     restart: unless-stopped
+    deploy: *resources-medium
     healthcheck:
       test: ["CMD-SHELL", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5601/api/status); [ \"$$code\" = 200 ] || [ \"$$code\" = 401 ]"]
       interval: 10s
@@ -807,7 +1169,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${DATA_PREPPER_MEMORY_LIMIT:-1g}
+          cpus: "${RESOURCE_MEDIUM_CPU_LIMIT:-2}"
+          memory: ${DATA_PREPPER_MEMORY_LIMIT:-2g}
     depends_on:
       opensearch-setup:
         condition: service_completed_successfully
@@ -857,336 +1220,10 @@ services:
         condition: service_started
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-small
     healthcheck:
       test: ["CMD", "python", "-m", "litellm_opensearch", "healthcheck"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 3m
-
-  litellm-prod:
-    logging: *default-logging
-    profiles: [prod]
-    image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml
-        exec /app/docker/prod_entrypoint.sh --config=/app/runtime-config.yaml --port=4000
-    volumes:
-      - ./litellm/config.prod.yaml:/app/config.yaml:ro
-      - ./litellm/modules:/app/modules:ro
-      - ${BRAND_ASSETS_DIR:-./branding/foo-bar}:/app/branding:ro
-      - ${D3_DECISION_CA_BUNDLE:?Set D3_DECISION_CA_BUNDLE in .env}:/etc/ssl/certs/d3-decision-ca-bundle.pem:ro
-    environment:
-      # LiteLLM-native branding. Logo and favicon accept a local PNG/JPEG/WEBP/ICO
-      # path under /app/branding or an https:// URL; the rest are LiteLLM
-      # Enterprise options and are passed only when set in .env.
-      UI_LOGO_PATH: ${UI_LOGO_PATH:-/app/branding/logo.png}
-      UI_LOGO_PATH_DARK: ${UI_LOGO_PATH_DARK:-/app/branding/logo-dark.png}
-      LITELLM_FAVICON_URL: ${LITELLM_FAVICON_URL:-/app/branding/favicon.png}
-      DOCS_TITLE:
-      DOCS_DESCRIPTION:
-      EMAIL_LOGO_URL:
-      EMAIL_SUPPORT_CONTACT:
-      EMAIL_SIGNATURE:
-      EMAIL_SUBJECT_INVITATION:
-      EMAIL_SUBJECT_KEY_CREATED:
-      EMAIL_SUBJECT_KEY_ROTATED:
-      DATABASE_URL: postgresql://${PG_USER:-litellm}:${PG_PASSWORD:?Set PG_PASSWORD in .env}@postgres:5432/litellm_prod
-      STORE_MODEL_IN_DB: "${LITELLM_STORE_MODEL_IN_DB:-True}"
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
-      D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
-      D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
-      SSL_CERT_FILE: /etc/ssl/certs/d3-decision-ca-bundle.pem
-      LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
-      # Request and service spans also go to OpenSearch Trace Analytics through
-      # Data Prepper; Langfuse keeps its own exporter.
-      OTEL_EXPORTER: ${LITELLM_OTEL_TRACE_EXPORTER:-otlp_grpc}
-      OTEL_ENDPOINT: http://data-prepper:21890
-      OTEL_SERVICE_NAME: litellm-prod
-      OTEL_ENVIRONMENT_NAME: production
-      LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""
-      LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""
-      LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""
-      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: ${OTEL_GENAI_CAPTURE_MESSAGE_CONTENT:-no_content}
-      OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: "${OTEL_PYTHON_FASTAPI_EXCLUDED_URLS:-.*}"
-      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
-      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
-      LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:-}
-      LANGFUSE_HOST: http://langfuse-web:3000
-      PROXY_BASE_URL: https://${LITELLM_PROD_HOST:?Set LITELLM_PROD_HOST in .env}
-      FORWARDED_ALLOW_IPS: "${LITELLM_FORWARDED_ALLOW_IPS:-*}"
-    depends_on:
-      postgres-init:
-        condition: service_completed_successfully
-      presidio-analyzer:
-        condition: service_healthy
-      presidio-anonymizer:
-        condition: service_healthy
-      langfuse-web:
-        condition: service_healthy
-        required: false
-    cap_drop: [NET_RAW]
-    networks: [edge, internal, xberg-sandbox]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
-      interval: 10s
-      timeout: 5s
-      retries: 18
-      start_period: 30s
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.litellm-prod.rule=Host(`${LITELLM_PROD_HOST:?Set LITELLM_PROD_HOST in .env}`)
-      - traefik.http.routers.litellm-prod.entrypoints=websecure
-      - traefik.http.routers.litellm-prod.tls=true
-      - traefik.http.services.litellm-prod.loadbalancer.server.port=4000
-
-  litellm-demo-data-prod:
-    logging: *default-logging
-    profiles: [demo]
-    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
-    environment:
-      PGHOST: postgres
-      PGDATABASE: litellm_prod
-      PGUSER: ${PG_USER:-litellm}
-      PGPASSWORD: ${PG_PASSWORD:?Set PG_PASSWORD in .env}
-    command:
-      - psql
-      - --no-psqlrc
-      - --set
-      - ON_ERROR_STOP=1
-      - --file
-      - /seed/demo-data.sql
-    volumes:
-      - ./litellm/demo-data.sql:/seed/demo-data.sql:ro
-    depends_on:
-      litellm-prod:
-        condition: service_healthy
-    networks: [internal]
-    restart: "no"
-
-  litellm-dev:
-    logging: *default-logging
-    profiles: [dev]
-    image: ghcr.io/berriai/litellm:v1.107.0-dev.3@sha256:e7f68da02ed3ec52f0b8d386dbb278a0aa06dbc879f5ddda5a3cf87b2bff194c
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml
-        exec /app/docker/prod_entrypoint.sh --config=/app/runtime-config.yaml --port=4000
-    volumes:
-      - ./litellm/config.dev.yaml:/app/config.yaml:ro
-      - ./litellm/modules:/app/modules:ro
-      - ${BRAND_ASSETS_DIR:-./branding/foo-bar}:/app/branding:ro
-      - ${D3_DECISION_CA_BUNDLE:?Set D3_DECISION_CA_BUNDLE in .env}:/etc/ssl/certs/d3-decision-ca-bundle.pem:ro
-    environment:
-      # LiteLLM-native branding. Logo and favicon accept a local PNG/JPEG/WEBP/ICO
-      # path under /app/branding or an https:// URL; the rest are LiteLLM
-      # Enterprise options and are passed only when set in .env.
-      UI_LOGO_PATH: ${UI_LOGO_PATH:-/app/branding/logo.png}
-      UI_LOGO_PATH_DARK: ${UI_LOGO_PATH_DARK:-/app/branding/logo-dark.png}
-      LITELLM_FAVICON_URL: ${LITELLM_FAVICON_URL:-/app/branding/favicon.png}
-      DOCS_TITLE:
-      DOCS_DESCRIPTION:
-      EMAIL_LOGO_URL:
-      EMAIL_SUPPORT_CONTACT:
-      EMAIL_SIGNATURE:
-      EMAIL_SUBJECT_INVITATION:
-      EMAIL_SUBJECT_KEY_CREATED:
-      EMAIL_SUBJECT_KEY_ROTATED:
-      DATABASE_URL: postgresql://${PG_USER:-litellm}:${PG_PASSWORD:?Set PG_PASSWORD in .env}@postgres:5432/litellm_dev
-      STORE_MODEL_IN_DB: "${LITELLM_STORE_MODEL_IN_DB:-True}"
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
-      D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
-      D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
-      SSL_CERT_FILE: /etc/ssl/certs/d3-decision-ca-bundle.pem
-      LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
-      # Request and service spans also go to OpenSearch Trace Analytics through
-      # Data Prepper; Langfuse keeps its own exporter.
-      OTEL_EXPORTER: ${LITELLM_OTEL_TRACE_EXPORTER:-otlp_grpc}
-      OTEL_ENDPOINT: http://data-prepper:21890
-      OTEL_SERVICE_NAME: litellm-dev
-      OTEL_ENVIRONMENT_NAME: development
-      LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""
-      LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""
-      LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""
-      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: ${OTEL_GENAI_CAPTURE_MESSAGE_CONTENT:-no_content}
-      OTEL_PYTHON_FASTAPI_EXCLUDED_URLS: "${OTEL_PYTHON_FASTAPI_EXCLUDED_URLS:-.*}"
-      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
-      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
-      LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:-}
-      LANGFUSE_HOST: http://langfuse-web:3000
-      PG_VECTOR_API_BASE: http://litellm-pgvector:8000
-      PG_VECTOR_API_KEY: ${PG_VECTOR_API_KEY:?Set PG_VECTOR_API_KEY in .env}
-      VECTOR_DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}@vector-postgres:5432/vector_store
-      QDRANT_API_BASE: http://qdrant:6333
-      QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
-      XBERG_INDEX_EMBEDDING_MODEL: ${XBERG_INDEX_EMBEDDING_MODEL:-hosted_vllm/bge-m3}
-      XBERG_INDEX_EMBEDDING_API_BASE: http://bge-m3-vllm:8000
-      XBERG_AUTO_INDEX_ENABLED: ${XBERG_AUTO_INDEX_ENABLED:-false}
-      PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
-      PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000
-      PROXY_BASE_URL: https://${LITELLM_DEV_HOST:?Set LITELLM_DEV_HOST in .env}
-      FORWARDED_ALLOW_IPS: "${LITELLM_FORWARDED_ALLOW_IPS:-*}"
-    depends_on:
-      postgres-init:
-        condition: service_completed_successfully
-      presidio-analyzer:
-        condition: service_started
-      presidio-anonymizer:
-        condition: service_started
-      xberg:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-      langfuse-web:
-        condition: service_healthy
-        required: false
-      bge-m3-vllm:
-        condition: service_healthy
-    cap_drop: [NET_RAW]
-    networks: [edge, internal, xberg-sandbox]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
-      interval: 10s
-      timeout: 5s
-      retries: 18
-      start_period: 30s
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.litellm-dev.rule=Host(`${LITELLM_DEV_HOST:?Set LITELLM_DEV_HOST in .env}`)
-      - traefik.http.routers.litellm-dev.entrypoints=websecure
-      - traefik.http.routers.litellm-dev.tls=true
-      - traefik.http.services.litellm-dev.loadbalancer.server.port=4000
-
-  litellm-demo-data-dev:
-    logging: *default-logging
-    profiles: [dev]
-    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
-    environment:
-      PGHOST: postgres
-      PGDATABASE: litellm_dev
-      PGUSER: ${PG_USER:-litellm}
-      PGPASSWORD: ${PG_PASSWORD:?Set PG_PASSWORD in .env}
-    command:
-      - psql
-      - --no-psqlrc
-      - --set
-      - ON_ERROR_STOP=1
-      - --file
-      - /seed/demo-data.sql
-    volumes:
-      - ./litellm/demo-data.sql:/seed/demo-data.sql:ro
-    depends_on:
-      litellm-dev:
-        condition: service_healthy
-    networks: [internal]
-    restart: "no"
-
-  litellm-pgvector:
-    logging: *default-logging
-    profiles: [dev]
-    image: litellm-pgvector:5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
-    build:
-      context: .
-      dockerfile: pgvector/Dockerfile
-      additional_contexts:
-        upstream: https://github.com/BerriAI/litellm-pgvector.git#5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
-      labels:
-        <<: *own-image-labels
-        org.opencontainers.image.title: litellm-pgvector
-        org.opencontainers.image.description: LiteLLM pgvector vector-store connector built from the pinned upstream commit
-        org.opencontainers.image.version: 5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
-        org.opencontainers.image.base.name: python:3.11.18-slim-bookworm
-        org.opencontainers.image.source: https://github.com/BerriAI/litellm-pgvector
-        org.opencontainers.image.url: https://github.com/BerriAI/litellm-pgvector
-        org.opencontainers.image.revision: 5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
-        org.opencontainers.image.licenses: MIT
-    environment:
-      DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}@vector-postgres:5432/vector_store?schema=public
-      SERVER_API_KEY: ${PG_VECTOR_API_KEY:?Set PG_VECTOR_API_KEY in .env}
-      HOST: 0.0.0.0
-      PORT: "8000"
-      EMBEDDING__MODEL: ${PGVECTOR_EMBEDDING_MODEL:-openai/bge-m3}
-      EMBEDDING__BASE_URL: http://litellm-dev:4000
-      EMBEDDING__API_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
-      EMBEDDING__DIMENSIONS: "${PGVECTOR_EMBEDDING_DIMENSIONS:-1024}"
-    depends_on:
-      pgvector-migrate:
-        condition: service_completed_successfully
-      litellm-dev:
-        condition: service_started
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp:mode=1777
-    networks: [internal]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 20s
-
-  postgres-exporter:
-    logging: *default-logging
-    image: prometheuscommunity/postgres-exporter:v0.20.1@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
-    environment:
-      DATA_SOURCE_NAME: postgresql://litellm_exporter:${PG_EXPORTER_PASSWORD:?Set PG_EXPORTER_PASSWORD in .env}@postgres:5432/postgres?sslmode=disable
-    depends_on:
-      postgres-init:
-        condition: service_completed_successfully
-    networks: [internal]
-    restart: unless-stopped
-
-  pgvector-exporter:
-    logging: *default-logging
-    image: prometheuscommunity/postgres-exporter:v0.20.1@sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
-    environment:
-      DATA_SOURCE_NAME: postgresql://vector_exporter:${PG_VECTOR_EXPORTER_PASSWORD:?Set PG_VECTOR_EXPORTER_PASSWORD in .env}@vector-postgres:5432/vector_store?sslmode=disable
-    depends_on:
-      pgvector-access-init:
-        condition: service_completed_successfully
-    networks: [internal]
-    restart: unless-stopped
-
-  node-exporter:
-    logging: *default-logging
-    image: prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
-    pid: host
-    command:
-      - --path.rootfs=/host
-      - --collector.textfile.directory=/textfile
-    volumes:
-      - /:/host:ro
-      - ./security-metrics:/textfile:ro
-    networks: [internal]
-    restart: unless-stopped
-
-  cadvisor:
-    logging: *default-logging
-    image: gcr.io/cadvisor/cadvisor:v0.55.1@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
-    privileged: true
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-    networks: [internal]
-    restart: unless-stopped
-
-  blackbox:
-    logging: *default-logging
-    image: prom/blackbox-exporter:v0.29.1@sha256:ea1c7aa3ef3f307cd03e85f34abb604478ccb90b567fc690da0cd9776da76b13
-    # Only the http_2xx module is used; ICMP probing is not required.
-    cap_drop: [NET_RAW]
-    networks: [internal]
-    restart: unless-stopped

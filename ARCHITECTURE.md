@@ -91,7 +91,12 @@ docker compose --profile prod --profile dev up -d
 ```
 
 The root `docker-compose.yml` includes `compose.optional.yml`, which owns
-Grafana/Loki, Langfuse, and image-security services and state. Profiles remain
+Grafana/Loki, Langfuse, and image-security services and state. The core file
+groups its services along the request path (edge, LiteLLM, guardrails and
+tools, data stores, the dev model plane, observability); the optional file
+groups them by profile. YAML anchors cannot cross the include boundary, so the
+logging, image-label, and resource-tier fragments are duplicated, and the
+maintenance contracts fail if the copies drift. Profiles remain
 the runtime gate. The included module declares the three networks shared across
 the file boundary once, because Compose include resources cannot be redeclared
 by the parent. Optional services load operator values from `.env.optional` when
@@ -155,13 +160,21 @@ blackbox `/health` probes.
 | `langfuse-clickhouse-logs` | ClickHouse (optional) | Warning-or-higher ClickHouse logs, rotated at 100 MB with three files per channel |
 | `langfuse-minio-data` | MinIO (optional) | Langfuse events and media objects |
 | `langfuse-redis-data` | Redis (optional) | Langfuse queues |
-| `bge-m3-vllm-cache` | vLLM | Downloaded BGE-M3 model artifacts |
 
-The D3-mini model and its cache live on a separate GPU host and are not part of
+The D3-mini model and its cache live on a separate GPU host, deployed by the
+separate [`gpu-host/`](gpu-host/README.md) Compose project, and are not part of
 this Compose project's persistence. That host must expose only authenticated
 Decisions routes over verified TLS and should firewall access to the LiteLLM host.
-Both LiteLLM containers mount a combined CA bundle containing the D3 issuing CA
-and standard public roots, so private-PKI trust does not break provider TLS.
+Both LiteLLM containers mount `GPU_HOST_CA_BUNDLE`, the standard public roots plus
+the GPU host's dedicated mkcert CA, as `SSL_CERT_FILE`, so private-PKI trust does
+not break provider TLS. `scripts/build-gpu-host-ca-bundle.py` builds it.
+
+The development BGE-M3 embedding model and its cache live on the same remote GPU
+host, served by Text Embeddings Inference from the same `gpu-host/` project
+behind the same TLS proxy. TEI's API key guards every compute route, and only
+`litellm-dev` calls it. Keep the link on a private network and
+firewall it to the LiteLLM dev host. See
+[Remote BGE-M3 embeddings](docs/search-extraction-and-caching.md#remote-bge-m3-embeddings).
 
 The PostgreSQL default database is `litellm_prod`; `postgres-init` creates
 `litellm_dev`. Do not reintroduce an unused default `litellm` database.

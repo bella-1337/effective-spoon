@@ -171,6 +171,69 @@ class MaintenanceContractTests(unittest.TestCase):
         )
 
 
+    def test_gpu_host_stack_feeds_the_licence_register(self) -> None:
+        images, failures = contracts.auxiliary_images(contracts.ROOT)
+        self.assertEqual(failures, [])
+        for image in (
+            "ghcr.io/vllm-project/semantic-router/vllm-sr-cuda:latest",
+            "docker.io/nginxinc/nginx-unprivileged:1.29.5-alpine",
+            "ghcr.io/huggingface/text-embeddings-inference:cuda-1.9.4",
+        ):
+            self.assertIn(image, images)
+        revisions = {
+            revision
+            for relative in contracts.GPU_HOST_REVISION_SOURCES
+            for revision in contracts.GPU_HOST_REVISION_RE.findall(
+                (contracts.ROOT / relative).read_text(encoding="utf-8")
+            )
+        }
+        self.assertEqual(
+            revisions,
+            {
+                "5617a9f61b028005a4858fdac845db406aefb181",
+                "a475367de0d8133a3c1a2a0dc12303d89cfa2ab4",
+            },
+        )
+
+    def test_shared_compose_fragments_must_match_across_include(self) -> None:
+        fragments = "".join(
+            f"{key}: &{key.removeprefix('x-')}\n  value: 1\n\n"
+            for key in contracts.SHARED_COMPOSE_FRAGMENTS
+        )
+        self.assertEqual(
+            contracts.shared_compose_fragment_failures(
+                "name: stack\n" + fragments, "# optional\n" + fragments
+            ),
+            [],
+        )
+
+        drifted = fragments.replace(
+            "x-resources-small: &resources-small\n  value: 1",
+            "x-resources-small: &resources-small\n  value: 2",
+        )
+        missing = fragments.replace("x-default-logging:", "x-other-logging:")
+        self.assertEqual(
+            contracts.shared_compose_fragment_failures(fragments, drifted),
+            [
+                "Shared Compose fragment x-resources-small differs between "
+                "docker-compose.yml and compose.optional.yml"
+            ],
+        )
+        self.assertEqual(
+            contracts.shared_compose_fragment_failures(fragments, missing),
+            ["Shared Compose fragment x-default-logging is missing from compose.optional.yml"],
+        )
+
+    def test_repository_shared_compose_fragments_are_in_sync(self) -> None:
+        root = contracts.ROOT
+        self.assertEqual(
+            contracts.shared_compose_fragment_failures(
+                (root / "docker-compose.yml").read_text(encoding="utf-8"),
+                (root / "compose.optional.yml").read_text(encoding="utf-8"),
+            ),
+            [],
+        )
+
     def test_public_hostnames_must_not_be_hard_coded(self) -> None:
         env_examples = {
             ".env.example": {

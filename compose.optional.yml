@@ -18,6 +18,31 @@ x-default-logging: &default-logging
     max-size: "${LOG_MAX_SIZE:-10m}"
     max-file: "${LOG_MAX_FILE:-3}"
 
+# Resource tiers, mirrored from docker-compose.yml because YAML anchors do not
+# cross the include boundary. Values come from .env. The maintenance contracts
+# fail when these, x-own-image-labels, or x-default-logging drift from the core
+# file.
+x-resources-tiny: &resources-tiny
+  resources:
+    limits:
+      cpus: "${RESOURCE_TINY_CPU_LIMIT:-0.5}"
+      memory: ${RESOURCE_TINY_MEMORY_LIMIT:-256m}
+x-resources-small: &resources-small
+  resources:
+    limits:
+      cpus: "${RESOURCE_SMALL_CPU_LIMIT:-1}"
+      memory: ${RESOURCE_SMALL_MEMORY_LIMIT:-1g}
+x-resources-medium: &resources-medium
+  resources:
+    limits:
+      cpus: "${RESOURCE_MEDIUM_CPU_LIMIT:-2}"
+      memory: ${RESOURCE_MEDIUM_MEMORY_LIMIT:-2g}
+x-resources-database: &resources-database
+  resources:
+    limits:
+      cpus: "${RESOURCE_DATABASE_CPU_LIMIT:-2}"
+      memory: ${RESOURCE_DATABASE_MEMORY_LIMIT:-4g}
+
 x-langfuse-environment: &langfuse-environment
   HOSTNAME: 0.0.0.0
   TZ: UTC
@@ -70,6 +95,10 @@ volumes:
   langfuse-redis-data: {}
 
 services:
+  # ---------------------------------------------------------------------------
+  # grafana profile: Grafana, Loki, and the Loki collector
+  # ---------------------------------------------------------------------------
+
   loki:
     logging: *default-logging
     profiles: [grafana]
@@ -82,6 +111,7 @@ services:
       - "3100"
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-medium
     healthcheck:
       test: ["CMD", "/usr/bin/loki", "-version"]
       interval: 10s
@@ -107,6 +137,7 @@ services:
         condition: service_healthy
     networks: [internal, alloy-monitor]
     restart: unless-stopped
+    deploy: *resources-medium
 
   grafana-db-init:
     logging: *default-logging
@@ -178,12 +209,17 @@ services:
         condition: service_healthy
     networks: [edge, internal]
     restart: unless-stopped
+    deploy: *resources-small
     labels:
       - traefik.enable=true
       - traefik.http.routers.grafana.rule=Host(`${GRAFANA_HOST:?Set GRAFANA_HOST in .env.optional}`)
       - traefik.http.routers.grafana.entrypoints=websecure
       - traefik.http.routers.grafana.tls=true
       - traefik.http.services.grafana.loadbalancer.server.port=3000
+
+  # ---------------------------------------------------------------------------
+  # langfuse profile: Langfuse web and worker with their stores
+  # ---------------------------------------------------------------------------
 
   langfuse-preflight:
     logging: *default-logging
@@ -245,6 +281,7 @@ services:
       langfuse-preflight:
         condition: service_completed_successfully
     restart: unless-stopped
+    deploy: *resources-database
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -270,6 +307,7 @@ services:
       langfuse-preflight:
         condition: service_completed_successfully
     restart: unless-stopped
+    deploy: *resources-database
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
       interval: 5s
@@ -325,6 +363,7 @@ services:
       langfuse-preflight:
         condition: service_completed_successfully
     restart: unless-stopped
+    deploy: *resources-small
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 3s
@@ -357,6 +396,7 @@ services:
       langfuse-preflight:
         condition: service_completed_successfully
     restart: unless-stopped
+    deploy: *resources-small
     healthcheck:
       test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_AUTH redis-cli ping | grep -q PONG"]
       interval: 3s
@@ -384,6 +424,7 @@ services:
         condition: service_healthy
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-medium
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3030/api/health"]
       interval: 10s
@@ -429,6 +470,7 @@ services:
         condition: service_healthy
     networks: [edge, internal]
     restart: unless-stopped
+    deploy: *resources-medium
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/api/public/health?failIfDatabaseUnavailable=true"]
       interval: 10s
@@ -441,6 +483,10 @@ services:
       - traefik.http.routers.langfuse.entrypoints=websecure
       - traefik.http.routers.langfuse.tls=true
       - traefik.http.services.langfuse.loadbalancer.server.port=3000
+
+  # ---------------------------------------------------------------------------
+  # security profile: scheduled image scanning
+  # ---------------------------------------------------------------------------
 
   image-security-docker-proxy:
     logging: *default-logging
@@ -465,6 +511,7 @@ services:
       timeout: 3s
       retries: 12
     restart: unless-stopped
+    deploy: *resources-tiny
 
   image-security-monitor:
     logging: *default-logging

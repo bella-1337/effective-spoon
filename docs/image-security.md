@@ -8,20 +8,21 @@ The repository includes a fail-closed, scheduled image-security monitor. It
 uses Trivy `0.76.1` from an immutable container digest, downloads a fresh
 vulnerability database, retrieves and validates the CISA Known Exploited
 Vulnerabilities (KEV) catalog, and scans the platform-specific digest actually
-used by each configured gateway and local-model container:
+used by each configured gateway and service container:
 
 ```bash
 ./scripts/maintenance.py security-scan
 ```
 
-The default scope is every running service in the Compose project. This includes
-`bge-m3-vllm` whenever the development profile is active, without
-reporting intentionally inactive profile services as unknown. Restrict a manual
+The default scope is every running service in the Compose project, without
+reporting intentionally inactive profile services as unknown. The remote GPU
+host's BGE-M3 and D3-mini containers belong to the separate `gpu-host/` project;
+scan their pinned images on that host or in the registry. Restrict a manual
 scan only when a narrower reviewed scope is required:
 
 ```bash
 ./scripts/maintenance.py security-scan \
-  --services litellm-dev,bge-m3-vllm
+  --services litellm-prod,litellm-dev
 ```
 
 The monitor reads running-container metadata directly from Docker. It never
@@ -299,9 +300,8 @@ SBOM generation shares the scanner lock, so it never runs concurrently with a
 vulnerability scan.
 
 Model weights are not inside any image and therefore not in the SBOMs. They are
-pinned to immutable revisions (`BGE_M3_REVISION` for BGE-M3 and
-`D3_MODEL_REVISION` in `scripts/deploy-d3-mini.sh`) and recorded in the
-register.
+pinned to immutable revisions (BGE-M3 in `gpu-host/compose.yml` and
+`D3_MODEL_REVISION` in `gpu-host/deploy.py`) and recorded in the register.
 
 ## Labels of locally built images
 
