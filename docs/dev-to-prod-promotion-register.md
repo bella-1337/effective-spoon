@@ -215,15 +215,15 @@ Tags: `register-added:v1.0.0`, `state:dev-only`,
 `stable-support:not-litellm-only`, `activation:service`.
 
 Dev calls BGE-M3 on the remote GPU host, served by Text Embeddings Inference
-from the `gpu-host/` stack over plain HTTP with an API key. The image and model
+from the `gpu-host/` stack over verified TLS with an API key. The image and model
 revision are pinned in `gpu-host/compose.yml`.
 
 Promotion plan:
 
 1. Select a production embedding service: a separate instance of the remote
    deployment or a managed service. Do not share the dev instance.
-2. Serve it over verified TLS, as D3 does; the dev endpoint's plain HTTP is an
-   accepted development-only risk.
+2. Keep verified TLS and a production-only API key; consider a certificate from
+   the organisation's CA instead of the GPU host's mkcert CA.
 3. Review the pinned image and model artifact provenance and license.
 4. Validate 1,024-dimensional output compatibility and multilingual quality.
 5. Capacity-test GPU memory, concurrency, cold starts, and request limits.

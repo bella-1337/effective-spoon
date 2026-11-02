@@ -165,13 +165,14 @@ The D3-mini model and its cache live on a separate GPU host, deployed by the
 separate [`gpu-host/`](gpu-host/README.md) Compose project, and are not part of
 this Compose project's persistence. That host must expose only authenticated
 Decisions routes over verified TLS and should firewall access to the LiteLLM host.
-Both LiteLLM containers mount a combined CA bundle containing the D3 issuing CA
-and standard public roots, so private-PKI trust does not break provider TLS.
+Both LiteLLM containers mount `GPU_HOST_CA_BUNDLE`, the standard public roots plus
+the GPU host's dedicated mkcert CA, as `SSL_CERT_FILE`, so private-PKI trust does
+not break provider TLS. `scripts/build-gpu-host-ca-bundle.py` builds it.
 
 The development BGE-M3 embedding model and its cache live on the same remote GPU
-host, served by Text Embeddings Inference from the same `gpu-host/` project. By
-operator decision that endpoint uses plain HTTP; TEI's API key guards every
-compute route, and only `litellm-dev` calls it. Keep the link on a private network and
+host, served by Text Embeddings Inference from the same `gpu-host/` project
+behind the same TLS proxy. TEI's API key guards every compute route, and only
+`litellm-dev` calls it. Keep the link on a private network and
 firewall it to the LiteLLM dev host. See
 [Remote BGE-M3 embeddings](docs/search-extraction-and-caching.md#remote-bge-m3-embeddings).
 

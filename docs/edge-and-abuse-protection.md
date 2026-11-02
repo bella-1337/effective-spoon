@@ -142,9 +142,9 @@ service-to-service traffic. cAdvisor remains privileged by design.
   [Environment variables](environment-variables.md).
 - **Plaintext internal links.** PostgreSQL, Presidio, and Data Prepper traffic
   on the `internal` network is not encrypted. OpenSearch uses TLS.
-- **Plaintext remote embeddings.** The dev profile reaches BGE-M3 on the remote
-  GPU host over plain HTTP, so its API key and the embedded request text cross
-  that network unencrypted. Production never calls it. See
-  [Plain HTTP: accepted risk](search-extraction-and-caching.md#plain-http-accepted-risk).
+- **Unconstrained GPU host CA.** LiteLLM trusts the GPU host's mkcert CA for
+  all outbound TLS, and mkcert CAs have no name constraints, so its private key
+  could impersonate a completion provider. It never leaves the GPU host; see the
+  [GPU host guide](../gpu-host/README.md#network-and-security).
 - **Upstream error detail.** Provider authentication errors are returned to
   callers and include a masked fragment of the provider API key.

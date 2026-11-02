@@ -183,7 +183,7 @@ services:
       - ./litellm/config.prod.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
       - ${BRAND_ASSETS_DIR:-./branding/foo-bar}:/app/branding:ro
-      - ${D3_DECISION_CA_BUNDLE:?Set D3_DECISION_CA_BUNDLE in .env}:/etc/ssl/certs/d3-decision-ca-bundle.pem:ro
+      - ${GPU_HOST_CA_BUNDLE:?Set GPU_HOST_CA_BUNDLE in .env}:/etc/ssl/certs/gpu-host-ca-bundle.pem:ro
     environment:
       # LiteLLM-native branding. Logo and favicon accept a local PNG/JPEG/WEBP/ICO
       # path under /app/branding or an https:// URL; the rest are LiteLLM
@@ -205,7 +205,8 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
       D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
       D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
-      SSL_CERT_FILE: /etc/ssl/certs/d3-decision-ca-bundle.pem
+      # Public roots plus the GPU host mkcert CA (D3-mini and BGE-M3 over TLS).
+      SSL_CERT_FILE: /etc/ssl/certs/gpu-host-ca-bundle.pem
       LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
       # Request and service spans also go to OpenSearch Trace Analytics through
       # Data Prepper; Langfuse keeps its own exporter.
@@ -288,7 +289,7 @@ services:
       - ./litellm/config.dev.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
       - ${BRAND_ASSETS_DIR:-./branding/foo-bar}:/app/branding:ro
-      - ${D3_DECISION_CA_BUNDLE:?Set D3_DECISION_CA_BUNDLE in .env}:/etc/ssl/certs/d3-decision-ca-bundle.pem:ro
+      - ${GPU_HOST_CA_BUNDLE:?Set GPU_HOST_CA_BUNDLE in .env}:/etc/ssl/certs/gpu-host-ca-bundle.pem:ro
     environment:
       # LiteLLM-native branding. Logo and favicon accept a local PNG/JPEG/WEBP/ICO
       # path under /app/branding or an https:// URL; the rest are LiteLLM
@@ -310,7 +311,8 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
       D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
       D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
-      SSL_CERT_FILE: /etc/ssl/certs/d3-decision-ca-bundle.pem
+      # Public roots plus the GPU host mkcert CA (D3-mini and BGE-M3 over TLS).
+      SSL_CERT_FILE: /etc/ssl/certs/gpu-host-ca-bundle.pem
       LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
       # Request and service spans also go to OpenSearch Trace Analytics through
       # Data Prepper; Langfuse keeps its own exporter.
@@ -332,8 +334,7 @@ services:
       VECTOR_DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}@vector-postgres:5432/vector_store
       QDRANT_API_BASE: http://qdrant:6333
       QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
-      # BGE-M3 runs on the remote GPU host over plain HTTP by operator decision;
-      # see docs/search-extraction-and-caching.md for the accepted risk.
+      # BGE-M3 runs on the remote GPU host behind its TLS proxy (gpu-host/).
       BGE_M3_API_BASE: ${BGE_M3_API_BASE:?Set BGE_M3_API_BASE in .env}
       BGE_M3_API_KEY: ${BGE_M3_API_KEY:?Set BGE_M3_API_KEY in .env}
       XBERG_INDEX_EMBEDDING_MODEL: ${XBERG_INDEX_EMBEDDING_MODEL:-hosted_vllm/bge-m3}

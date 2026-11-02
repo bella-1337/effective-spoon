@@ -17,10 +17,13 @@ available only for a private workstation or trusted development network.
 - Docker Engine or Docker Desktop with Docker Compose v2.20.0 or newer
   (required for the top-level `include` model)
 - Python 3.11 or newer for the local CI validation entrypoint
-- A remote GPU host serving the D3-mini Decisions endpoint (HTTPS) and, for the
-  development profile, the BGE-M3 embedding endpoint (plain HTTP), deployed with
-  the separate [`gpu-host/`](gpu-host/README.md) stack; see
+- A remote GPU host serving the D3-mini Decisions endpoint and, for the
+  development profile, the BGE-M3 embedding endpoint, both over TLS with a
+  certificate from the host's mkcert CA, deployed with the separate
+  [`gpu-host/`](gpu-host/README.md) stack; see
   [Hardware sizing](#hardware-sizing)
+- `GPU_HOST_CA_BUNDLE`: the public roots plus that mkcert CA, built with
+  `./scripts/build-gpu-host-ca-bundle.py --root-ca rootCA.pem`
 - About 4.5 GB of additional RAM for OpenSearch, OpenSearch Dashboards, and Data
   Prepper. On Linux hosts, OpenSearch requires `vm.max_map_count` of at least
   262144:
@@ -152,8 +155,12 @@ One 48 GB GPU serves both models through the separate
 
 | Model | Engine | Endpoint | GPU memory (typical / worst) |
 | --- | --- | --- | --- |
-| D3-mini | vLLM Semantic Router model runtime, Nginx TLS proxy | HTTPS, prod and dev | ~12 / ~18 GiB at the 8,192-token input cap |
-| BGE-M3 | Hugging Face Text Embeddings Inference | plain HTTP, dev only | ~2–3 / ~4 GiB |
+| D3-mini | vLLM Semantic Router model runtime | HTTPS on 8443, prod and dev | ~12 / ~18 GiB at the 8,192-token input cap |
+| BGE-M3 | Hugging Face Text Embeddings Inference | HTTPS on 9443, dev only | ~2–3 / ~4 GiB |
+
+One Nginx proxy terminates TLS for both with a certificate from the host's
+dedicated mkcert CA; the LiteLLM hosts trust that CA through
+`GPU_HOST_CA_BUNDLE`.
 
 - **About 23 GiB at worst** leaves more than 20 GB free. Neither engine reserves
   memory up front, so no per-process fractions are needed.
@@ -161,9 +168,9 @@ One 48 GB GPU serves both models through the separate
   request; if it fails or takes longer than 15 seconds, routing falls back to
   `gpt-4o`. Keep the host on the same site network and firewalled to both
   LiteLLM hosts.
-- **BGE-M3 uses plain HTTP** with an API key that guards every compute route.
-  Keep it firewalled to the dev host. Promoting the semantic cache or RAG to
-  prod adds prod load to this GPU and requires TLS first.
+- **BGE-M3** has its own API key, which guards every compute route. Keep its
+  port firewalled to the dev host. Promoting the semantic cache or RAG to prod
+  adds prod load to this GPU.
 - **Dev and prod share D3-mini.** A dev load test can slow prod routing. With
   the headroom on a 48 GB card, a second D3-mini instance for dev fits too.
 

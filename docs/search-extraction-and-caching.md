@@ -144,13 +144,13 @@ service; embeddings never pass through D3.
 
 Deploy D3-mini on the separate NVIDIA GPU host before starting this stack, with
 the [`gpu-host/`](../gpu-host/README.md) Compose project, which also serves
-BGE-M3. It needs Docker Compose, one CUDA-capable GPU, a DNS name, an
-operator-provided TLS certificate and key, and a random API key of at least 32
-characters:
+BGE-M3. It needs Docker Compose, one CUDA-capable GPU, `mkcert`, two DNS names
+that resolve to the host, and a random API key of at least 32 characters per
+model:
 
 ```sh
 cd gpu-host
-install -m 600 .env.example .env   # set D3_SERVER_NAME, TLS files, and keys
+install -m 600 .env.example .env   # set the server names and keys
 ./deploy.py
 ```
 
@@ -161,15 +161,35 @@ deployment checks a real four-tier decision before reporting success. Restrict
 the port at the firewall to the LiteLLM hosts. Copy the endpoint and the same
 secret to `D3_DECISION_API_BASE` and `D3_DECISION_API_KEY` in this stack's
 `.env`.
-Create `D3_DECISION_CA_BUNDLE` as a combined PEM containing the normal public
-root bundle plus the CA that issued D3's certificate. LiteLLM uses that combined
-bundle for both D3 and completion-provider TLS verification.
+
+### Trusting the GPU host's certificate
+
+The proxy's certificate for both models comes from a dedicated mkcert CA on the
+GPU host. Copy its public `rootCA.pem` (never `rootCA-key.pem`) to each LiteLLM
+host and build the combined bundle:
+
+```sh
+./scripts/build-gpu-host-ca-bundle.py --root-ca /path/to/rootCA.pem
+```
+
+The script joins the operating system's public roots with that CA in
+`traefik/certs/gpu-host-ca-bundle.pem`, which `GPU_HOST_CA_BUNDLE` mounts into
+both LiteLLM containers as `SSL_CERT_FILE`. LiteLLM verifies D3, BGE-M3, and
+every completion provider against it, so it must contain the public roots as
+well; a bundle holding only the mkcert CA would break OpenAI. Because mkcert CAs
+carry no name constraints, the CA's private key can impersonate any server to
+LiteLLM; protect it as described in the
+[GPU host guide](../gpu-host/README.md#network-and-security).
+
+### Calling the router
+
+Start the stack and call the router through the normal LiteLLM hostname and
+credential:
 
 ```sh
 docker compose --profile dev up -d
 ```
 
-Call the router through the normal LiteLLM hostname and credential:
 
 ```sh
 curl --fail --silent "https://$LITELLM_DEV_HOST/v1/chat/completions" \
@@ -200,38 +220,17 @@ the remote GPU host. Production does not use BGE-M3. The
 Embeddings Inference next to D3-mini on the same GPU; that README explains the
 engine choice and the 48 GB memory budget.
 
-TEI's image and the model revision are pinned, the container runs unprivileged
-on a read-only root filesystem, and its API key guards every compute route,
-including `/v1/embeddings` and `/invocations`. Only `/health`, `/ping`,
-`/metrics`, and `/docs` answer without it. Inputs over 8,192 tokens are
-rejected rather than truncated, so a long prompt cannot match a cached answer
-for a shared prefix. The deployment reports success only after an
-unauthenticated request is refused and a real embedding has 1,024 dimensions.
+BGE-M3 is reached over the same verified TLS as D3: the proxy publishes only
+`/v1/embeddings` and `/health`. TEI's image and the model revision are pinned,
+the container runs unprivileged on a read-only root filesystem, and its API key
+guards every compute route. Inputs over 8,192 tokens are rejected rather than
+truncated, so a long prompt cannot match a cached answer for a shared prefix.
+The deployment reports success only after an unauthenticated request is refused
+and a real embedding has 1,024 dimensions.
 
-Set `BGE_M3_API_BASE` (for example `http://bge-m3.${STACK_DOMAIN}:8080/v1`) and
+Set `BGE_M3_API_BASE` (for example `https://bge-m3.${STACK_DOMAIN}:9443/v1`) and
 the same `BGE_M3_API_KEY` in the dev host's `.env`. LiteLLM's `hosted_vllm`
 provider is its generic OpenAI-compatible adapter and works with TEI.
-
-### Plain HTTP: accepted risk
-
-By operator decision the endpoint uses plain HTTP, unlike D3, which keeps
-verified TLS. Anyone who can observe or intercept traffic between the dev host
-and the GPU host can read the API key and the embedded text, and can alter
-embeddings. The embedded text includes the user's request text for MCP tool
-filtering, prompts that opt in to the semantic cache, and Xberg chunks, which
-Presidio anonymizes before indexing. Compensating controls:
-
-- only the dev profile calls BGE-M3, and production traffic never does;
-- keep both hosts on the same private network segment, never route the port
-  over the Internet, and firewall it to the LiteLLM dev host;
-- TEI enforces the API key on every compute route;
-- rotate `BGE_M3_API_KEY` if the network is shared or the key may have been
-  observed.
-
-Switch to TLS before promoting BGE-M3 to production
-([D2P-008](dev-to-prod-promotion-register.md#d2p-008---bge-m3-embedding-service))
-or before the network between the hosts becomes untrusted. Only
-`BGE_M3_API_BASE` changes on the LiteLLM side.
 
 ## Development semantic response cache
 

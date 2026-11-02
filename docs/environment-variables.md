@@ -281,8 +281,8 @@ see [Remote BGE-M3 embeddings](search-extraction-and-caching.md#remote-bge-m3-em
 
 | Variable | Default / format | Description and guidance |
 | --- | --- | --- |
-| `BGE_M3_API_BASE` | Required; HTTP base URL ending in `/v1`; example: `http://bge-m3.${STACK_DOMAIN}:8080/v1` | Remote BGE-M3 endpoint on Text Embeddings Inference, used by LiteLLM development and Xberg auto-indexing. LiteLLM appends `/embeddings`. Prod never calls it, but Compose requires a value on every host. Plain HTTP is an accepted development-only risk: keep it on a private network and firewall the port to the LiteLLM dev host. Switching to an `https://` URL needs no other change once the remote host terminates TLS. |
-| `BGE_M3_API_KEY` | Required secret; at least 32 URL-safe random characters | API key enforced by Text Embeddings Inference on the GPU host. Over plain HTTP it is visible to anyone who can observe the link, so rotate it on the GPU host and in `.env` together whenever the network may be shared. |
+| `BGE_M3_API_BASE` | Required; HTTPS base URL ending in `/v1`; example: `https://bge-m3.${STACK_DOMAIN}:9443/v1` | Remote BGE-M3 endpoint behind the GPU host's TLS proxy, used by LiteLLM development and Xberg auto-indexing. LiteLLM appends `/embeddings` and verifies the certificate against `GPU_HOST_CA_BUNDLE`. The hostname must be in the GPU host's certificate. Prod never calls it, but Compose requires a value on every host. |
+| `BGE_M3_API_KEY` | Required secret; at least 32 URL-safe random characters | API key enforced by Text Embeddings Inference on the GPU host. Rotate it on the GPU host and in `.env` together. |
 
 ### Qdrant and semantic router
 
@@ -293,7 +293,7 @@ see [Remote BGE-M3 embeddings](search-extraction-and-caching.md#remote-bge-m3-em
 | `QDRANT_MEMORY_LIMIT` | `2g`; Docker size | Memory limit for Qdrant. Keep enough headroom for indexes and query peaks. |
 | `D3_DECISION_API_BASE` | Required; HTTPS base URL; example: `https://d3-mini.${STACK_DOMAIN}:8443` | Operator-controlled remote D3-mini endpoint, without `/v1/systemone`. LiteLLM appends the path. Allowlist this destination in network policy and use a certificate trusted by the LiteLLM host. |
 | `D3_DECISION_API_KEY` | Required secret, at least 32 random characters | Bearer credential shared only by LiteLLM and the remote D3 listener. Rotate it independently of LiteLLM client keys. |
-| `D3_DECISION_CA_BUNDLE` | Required host path to a PEM bundle | CA bundle mounted into both LiteLLM containers. It must include the CA that issued the D3 certificate **and** the normal public roots needed by completion providers; setting `SSL_CERT_FILE` to a private CA alone would break those providers. |
+| `GPU_HOST_CA_BUNDLE` | Required host path to a PEM bundle; example: `./traefik/certs/gpu-host-ca-bundle.pem` | Bundle mounted into both LiteLLM containers as `SSL_CERT_FILE`. Build it with `scripts/build-gpu-host-ca-bundle.py --root-ca rootCA.pem` from the GPU host's mkcert CA. It must hold that CA **and** the normal public roots needed by completion providers; a private CA alone would break those providers. Rebuild it and recreate both proxies when the GPU host's CA changes. Replaces `D3_DECISION_CA_BUNDLE`. |
 
 ### Presidio, Xberg, and pgvector connector
 

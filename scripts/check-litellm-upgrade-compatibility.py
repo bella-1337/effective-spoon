@@ -208,8 +208,8 @@ def static_checks(report: Reporter) -> None:
             "VLLM_SR_HOST",
         )
     ) and all(
-        mounts_read_only(proxy, "/etc/ssl/certs/d3-decision-ca-bundle.pem")
-        and service_environment(proxy).get("SSL_CERT_FILE") == "/etc/ssl/certs/d3-decision-ca-bundle.pem"
+        mounts_read_only(proxy, "/etc/ssl/certs/gpu-host-ca-bundle.pem")
+        and service_environment(proxy).get("SSL_CERT_FILE") == "/etc/ssl/certs/gpu-host-ca-bundle.pem"
         for proxy in ("litellm-prod", "litellm-dev")
     )
     (report.pass_ if decisions_router_ok else report.fail_)(
@@ -736,7 +736,7 @@ def main() -> None:
                                                            "-e", "PG_VECTOR_API_KEY=upgrade-check-placeholder",
                                                            "-e", "QDRANT_API_BASE=http://qdrant:6333",
                                                            "-e", "QDRANT_API_KEY=upgrade-check-placeholder",
-                                                           "-e", "BGE_M3_API_BASE=http://upgrade-check-placeholder:8000",
+                                                           "-e", "BGE_M3_API_BASE=https://bge-m3.example.test:9443/v1",
                                                            "-e", "BGE_M3_API_KEY=upgrade-check-placeholder"])
         finally:
             if xberg_container:

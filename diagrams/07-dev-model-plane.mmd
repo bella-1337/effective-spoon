@@ -8,7 +8,7 @@ flowchart TD
   %% @subtitle Dev-only services that give LiteLLM a semantic cache and a pgvector knowledge store, with BGE-M3 embeddings from the remote GPU host
   %% @card cyan | Semantic cache | Opt-in per request with cache.use-cache | Hit when cosine similarity is at least 0.92, scoped per end user | Qdrant runs on tmpfs, so recreating it deletes every entry
   %% @card violet | Knowledge store | sme-knowledge lives in vector-postgres (1,024-dim HNSW) | Search goes through BerriAI's litellm-pgvector connector | Opt-in Xberg auto-indexing anonymizes chunks with Presidio first
-  %% @card rose | Scope | Qdrant and the connector run only in the dev profile; only litellm-dev calls BGE-M3, over plain HTTP | Production lists no vector store and no semantic cache | Promote capabilities through the dev-to-prod register
+  %% @card rose | Scope | Qdrant and the connector run only in the dev profile; only litellm-dev calls BGE-M3, over TLS | Production lists no vector store and no semantic cache | Promote capabilities through the dev-to-prod register
   %% @tier 0: CU
   %% @tier 1: TR
   %% @tier 2: LD
@@ -33,14 +33,14 @@ flowchart TD
     end
   end
   subgraph EX["External services — outside the stack"]
-    BGE["Remote BGE-M3<br/>GPU host · plain HTTP"]:::external
+    BGE["Remote BGE-M3<br/>GPU host · TLS"]:::external
     OAI["OpenAI API<br/>generation on cache miss"]:::external
   end
 
   CU ==>|"HTTPS"| TR
   TR ==> LD
   LD -->|"cache lookup"| QD
-  LD -->|"embed · HTTP"| BGE
+  LD -->|"embed · TLS"| BGE
   LD -->|"vector search"| CON
   CON --> VP
   LD -.-> PR

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import stat
 import sys
 import tempfile
@@ -21,14 +22,10 @@ class GpuHostDeployTests(unittest.TestCase):
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        for name in ("tls.crt", "tls.key", "ca.crt"):
-            (self.root / name).write_text(f"{name}\n", encoding="utf-8")
         self.values = {
             "D3_SERVER_NAME": "d3-mini.example.test",
             "D3_API_KEY": "a" * 32,
-            "D3_TLS_CERT_FILE": str(self.root / "tls.crt"),
-            "D3_TLS_KEY_FILE": str(self.root / "tls.key"),
-            "D3_CA_CERT_FILE": str(self.root / "ca.crt"),
+            "BGE_M3_SERVER_NAME": "bge-m3.example.test",
             "BGE_M3_API_KEY": "b" * 32,
         }
 
@@ -55,7 +52,7 @@ class GpuHostDeployTests(unittest.TestCase):
 
     def test_valid_settings_fill_defaults(self) -> None:
         settings = deploy.validate(self.values)
-        self.assertEqual(settings["BGE_M3_PUBLIC_PORT"], "8080")
+        self.assertEqual(settings["BGE_M3_PUBLIC_PORT"], "9443")
         self.assertEqual(settings["D3_PUBLIC_PORT"], "8443")
 
     def test_validation_rejects_unsafe_settings(self) -> None:
@@ -63,6 +60,8 @@ class GpuHostDeployTests(unittest.TestCase):
             "D3_API_KEY": ("replace_with_random_32_byte_d3_api_key", "URL-safe"),
             "BGE_M3_API_KEY": ("a" * 32, "different secrets"),
             "D3_SERVER_NAME": ("d3 mini", "DNS hostname"),
+            "BGE_M3_SERVER_NAME": ("bge_m3.example.test", "DNS hostname"),
+            "TLS_EXTRA_NAMES": ("gpu.example.test, not a name", "hostnames or IP addresses"),
             "BGE_M3_PUBLIC_PORT": ("8443", "must differ"),
             "BGE_M3_BIND_ADDRESS": ("example.test", "IP address"),
             "BGE_M3_MAX_BATCH_TOKENS": ("4096", "at least 8192"),
@@ -77,6 +76,25 @@ class GpuHostDeployTests(unittest.TestCase):
         self.assertIn(f"- {json.dumps('key-with.dots~and-dashes-0123456789')}", rendered)
         self.assertIn(f"revision: {deploy.D3_MODEL_REVISION}", rendered)
         self.assertIn("overflow: reject", rendered)
+
+    def test_certificate_names_cover_both_endpoints_once(self) -> None:
+        settings = deploy.validate(
+            {**self.values, "TLS_EXTRA_NAMES": "gpu.example.test, 10.0.0.5, bge-m3.example.test"}
+        )
+        self.assertEqual(
+            deploy.certificate_names(settings),
+            ["d3-mini.example.test", "bge-m3.example.test", "gpu.example.test", "10.0.0.5"],
+        )
+
+    @unittest.skipUnless(shutil.which("mkcert") and shutil.which("openssl"), "mkcert and openssl are required")
+    def test_certificate_is_issued_once_from_the_dedicated_ca(self) -> None:
+        state = self.root / "state"
+        settings = deploy.validate(self.values)
+        deploy.prepare_state(settings, state)
+        self.assertTrue(deploy.ensure_certificate(settings, state))
+        self.assertFalse(deploy.ensure_certificate(settings, state))
+        self.assertTrue((state / "mkcert" / "rootCA.pem").is_file())
+        self.assertTrue(deploy.ensure_certificate({**settings, "TLS_EXTRA_NAMES": "gpu.example.test"}, state))
 
     def test_rendered_state_is_private(self) -> None:
         state = self.root / "state"

@@ -1,6 +1,7 @@
-# Remote GPU host: D3-mini decisions (verified TLS) and BGE-M3 embeddings
-# (plain HTTP by operator decision) sharing one GPU. Deploy with ./deploy.py,
-# which renders the secrets under state/ and passes state/compose.env.
+# Remote GPU host: D3-mini decisions and BGE-M3 embeddings sharing one GPU,
+# both published only through the TLS proxy with a certificate from this host's
+# dedicated mkcert CA. Deploy with ./deploy.py, which renders the secrets under
+# state/ and passes state/compose.env.
 name: ${COMPOSE_PROJECT_NAME:-gpu-models}
 
 x-hardening: &hardening
@@ -53,33 +54,9 @@ services:
       retries: 120
       start_period: 30s
 
-  # Terminates TLS for D3 and publishes only the three Decisions routes.
-  d3-tls:
-    <<: *hardening
-    logging: *logging
-    image: docker.io/nginxinc/nginx-unprivileged:1.29.5-alpine@sha256:42a7d7f2ee23e9f5a1dcdf3647ba5c585bbd18f79e79cd817e70e8cd61c55779
-    ports:
-      - "${D3_BIND_ADDRESS:-0.0.0.0}:${D3_PUBLIC_PORT:-8443}:8443"
-    volumes:
-      - ./nginx/d3-tls.conf:/etc/nginx/nginx.conf:ro
-      - ./state/d3/tls:/run/secrets:ro
-    tmpfs:
-      - /tmp:mode=1777
-      - /var/cache/nginx:mode=0750
-    depends_on:
-      d3-mini:
-        condition: service_healthy
-    networks: [d3]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "nc", "-z", "127.0.0.1", "8443"]
-      interval: 15s
-      timeout: 5s
-      retries: 12
-
   # BGE-M3 on Hugging Face Text Embeddings Inference. Its API key guards every
-  # compute route; only /health, /ping, /metrics, and /docs answer without it.
-  # Plain HTTP: keep the port on a private network, firewalled to LiteLLM dev.
+  # compute route; only /health, /ping, /metrics, and /docs answer without it,
+  # and the TLS proxy publishes only /v1/embeddings and /health.
   bge-m3:
     <<: *hardening
     logging: *logging
@@ -113,8 +90,6 @@ services:
       - ./state/bge-m3/data:/data
     tmpfs:
       - /tmp:mode=1777
-    ports:
-      - "${BGE_M3_BIND_ADDRESS:-0.0.0.0}:${BGE_M3_PUBLIC_PORT:-8080}:8080"
     deploy:
       resources:
         limits:
@@ -132,6 +107,30 @@ services:
       timeout: 10s
       retries: 15
       start_period: 15m
+
+  # Terminates TLS for both models and publishes only their allowlisted routes:
+  # D3-mini on D3_PUBLIC_PORT and BGE-M3 on BGE_M3_PUBLIC_PORT. Upstreams are
+  # resolved per request, so neither model's start-up blocks the other.
+  tls:
+    <<: *hardening
+    logging: *logging
+    image: docker.io/nginxinc/nginx-unprivileged:1.29.5-alpine@sha256:42a7d7f2ee23e9f5a1dcdf3647ba5c585bbd18f79e79cd817e70e8cd61c55779
+    ports:
+      - "${D3_BIND_ADDRESS:-0.0.0.0}:${D3_PUBLIC_PORT:-8443}:8443"
+      - "${BGE_M3_BIND_ADDRESS:-0.0.0.0}:${BGE_M3_PUBLIC_PORT:-9443}:9443"
+    volumes:
+      - ./nginx/tls.conf:/etc/nginx/nginx.conf:ro
+      - ./state/tls:/run/secrets:ro
+    tmpfs:
+      - /tmp:mode=1777
+      - /var/cache/nginx:mode=0750
+    networks: [d3, bge-m3]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8443"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
 
 networks:
   d3:

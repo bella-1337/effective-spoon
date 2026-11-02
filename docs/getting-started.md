@@ -121,6 +121,22 @@ unless that device explicitly trusts the local CA. Never publish the generated
 private key or the CA root key. Do not use the local fallback for the on-prem
 deployment.
 
+### Trust the remote GPU host
+
+D3-mini and BGE-M3 run on the remote GPU host behind TLS issued by that host's
+own mkcert CA (see the [GPU host guide](../gpu-host/README.md)). Copy its public
+`gpu-host/state/mkcert/rootCA.pem` to this host, never `rootCA-key.pem`, and
+build the bundle that `GPU_HOST_CA_BUNDLE` mounts into both LiteLLM containers:
+
+```sh
+./scripts/build-gpu-host-ca-bundle.py --root-ca /path/to/rootCA.pem
+```
+
+The LiteLLM containers resolve the GPU host's names through DNS; entries in this
+host's `/etc/hosts` are not visible inside containers. Create DNS records for
+the names in `D3_DECISION_API_BASE` and `BGE_M3_API_BASE` that point at the GPU
+host's private IP.
+
 ## 3. Resolve the hostnames
 
 For a stack running on this machine, generate the `/etc/hosts` line from the

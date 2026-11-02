@@ -2,9 +2,10 @@
 """Deploy D3-mini and BGE-M3 on the remote GPU host.
 
 Reads gpu-host/.env, renders the secrets the containers need under
-gpu-host/state/ (private to the deploying user), starts the Compose project,
-and reports success only after both endpoints answer real requests and refuse
-unauthenticated ones.
+gpu-host/state/ (private to the deploying user), issues the TLS certificate
+for both endpoints from a dedicated mkcert CA in state/mkcert/, starts the
+Compose project, and reports success only after both endpoints answer real
+requests over verified TLS and refuse unauthenticated ones.
 
 Usage:
   ./deploy.py                 validate, render, start, and probe
@@ -47,9 +48,7 @@ GPU_DEVICE_RE = re.compile(r"[0-9]+|GPU-[0-9a-fA-F-]{8,}")
 REQUIRED = (
     "D3_SERVER_NAME",
     "D3_API_KEY",
-    "D3_TLS_CERT_FILE",
-    "D3_TLS_KEY_FILE",
-    "D3_CA_CERT_FILE",
+    "BGE_M3_SERVER_NAME",
     "BGE_M3_API_KEY",
 )
 DEFAULTS = {
@@ -58,12 +57,14 @@ DEFAULTS = {
     "D3_MEMORY_LIMIT": "16g",
     "D3_SHM_SIZE": "4gb",
     "BGE_M3_BIND_ADDRESS": "0.0.0.0",
-    "BGE_M3_PUBLIC_PORT": "8080",
+    "BGE_M3_PUBLIC_PORT": "9443",
     "BGE_M3_MEMORY_LIMIT": "8g",
     "BGE_M3_MAX_BATCH_TOKENS": "16384",
     "BGE_M3_MAX_CLIENT_BATCH_SIZE": "64",
     "GPU_DEVICE_ID": "0",
     "STARTUP_TIMEOUT": "1800",
+    "TLS_EXTRA_NAMES": "",
+    "TLS_RENEW_BEFORE_DAYS": "30",
 }
 
 
@@ -114,11 +115,21 @@ def _positive_int(settings: dict[str, str], key: str) -> int:
     return int(value)
 
 
-def _regular_file(settings: dict[str, str], key: str) -> Path:
-    path = Path(settings[key]).expanduser()
-    if path.is_symlink() or not path.is_file():
-        raise DeployError(f"{key} must name a regular file, not a symbolic link: {path}")
-    return path
+def _is_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _split_names(value: str) -> list[str]:
+    return [name.strip() for name in value.split(",") if name.strip()]
+
+
+def certificate_names(settings: dict[str, str]) -> list[str]:
+    names = [settings["D3_SERVER_NAME"], settings["BGE_M3_SERVER_NAME"], *_split_names(settings["TLS_EXTRA_NAMES"])]
+    return list(dict.fromkeys(names))
 
 
 def validate(values: dict[str, str]) -> dict[str, str]:
@@ -132,10 +143,12 @@ def validate(values: dict[str, str]) -> dict[str, str]:
             raise DeployError(f"{key} must be a random secret of at least 32 URL-safe characters ([A-Za-z0-9._~-])")
     if settings["D3_API_KEY"] == settings["BGE_M3_API_KEY"]:
         raise DeployError("D3_API_KEY and BGE_M3_API_KEY must be different secrets")
-    if not _is_hostname(settings["D3_SERVER_NAME"]):
-        raise DeployError("D3_SERVER_NAME must be a DNS hostname")
-    for key in ("D3_TLS_CERT_FILE", "D3_TLS_KEY_FILE", "D3_CA_CERT_FILE"):
-        _regular_file(settings, key)
+    for key in ("D3_SERVER_NAME", "BGE_M3_SERVER_NAME"):
+        if not _is_hostname(settings[key]):
+            raise DeployError(f"{key} must be a DNS hostname")
+    for name in _split_names(settings["TLS_EXTRA_NAMES"]):
+        if not _is_hostname(name) and not _is_ip(name):
+            raise DeployError("TLS_EXTRA_NAMES must be a comma-separated list of hostnames or IP addresses")
     for key in ("D3_BIND_ADDRESS", "BGE_M3_BIND_ADDRESS"):
         try:
             ipaddress.ip_address(settings[key])
@@ -148,7 +161,7 @@ def validate(values: dict[str, str]) -> dict[str, str]:
     for key in ("D3_MEMORY_LIMIT", "D3_SHM_SIZE", "BGE_M3_MEMORY_LIMIT"):
         if not DOCKER_SIZE_RE.fullmatch(settings[key]):
             raise DeployError(f"{key} must be a Docker size such as 8g or 4gb")
-    for key in ("BGE_M3_MAX_BATCH_TOKENS", "BGE_M3_MAX_CLIENT_BATCH_SIZE", "STARTUP_TIMEOUT"):
+    for key in ("BGE_M3_MAX_BATCH_TOKENS", "BGE_M3_MAX_CLIENT_BATCH_SIZE", "STARTUP_TIMEOUT", "TLS_RENEW_BEFORE_DAYS"):
         _positive_int(settings, key)
     if int(settings["BGE_M3_MAX_BATCH_TOKENS"]) < BGE_M3_MAX_INPUT_TOKENS:
         raise DeployError(f"BGE_M3_MAX_BATCH_TOKENS must be at least {BGE_M3_MAX_INPUT_TOKENS} to fit one full-length input")
@@ -202,10 +215,11 @@ def write_private(path: Path, content: str | bytes) -> None:
 def prepare_state(settings: dict[str, str], state: Path = STATE) -> None:
     for directory in (
         state,
+        state / "mkcert",
+        state / "tls",
         state / "d3",
         state / "d3" / "models",
         state / "d3" / "runtime",
-        state / "d3" / "tls",
         state / "bge-m3",
         state / "bge-m3" / "data",
     ):
@@ -214,12 +228,48 @@ def prepare_state(settings: dict[str, str], state: Path = STATE) -> None:
         directory.mkdir(mode=0o700, exist_ok=True)
         os.chmod(directory, 0o700)
     write_private(state / "d3" / "config.yaml", render_d3_config(settings["D3_API_KEY"]))
-    for key, name in (("D3_TLS_CERT_FILE", "tls.crt"), ("D3_TLS_KEY_FILE", "tls.key"), ("D3_CA_CERT_FILE", "ca.crt")):
-        write_private(state / "d3" / "tls" / name, _regular_file(settings, key).read_bytes())
     write_private(state / "bge-m3.env", f"API_KEY={settings['BGE_M3_API_KEY']}\n")
     write_private(state / "d3.header", f"Authorization: Bearer {settings['D3_API_KEY']}\n")
     write_private(state / "bge-m3.header", f"Authorization: Bearer {settings['BGE_M3_API_KEY']}\n")
     write_private(state / "compose.env", f"HOST_UID={os.getuid()}\nHOST_GID={os.getgid()}\n")
+
+
+def certificate_is_current(state: Path, names: list[str], renew_before_days: int) -> bool:
+    certificate, root = state / "tls" / "tls.crt", state / "mkcert" / "rootCA.pem"
+    recorded = state / "tls" / "names.txt"
+    if not (certificate.is_file() and (state / "tls" / "tls.key").is_file() and root.is_file() and recorded.is_file()):
+        return False
+    if recorded.read_text(encoding="utf-8").split() != names:
+        return False
+    checks = (
+        ["openssl", "x509", "-noout", "-checkend", str(renew_before_days * 86400), "-in", str(certificate)],
+        ["openssl", "verify", "-CAfile", str(root), str(certificate)],
+    )
+    return all(subprocess.run(check, capture_output=True, check=False).returncode == 0 for check in checks)
+
+
+def ensure_certificate(settings: dict[str, str], state: Path = STATE) -> bool:
+    """Issue the TLS certificate from the dedicated mkcert CA; return True when it changed."""
+    names = certificate_names(settings)
+    if certificate_is_current(state, names, int(settings["TLS_RENEW_BEFORE_DAYS"])):
+        return False
+    # A dedicated CAROOT keeps this CA separate from any personal mkcert CA and
+    # out of the host trust store; mkcert creates it on first use.
+    result = subprocess.run(
+        ["mkcert", "-cert-file", str(state / "tls" / "tls.crt"), "-key-file", str(state / "tls" / "tls.key"), *names],
+        env={**os.environ, "CAROOT": str(state / "mkcert")},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        raise DeployError("mkcert could not issue the certificate: " + result.stderr.strip())
+    for path in (state / "tls" / "tls.crt", state / "tls" / "tls.key"):
+        os.chmod(path, 0o600)
+    write_private(state / "tls" / "names.txt", "\n".join(names) + "\n")
+    if not certificate_is_current(state, names, int(settings["TLS_RENEW_BEFORE_DAYS"])):
+        raise DeployError("the issued certificate does not verify against the mkcert root CA")
+    return True
 
 
 def compose(env_file: Path, *arguments: str) -> None:
@@ -271,7 +321,7 @@ def probe_d3(settings: dict[str, str], deadline: float) -> None:
     name, port = settings["D3_SERVER_NAME"], settings["D3_PUBLIC_PORT"]
     base = f"https://{name}:{port}"
     tls = [
-        "--cacert", str(STATE / "d3" / "tls" / "ca.crt"),
+        "--cacert", str(STATE / "mkcert" / "rootCA.pem"),
         "--resolve", f"{name}:{port}:{probe_address(settings['D3_BIND_ADDRESS'])}",
     ]
     header = ["-H", f"@{STATE / 'd3.header'}"]
@@ -302,16 +352,19 @@ def probe_d3(settings: dict[str, str], deadline: float) -> None:
 
 
 def probe_bge_m3(settings: dict[str, str], deadline: float) -> None:
-    address = probe_address(settings["BGE_M3_BIND_ADDRESS"])
-    host = f"[{address}]" if ":" in address else address
-    base = f"http://{host}:{settings['BGE_M3_PUBLIC_PORT']}"
+    name, port = settings["BGE_M3_SERVER_NAME"], settings["BGE_M3_PUBLIC_PORT"]
+    base = f"https://{name}:{port}"
+    tls = [
+        "--cacert", str(STATE / "mkcert" / "rootCA.pem"),
+        "--resolve", f"{name}:{port}:{probe_address(settings['BGE_M3_BIND_ADDRESS'])}",
+    ]
     body = json.dumps({"model": BGE_M3_MODEL, "input": "bge-m3 deployment probe"})
-    wait_until("BGE-M3 readiness", lambda: curl("--fail", "--output", "/dev/null", f"{base}/health").returncode == 0, deadline)
-    unauthenticated = curl("--output", "/dev/null", "--write-out", "%{http_code}", f"{base}/v1/embeddings",
+    wait_until("BGE-M3 readiness", lambda: curl("--fail", "--output", "/dev/null", *tls, f"{base}/health").returncode == 0, deadline)
+    unauthenticated = curl("--output", "/dev/null", "--write-out", "%{http_code}", *tls, f"{base}/v1/embeddings",
                            "-H", "Content-Type: application/json", "--data", body)
     if unauthenticated.stdout.strip() != "401":
         raise DeployError(f"BGE-M3 answered an unauthenticated request with HTTP {unauthenticated.stdout.strip()}; expected 401")
-    data = _json(curl("--fail", f"{base}/v1/embeddings", "-H", f"@{STATE / 'bge-m3.header'}",
+    data = _json(curl("--fail", *tls, f"{base}/v1/embeddings", "-H", f"@{STATE / 'bge-m3.header'}",
                       "-H", "Content-Type: application/json", "--data", body))
     items = data.get("data") if isinstance(data, dict) else None
     vector = items[0].get("embedding") if isinstance(items, list) and items and isinstance(items[0], dict) else None
@@ -325,28 +378,35 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE, help="settings file (default: gpu-host/.env)")
     arguments = parser.parse_args(argv)
     try:
-        for tool in ("docker", "curl"):
+        for tool in ("docker", "curl", "mkcert", "openssl"):
             if shutil.which(tool) is None:
                 raise DeployError(f"{tool} is required")
         os.umask(0o077)
         env_file = arguments.env_file.resolve()
         settings = validate(parse_env_file(env_file))
         prepare_state(settings)
+        renewed = ensure_certificate(settings)
         compose(env_file, "config", "--quiet")
         if arguments.render_only:
             print(f"Validated the GPU host deployment and rendered {STATE}")
             return 0
         compose(env_file, "up", "-d", "--remove-orphans")
+        if renewed:
+            # Bind-mounted files changed under a running proxy; reload them.
+            compose(env_file, "restart", "tls")
         deadline = time.monotonic() + int(settings["STARTUP_TIMEOUT"])
         probe_d3(settings, deadline)
         probe_bge_m3(settings, deadline)
     except DeployError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    print("D3-mini and BGE-M3 are ready. On the LiteLLM hosts set:")
-    print(f"  D3_DECISION_API_BASE=https://{settings['D3_SERVER_NAME']}:{settings['D3_PUBLIC_PORT']}")
-    print(f"  BGE_M3_API_BASE=http://<this-host>:{settings['BGE_M3_PUBLIC_PORT']}/v1   (dev host only)")
-    print("and copy D3_API_KEY to D3_DECISION_API_KEY and BGE_M3_API_KEY unchanged.")
+    print("D3-mini and BGE-M3 are ready over TLS. On the LiteLLM hosts:")
+    print(f"  1. Copy {STATE / 'mkcert' / 'rootCA.pem'} (the public CA certificate only;")
+    print("     never rootCA-key.pem) and run:")
+    print("     ./scripts/build-gpu-host-ca-bundle.py --root-ca /path/to/rootCA.pem")
+    print(f"  2. Set D3_DECISION_API_BASE=https://{settings['D3_SERVER_NAME']}:{settings['D3_PUBLIC_PORT']}")
+    print(f"     and BGE_M3_API_BASE=https://{settings['BGE_M3_SERVER_NAME']}:{settings['BGE_M3_PUBLIC_PORT']}/v1")
+    print("  3. Copy D3_API_KEY to D3_DECISION_API_KEY and BGE_M3_API_KEY unchanged.")
     return 0
 
 

@@ -1,29 +1,33 @@
 # Remote GPU host stack
 
 This folder deploys the two models the LiteLLM stack calls on a separate GPU
-host, sharing one GPU:
+host, sharing one GPU. Both are reachable only through the `tls` Nginx proxy,
+which presents one certificate issued by this host's dedicated mkcert CA:
 
 | Service | Engine | Model | Endpoint | Used by |
 | --- | --- | --- | --- | --- |
-| `d3-mini` + `d3-tls` | vLLM Semantic Router model runtime behind Nginx | `vllm-sr/d3-mini` (coding-tier decisions) | `https://<D3_SERVER_NAME>:8443`, verified TLS | `litellm-prod` and `litellm-dev` (`coding-router`) |
-| `bge-m3` | Hugging Face Text Embeddings Inference (TEI) | `BAAI/bge-m3` (1,024-dimension dense embeddings) | `http://<host>:8080/v1`, plain HTTP | `litellm-dev` only (semantic cache, MCP tool filter, pgvector, Xberg auto-indexing) |
+| `d3-mini` | vLLM Semantic Router model runtime | `vllm-sr/d3-mini` (coding-tier decisions) | `https://<D3_SERVER_NAME>:8443` | `litellm-prod` and `litellm-dev` (`coding-router`) |
+| `bge-m3` | Hugging Face Text Embeddings Inference (TEI) | `BAAI/bge-m3` (1,024-dimension dense embeddings) | `https://<BGE_M3_SERVER_NAME>:9443/v1` | `litellm-dev` only (semantic cache, MCP tool filter, pgvector, Xberg auto-indexing) |
 
-It is a separate Compose project from the main stack and never runs on the
-LiteLLM hosts.
+The proxy publishes only the three Decisions routes for D3 and only
+`/v1/embeddings` and `/health` for BGE-M3, accepts TLS 1.2 (forward-secret AEAD
+suites) and 1.3, and resolves each upstream per request, so one model starting
+or failing never blocks the other's endpoint. This is a separate Compose project
+from the main stack and never runs on the LiteLLM hosts.
 
 ## Engine choice
 
 - **D3-mini on the Semantic Router runtime.** D3 is a decision model with its
   own readout heads; only this runtime serves its Decisions and System One API.
   vLLM, SGLang, TGI, and Ollama cannot. The runtime enforces `D3_API_KEY` on
-  every public route, and the Nginx proxy publishes only the three Decisions
-  routes over TLS.
+  every public route.
 - **BGE-M3 on TEI.** TEI is built for embedding models: Flash Attention,
   token-budget batching, a small image, and no up-front GPU memory reservation.
   vLLM, the previous engine, reserves a fixed share of the card and leaves its
   tokenizer, pooling, and metrics routes outside the API key. TEI's key guards
   every compute route, including `/invocations`; only `/health`, `/ping`,
-  `/metrics`, and `/docs` answer without it, so no proxy is needed. TEI serves
+  `/metrics`, and `/docs` answer without it, and the proxy does not publish
+  those last three. Neither engine terminates TLS itself. TEI serves
   BGE-M3's dense vectors, which are the only output the stack uses. The
   `cuda-1.9.4` image selects the right kernels for Turing through Blackwell GPUs
   at start-up.
@@ -61,17 +65,24 @@ install -m 600 .env.example .env
 ./deploy.py
 ```
 
-`deploy.py` needs Python 3.9+, Docker, and `curl`. It:
+`deploy.py` needs Python 3.9+, Docker, `curl`, `openssl`, and
+[`mkcert`](https://github.com/FiloSottile/mkcert). It:
 
 1. validates `.env` (private file permissions, URL-safe keys of at least 32
    characters, distinct keys, hostnames, ports, sizes);
 2. renders `state/` with mode `0700`/`0600`: the D3 runtime configuration with
-   its key, the TLS files, TEI's key as an environment file, and the probe
-   headers, so no key appears on a command line;
-3. starts the Compose project; models download into `state/` on first start;
-4. succeeds only after D3 refuses an unauthenticated request and returns a
-   valid coding tier, and TEI refuses an unauthenticated request and returns a
-   1,024-dimension embedding.
+   its key, TEI's key as an environment file, and the probe headers, so no key
+   appears on a command line;
+3. issues the TLS certificate for `D3_SERVER_NAME`, `BGE_M3_SERVER_NAME`, and
+   any `TLS_EXTRA_NAMES` from a dedicated mkcert CA in `state/mkcert/`. mkcert
+   creates that CA on first use and never installs it in this host's trust
+   store. The certificate is re-issued only when the names change, it expires
+   within `TLS_RENEW_BEFORE_DAYS`, or it no longer verifies against the CA;
+4. starts the Compose project (models download into `state/` on first start)
+   and reloads the proxy when the certificate changed;
+5. succeeds only after both endpoints verify against the mkcert CA, refuse an
+   unauthenticated request, and answer a real one: a valid coding tier from D3
+   and a 1,024-dimension embedding from BGE-M3.
 
 `./deploy.py --render-only` validates and renders without starting anything.
 Run Compose commands with both environment files:
@@ -82,25 +93,56 @@ docker compose --env-file .env --env-file state/compose.env logs -f bge-m3
 docker compose --env-file .env --env-file state/compose.env down
 ```
 
-Then set on the LiteLLM hosts:
+## Trust the CA on the LiteLLM hosts
+
+LiteLLM verifies both endpoints, and every completion provider, against the one
+bundle named by `SSL_CERT_FILE` in its containers. On each LiteLLM host:
+
+1. Copy `gpu-host/state/mkcert/rootCA.pem` from the GPU host. It is the public
+   CA certificate only. **Never copy `rootCA-key.pem`**; it stays on the GPU
+   host.
+2. From the repository root, build the bundle of the operating system's public
+   roots plus that CA:
+
+   ```sh
+   ./scripts/build-gpu-host-ca-bundle.py --root-ca /path/to/rootCA.pem
+   ```
+
+   It refuses a file that contains a private key or is not a CA certificate, and
+   writes `traefik/certs/gpu-host-ca-bundle.pem` (ignored by Git). Pass
+   `--public-roots` if the host has no standard root bundle.
+3. Create DNS records pointing `D3_SERVER_NAME` and `BGE_M3_SERVER_NAME` at the
+   GPU host's private IP. The LiteLLM containers resolve names through DNS;
+   the LiteLLM host's `/etc/hosts` is not visible inside them. Then set:
 
 | Variable | Value | Hosts |
 | --- | --- | --- |
+| `GPU_HOST_CA_BUNDLE` | `./traefik/certs/gpu-host-ca-bundle.pem` | prod and dev |
 | `D3_DECISION_API_BASE` | `https://<D3_SERVER_NAME>:<D3_PUBLIC_PORT>` | prod and dev |
 | `D3_DECISION_API_KEY` | `D3_API_KEY` | prod and dev |
-| `D3_DECISION_CA_BUNDLE` | public roots plus the CA that issued D3's certificate | prod and dev |
-| `BGE_M3_API_BASE` | `http://<gpu-host>:<BGE_M3_PUBLIC_PORT>/v1` | dev |
+| `BGE_M3_API_BASE` | `https://<BGE_M3_SERVER_NAME>:<BGE_M3_PUBLIC_PORT>/v1` | dev |
 | `BGE_M3_API_KEY` | `BGE_M3_API_KEY` | dev (any placeholder on prod) |
+
+4. Recreate the proxies: `docker compose --profile prod --profile dev up -d
+   --force-recreate litellm-prod litellm-dev`.
+
+Leaf certificate renewals need no change on the LiteLLM hosts. Rebuild the
+bundle only when the CA changes.
 
 ## Network and security
 
 - Firewall `D3_PUBLIC_PORT` to both LiteLLM hosts and `BGE_M3_PUBLIC_PORT` to
   the LiteLLM dev host. Nothing else should reach either port.
-- **BGE-M3 uses plain HTTP by operator decision.** Its key and the embedded
-  text, including dev request text, cross the network unencrypted. Keep the
-  hosts on one private segment and rotate `BGE_M3_API_KEY` if the network may be
-  shared. Add TLS before production uses BGE-M3. See
-  [Plain HTTP: accepted risk](../docs/search-extraction-and-caching.md#plain-http-accepted-risk).
+- **The mkcert CA is trusted for every hostname.** The LiteLLM containers use
+  the bundle for all outbound TLS, and mkcert CAs carry no name constraints, so
+  whoever holds `state/mkcert/rootCA-key.pem` could impersonate any server to
+  LiteLLM, including the completion providers. Keep `state/` private to the
+  deploying account, include it only in encrypted backups, and never copy the
+  key. If it may have leaked, rotate the CA: stop the stack, delete
+  `state/mkcert/` and `state/tls/`, run `./deploy.py`, and rebuild the bundle on
+  every LiteLLM host.
+- mkcert is meant for private networks. Use a certificate from your
+  organisation's CA instead if the GPU host must be reachable more widely.
 - Every container runs as the deploying user with a read-only root
   filesystem, no capabilities, and `no-new-privileges`.
 - Images and model revisions are pinned in `compose.yml` and `deploy.py` and
@@ -117,6 +159,11 @@ Then set on the LiteLLM hosts:
   runtimes mount the driver under `/usr/local/nvidia`, and TEI's entrypoint then
   updates the linker cache. Use the standard NVIDIA Container Toolkit, which
   injects the driver libraries without that step.
+- **LiteLLM reports `CERTIFICATE_VERIFY_FAILED`.** The bundle does not contain
+  the current mkcert CA, or `GPU_HOST_CA_BUNDLE` points elsewhere. Rebuild it
+  and recreate the proxies. A hostname mismatch means the name in
+  `D3_DECISION_API_BASE` or `BGE_M3_API_BASE` is missing from the certificate;
+  add it to `TLS_EXTRA_NAMES` and run `./deploy.py`.
 - **TEI rejects an input over 8,192 tokens with a validation error.**
   Truncation is disabled on purpose so a long prompt cannot match a cached
   answer for a shared prefix.
