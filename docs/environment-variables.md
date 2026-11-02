@@ -174,14 +174,40 @@ ROI changes additionally require rerunning `postgres-init` and
 pseudonyms are indexed.
 Retention changes do not recover data already deleted.
 
+## Resource limits
+
+Docker CPU and memory caps per host. They are limits, not reservations: an idle
+service does not hold its cap, and a service that exceeds its memory cap is
+OOM-killed and restarted. Memory caps include the page cache the container
+uses, so a tight database cap mainly costs cache hits. Every long-running
+service without its own sizing variable belongs to one tier. One-shot setup
+jobs are not capped. The defaults suit the dev host; the README lists the
+[prod host values](../README.md#resource-limits).
+
+| Variable | Default / format | Description and guidance |
+| --- | --- | --- |
+| `RESOURCE_TINY_CPU_LIMIT` | `0.5`; positive decimal CPUs | Socket proxies, PostgreSQL and pgvector exporters, node-exporter, and blackbox. |
+| `RESOURCE_TINY_MEMORY_LIMIT` | `256m`; Docker size | Memory cap for the tiny tier. These services idle below 50 MiB. |
+| `RESOURCE_SMALL_CPU_LIMIT` | `1`; positive decimal CPUs | Traefik, Presidio Anonymizer, SearXNG, the Xberg egress proxy, `opensearch-bridge`, cAdvisor, `litellm-pgvector`, Grafana, and Langfuse Redis and MinIO. Raise for Traefik when TLS handshakes throttle at peak. |
+| `RESOURCE_SMALL_MEMORY_LIMIT` | `1g`; Docker size | Memory cap for the small tier. Raise with `PRESIDIO_ANONYMIZER_WORKERS` (about 80 MiB each). |
+| `RESOURCE_MEDIUM_CPU_LIMIT` | `2`; positive decimal CPUs | Prometheus, Alloy, OpenSearch Dashboards, Loki, `alloy-loki`, and Langfuse web and worker. Also caps Data Prepper CPU. |
+| `RESOURCE_MEDIUM_MEMORY_LIMIT` | `2g`; Docker size | Memory cap for the medium tier. Prometheus memory grows with active series; Alloy idles at about 0.5 GiB. |
+| `RESOURCE_DATABASE_CPU_LIMIT` | `2`; positive decimal CPUs | PostgreSQL, vector-postgres, Langfuse PostgreSQL, and ClickHouse. Also caps OpenSearch CPU. |
+| `RESOURCE_DATABASE_MEMORY_LIMIT` | `4g`; Docker size | Memory cap for each database in the tier. ClickHouse sizes its own memory and caches from this cap. Larger values let the databases keep more data in cache. |
+| `LITELLM_CPU_LIMIT` | `2`; positive decimal CPUs | Cap for each LiteLLM proxy (`litellm-prod` and `litellm-dev`). LiteLLM recommends 1 CPU per worker; the proxy runs one worker. |
+| `LITELLM_MEMORY_LIMIT` | `4g`; Docker size | Memory cap for each LiteLLM proxy. LiteLLM recommends at least 4 GiB per worker: the Prisma query engine keeps its largest-ever allocation, and the 2026-11 probe grew the proxy to 2.6 GiB with four large unauthenticated bodies. |
+
+Recreate the affected services after changing a value. Check `docker stats`
+after a change and leave headroom above observed peaks.
+
 ## OpenSearch observability
 
 | Variable | Default / format | Description and guidance |
 | --- | --- | --- |
 | `OPENSEARCH_JAVA_HEAP` | `1g`; JVM size | Heap for the single OpenSearch node (`-Xms` and `-Xmx`). Keep it at or below half of `OPENSEARCH_MEMORY_LIMIT`. |
-| `OPENSEARCH_MEMORY_LIMIT` | `3g`; Docker size | Container memory limit for OpenSearch. |
+| `OPENSEARCH_MEMORY_LIMIT` | `3g`; Docker size | Container memory limit for OpenSearch. Its CPU cap is `RESOURCE_DATABASE_CPU_LIMIT`. |
 | `DATA_PREPPER_JAVA_OPTS` | `-Xms256m -Xmx512m`; JVM options | Data Prepper JVM options. |
-| `DATA_PREPPER_MEMORY_LIMIT` | `1g`; Docker size | Container memory limit for Data Prepper. |
+| `DATA_PREPPER_MEMORY_LIMIT` | `2g`; Docker size | Container memory limit for Data Prepper. Keep it at least 1 GiB above the `-Xmx` heap for off-heap buffers; Data Prepper uses about 1 GiB with the default heap. Its CPU cap is `RESOURCE_MEDIUM_CPU_LIMIT`. |
 | `OPENSEARCH_LOG_RETENTION_DAYS` | `7`; days | ISM deletes `litellm-logs-*` daily indices after this age (matches Loki). |
 | `OPENSEARCH_METRICS_RETENTION_DAYS` | `15`; days | ISM deletes `litellm-metrics-*` and `litellm-alert-state-*` after this age (matches Prometheus). |
 | `OPENSEARCH_USAGE_RETENTION_DAYS` | `180`; days | `opensearch-bridge` deletes spend, provider-error, and audit copies older than this (matches LiteLLM's spend-log cleanup). It is also the initial backfill window. |
@@ -277,6 +303,7 @@ can cause startup failures or corrupt semantic-cache expectations.
 | --- | --- | --- |
 | `PRESIDIO_NLP_ENGINE` | `spacy`; Presidio engine name | NLP engine used by Presidio Analyzer. A different engine requires compatible analyzer configuration and image support. |
 | `PRESIDIO_SUPPORTED_LANGUAGES` | `en`; comma-separated language codes supported by the image | Languages exposed by Presidio. Adding a language also requires compatible NLP models and recognizers. |
+| `PRESIDIO_ANALYZER_CPU_LIMIT` | `2`; positive decimal CPUs | CPU limit for Presidio Analyzer, which scans every guarded prompt. Keep it at least equal to `PRESIDIO_ANALYZER_WORKERS`. |
 | `PRESIDIO_ANALYZER_MEMORY_LIMIT` | `2g`; Docker size | Memory limit for Presidio Analyzer. Increase when adding models or languages, and by about 0.5 GiB for each analyzer worker above two. |
 | `PRESIDIO_ANALYZER_WORKERS` | `2`; integer >= 2 | Synchronous gunicorn workers for Presidio Analyzer. One worker lets a single large prompt stall PII masking for every caller. Each worker loads the spaCy model; raise `PRESIDIO_ANALYZER_MEMORY_LIMIT` with it. See [Edge and abuse protection](edge-and-abuse-protection.md). |
 | `PRESIDIO_ANONYMIZER_WORKERS` | `2`; integer >= 2 | Synchronous gunicorn workers for Presidio Anonymizer (about 80 MiB each). Keep at least two so an oversized request cannot block masking until gunicorn's 30-second worker timeout. |

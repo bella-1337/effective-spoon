@@ -29,6 +29,35 @@ x-default-logging: &default-logging
     max-size: "${LOG_MAX_SIZE:-10m}"
     max-file: "${LOG_MAX_FILE:-3}"
 
+# Resource tiers. Long-running services without a dedicated sizing variable use
+# one of these caps; .env sets the values per host. They are limits, not
+# reservations, so idle services do not hold the memory.
+x-resources-tiny: &resources-tiny
+  resources:
+    limits:
+      cpus: "${RESOURCE_TINY_CPU_LIMIT:-0.5}"
+      memory: ${RESOURCE_TINY_MEMORY_LIMIT:-256m}
+x-resources-small: &resources-small
+  resources:
+    limits:
+      cpus: "${RESOURCE_SMALL_CPU_LIMIT:-1}"
+      memory: ${RESOURCE_SMALL_MEMORY_LIMIT:-1g}
+x-resources-medium: &resources-medium
+  resources:
+    limits:
+      cpus: "${RESOURCE_MEDIUM_CPU_LIMIT:-2}"
+      memory: ${RESOURCE_MEDIUM_MEMORY_LIMIT:-2g}
+x-resources-database: &resources-database
+  resources:
+    limits:
+      cpus: "${RESOURCE_DATABASE_CPU_LIMIT:-2}"
+      memory: ${RESOURCE_DATABASE_MEMORY_LIMIT:-4g}
+x-resources-litellm: &resources-litellm
+  resources:
+    limits:
+      cpus: "${LITELLM_CPU_LIMIT:-2}"
+      memory: ${LITELLM_MEMORY_LIMIT:-4g}
+
 networks:
   traefik-monitor:
     internal: true
@@ -102,6 +131,7 @@ services:
     cap_drop: [NET_RAW]
     networks: [edge, internal, traefik-monitor]
     restart: unless-stopped
+    deploy: *resources-small
 
   traefik-docker-proxy:
     logging: *default-logging
@@ -127,6 +157,7 @@ services:
       timeout: 3s
       retries: 12
     restart: unless-stopped
+    deploy: *resources-tiny
 
   postgres:
     logging: *default-logging
@@ -139,6 +170,7 @@ services:
       - pg-data:/var/lib/postgresql/data
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-database
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -246,6 +278,7 @@ services:
       - ./pgvector/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-database
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -394,6 +427,7 @@ services:
     deploy:
       resources:
         limits:
+          cpus: "${PRESIDIO_ANALYZER_CPU_LIMIT:-2}"
           memory: ${PRESIDIO_ANALYZER_MEMORY_LIMIT:-2g}
     networks: [internal]
     restart: unless-stopped
@@ -413,6 +447,7 @@ services:
       WORKERS: ${PRESIDIO_ANONYMIZER_WORKERS:-2}
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-small
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=5)"]
       interval: 10s
@@ -434,6 +469,7 @@ services:
     # never routed by Traefik. Outbound engine queries use the internal bridge.
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-small
 
   xberg:
     logging: *default-logging
@@ -554,6 +590,7 @@ services:
       timeout: 5s
       retries: 12
     restart: unless-stopped
+    deploy: *resources-small
 
   prometheus:
     logging: *default-logging
@@ -572,6 +609,7 @@ services:
         condition: service_completed_successfully
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-medium
 
   prometheus-secrets-init:
     logging: *default-logging
@@ -612,6 +650,7 @@ services:
         condition: service_healthy
     networks: [internal, alloy-monitor]
     restart: unless-stopped
+    deploy: *resources-medium
 
   alloy-docker-proxy:
     logging: *default-logging
@@ -636,6 +675,7 @@ services:
       timeout: 3s
       retries: 12
     restart: unless-stopped
+    deploy: *resources-tiny
 
   opensearch-certs:
     logging: *default-logging
@@ -690,6 +730,7 @@ services:
     deploy:
       resources:
         limits:
+          cpus: "${RESOURCE_DATABASE_CPU_LIMIT:-2}"
           memory: ${OPENSEARCH_MEMORY_LIMIT:-3g}
     depends_on:
       opensearch-certs:
@@ -753,6 +794,7 @@ services:
       - no-new-privileges:true
     networks: [edge, internal]
     restart: unless-stopped
+    deploy: *resources-medium
     healthcheck:
       test: ["CMD-SHELL", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5601/api/status); [ \"$$code\" = 200 ] || [ \"$$code\" = 401 ]"]
       interval: 10s
@@ -807,7 +849,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${DATA_PREPPER_MEMORY_LIMIT:-1g}
+          cpus: "${RESOURCE_MEDIUM_CPU_LIMIT:-2}"
+          memory: ${DATA_PREPPER_MEMORY_LIMIT:-2g}
     depends_on:
       opensearch-setup:
         condition: service_completed_successfully
@@ -857,6 +900,7 @@ services:
         condition: service_started
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-small
     healthcheck:
       test: ["CMD", "python", "-m", "litellm_opensearch", "healthcheck"]
       interval: 30s
@@ -931,6 +975,7 @@ services:
     cap_drop: [NET_RAW]
     networks: [edge, internal, xberg-sandbox]
     restart: unless-stopped
+    deploy: *resources-litellm
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
       interval: 10s
@@ -1051,6 +1096,7 @@ services:
     cap_drop: [NET_RAW]
     networks: [edge, internal, xberg-sandbox]
     restart: unless-stopped
+    deploy: *resources-litellm
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
       interval: 10s
@@ -1129,6 +1175,7 @@ services:
       - /tmp:mode=1777
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-small
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:8000/health"]
       interval: 10s
@@ -1146,6 +1193,7 @@ services:
         condition: service_completed_successfully
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-tiny
 
   pgvector-exporter:
     logging: *default-logging
@@ -1157,6 +1205,7 @@ services:
         condition: service_completed_successfully
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-tiny
 
   node-exporter:
     logging: *default-logging
@@ -1170,6 +1219,7 @@ services:
       - ./security-metrics:/textfile:ro
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-tiny
 
   cadvisor:
     logging: *default-logging
@@ -1182,6 +1232,7 @@ services:
       - /var/lib/docker/:/var/lib/docker:ro
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-small
 
   blackbox:
     logging: *default-logging
@@ -1190,3 +1241,4 @@ services:
     cap_drop: [NET_RAW]
     networks: [internal]
     restart: unless-stopped
+    deploy: *resources-tiny
