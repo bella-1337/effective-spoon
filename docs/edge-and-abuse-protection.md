@@ -22,7 +22,6 @@ the optional Grafana and Langfuse routes.
 | `edge-security-headers` | HSTS for one day, `nosniff`, referrer policy | Daily users' browsers refuse to downgrade to HTTP; an expired or replaced private certificate locks browsers out for at most a day |
 | `edge-rate-limit` | 500 requests/s per client, burst 2,000 | Runaway scripts receive cheap `429` responses from Traefik instead of reaching LiteLLM |
 | `edge-in-flight` | 1,024 concurrent requests per client | Caps connections held by one runaway client while allowing many long streaming requests |
-| `litellm-body-limit` | 100 MiB (`104857600` bytes) | Oversized bodies receive `413` before LiteLLM parses them |
 
 The client is the TCP peer. Traefik discards client-supplied `X-Forwarded-For`
 headers because no trusted forwarders are configured. Everyone behind one VPN,
@@ -32,24 +31,30 @@ shares a single budget, which is why the limits are generous. In the
 `429` responses, while an unthrottled flood was still cut to its budget.
 
 Raise a limit, rather than removing it, if your gateway aggregates more
-traffic. Large `/v1/files` or batch uploads above 100 MiB need a higher
-`maxRequestBodyBytes`.
+traffic.
 
-### Why the body limit uses a separate router
+### No request-body size limit (accepted)
 
-Traefik's `buffering` middleware also buffers the response, which would hold
-streamed completions until they finish. Each LiteLLM service therefore has two
-routers:
+Request bodies are not size-limited at the edge, and LiteLLM's own
+`max_request_size_mb` is an Enterprise-only setting. LiteLLM reads a whole body
+before it checks the API key, so anyone who can reach Traefik can make it hold
+large requests in memory. In the 2026-11-01 probe, four concurrent 150 MB
+requests with an invalid key raised `litellm-prod` from 1.04 to 2.6 GiB until
+they completed.
 
-- `litellm-<profile>`: requests with a `Content-Length` below 10 MB are
-  forwarded unbuffered and stream normally;
-- `litellm-<profile>-large-body`: `POST`, `PUT`, and `PATCH` requests of
-  10 MB or more, or of unknown length (chunked), pass through
-  `litellm-body-limit`. Their responses are not streamed incrementally.
+This risk is accepted for a company-internal deployment of about 200 users:
+the endpoint is not reachable from the Internet, and the rate and in-flight
+limits still bound how many such requests one source can hold. A body cap was
+evaluated and removed. Traefik's `buffering` middleware also buffers responses,
+so it needed a second router per LiteLLM service to keep streaming, which added
+more configuration than the risk justifies.
 
-To change the cap, edit `maxRequestBodyBytes` in `traefik/dynamic.yml`. To
-change the 10 MB routing threshold, edit the `HeaderRegexp` in both LiteLLM
-`large-body` router rules.
+Revisit this decision if the stack becomes reachable from outside the company
+network, if untrusted users or partners receive access, or if the host has
+little memory headroom. Options then are a `buffering` middleware on a
+dedicated large-body router, a memory limit on the LiteLLM services (an
+out-of-memory restart drops every open request), or an upstream proxy that
+enforces a body limit.
 
 ### Port 80
 
@@ -123,6 +128,8 @@ service-to-service traffic. cAdvisor remains privileged by design.
 
 ## Residual risks
 
+- **Unbounded request bodies.** See
+  [No request-body size limit](#no-request-body-size-limit-accepted).
 - **Shared Presidio capacity.** LiteLLM's per-key parallel-request limit is
   enforced after guardrails run, so a key can still queue large prompts that
   delay masking for other callers. Monitor guardrail latency and add Presidio

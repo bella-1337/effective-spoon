@@ -33,7 +33,7 @@ describes the resulting controls for operators.
 
 | ID | Area | Finding | Severity | Status |
 | --- | --- | --- | --- | --- |
-| D1 | DDoS | Unauthenticated 150 MB bodies were fully parsed before key validation; four requests grew LiteLLM from 1.04 to 2.6 GiB | High | Fixed |
+| D1 | DDoS | Unauthenticated 150 MB bodies were fully parsed before key validation; four requests grew LiteLLM from 1.04 to 2.6 GiB | High | Accepted (internal) |
 | D2 | DDoS | One 1.5 MB prompt from a low-privilege key OOM-killed the Presidio analyzer, failing masking for every caller | High | Fixed |
 | D3 | DDoS | Six concurrent 100 KB prompts from a scoped key stalled another user's request for 51.5 s (baseline 0.07 s) | High | Reduced |
 | D4 | DDoS | No edge rate or concurrency limit: 2,349 req/s accepted; invalid-key floods reached LiteLLM at about 65 req/s with about 3 s latency each | Medium | Fixed |
@@ -84,6 +84,9 @@ After: the same requests returned `413` in about 0.1 s after uploading at most
 1 MB, a chunked 60 MB body returned `413`, and LiteLLM memory stayed flat. A
 12 MB request passed the large-body router, and a small streamed request
 through the edge arrived incrementally at 1.5 s intervals.
+
+On 2026-11-02 the body cap and its large-body routers were removed and the risk
+accepted for internal use; see the calibration section below.
 
 ### D2/D3 — Presidio amplification
 
@@ -163,7 +166,7 @@ stack.
 | --- | --- | --- | --- |
 | Edge rate limit | 100/s, burst 200 | 500/s, burst 2,000 | Users behind one VPN, NAT, or load balancer share one budget; 200 clients at about 300 req/s now see no `429` |
 | Edge in-flight limit | 64 | 1,024 | Many concurrent streaming and agent requests from one shared address |
-| Body cap | 50 MiB | 100 MiB | Base64 images, audio, and documents in chat requests |
+| Body cap | 50 MiB on a second router per LiteLLM service | Removed; risk accepted | The extra router per service added more configuration than an internal-only risk justifies; see [Edge and abuse protection](edge-and-abuse-protection.md#no-request-body-size-limit-accepted) |
 | HSTS | 1 year | 1 day | A replaced or expired private certificate locks browsers out for at most a day |
 | `sniStrict` | on | off | Monitors and clients connecting by IP address complete the handshake |
 | Key defaults | 8 parallel, 300 rpm, 2M tpm | 32 parallel, 1,200 rpm, no tpm | Parallel coding agents with large contexts; spend is governed by budgets |

@@ -8,8 +8,8 @@ flowchart TD
 
   S(["CLIENT SENDS REQUEST"])
   TLS["Traefik terminates TLS and routes by host"]
-  LIM{"Within edge runaway-client and body limits?"}
-  REJ(["429 / 413 TO CLIENT"])
+  LIM{"Within edge runaway-client limits?"}
+  REJ(["429 TO CLIENT"])
   AUTH{"Key valid and model allowed?"}
   DENY(["401 / 403 TO CLIENT"])
   POL["Resolve eu-data-protection policy"]

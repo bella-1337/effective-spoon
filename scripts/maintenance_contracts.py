@@ -683,11 +683,9 @@ def traefik_edge_hardening_failures(source: str) -> list[str]:
         failures.append("Traefik TLS 1.2 cipher suites must be an explicit AEAD-only list")
     if not re.search(r"^\s+stsSeconds:\s*[1-9][0-9]*\s*$", uncommented, re.MULTILINE):
         failures.append("Traefik must send an HSTS header")
-    for name in (*EDGE_MIDDLEWARES, "litellm-body-limit"):
+    for name in EDGE_MIDDLEWARES:
         if not re.search(rf"^\s+{re.escape(name)}:\s*$", uncommented, re.MULTILINE):
             failures.append(f"Traefik dynamic configuration is missing middleware {name}")
-    if not re.search(r"^\s+maxRequestBodyBytes:\s*[1-9][0-9]*\s*$", uncommented, re.MULTILINE):
-        failures.append("Traefik LiteLLM body limit must set maxRequestBodyBytes")
     return failures
 
 
@@ -724,27 +722,6 @@ def edge_and_abuse_compose_failures(services: Mapping[str, Any]) -> list[str]:
         cap_drop = {str(cap).upper() for cap in service.get("cap_drop", []) or []}
         if not cap_drop & {"NET_RAW", "ALL"}:
             failures.append(f"{name} must drop NET_RAW to prevent ARP spoofing")
-
-    for name in ("litellm-prod", "litellm-dev"):
-        service = services.get(name)
-        if not isinstance(service, dict):
-            continue
-        labels = service.get("labels", {})
-        label_map = (
-            dict(str(label).partition("=")[::2] for label in labels)
-            if isinstance(labels, list)
-            else {str(key): str(value) for key, value in labels.items()}
-            if isinstance(labels, dict)
-            else {}
-        )
-        prefix = f"traefik.http.routers.{name}-large-body."
-        rule = label_map.get(prefix + "rule", "")
-        if (
-            label_map.get(prefix + "middlewares") != "litellm-body-limit@file"
-            or "!HeaderRegexp(`Content-Length`" not in rule
-            or label_map.get(prefix + "service") != name
-        ):
-            failures.append(f"{name} large-body requests do not pass the body limit")
 
     for name in ("presidio-analyzer", "presidio-anonymizer"):
         service = services.get(name)

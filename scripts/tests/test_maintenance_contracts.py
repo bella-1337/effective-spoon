@@ -449,15 +449,10 @@ class EdgeAndAbuseContractTests(unittest.TestCase):
             "AEAD-only",
             "HSTS",
             "edge-rate-limit",
-            "litellm-body-limit",
         ):
             self.assertTrue(any(expected in failure for failure in failures), (expected, failures))
 
     def test_compose_rejects_removed_edge_controls(self) -> None:
-        large_body_rule = (
-            "Host(`llm.example.test`) && (Method(`POST`)) && "
-            "!HeaderRegexp(`Content-Length`, `^[0-9]{1,7}$`)"
-        )
         hardened = {
             "traefik": {
                 "command": [
@@ -466,14 +461,7 @@ class EdgeAndAbuseContractTests(unittest.TestCase):
                 ],
                 "cap_drop": ["NET_RAW"],
             },
-            "litellm-prod": {
-                "cap_drop": ["NET_RAW"],
-                "labels": {
-                    "traefik.http.routers.litellm-prod-large-body.rule": large_body_rule,
-                    "traefik.http.routers.litellm-prod-large-body.middlewares": "litellm-body-limit@file",
-                    "traefik.http.routers.litellm-prod-large-body.service": "litellm-prod",
-                },
-            },
+            "litellm-prod": {"cap_drop": ["NET_RAW"]},
             "presidio-analyzer": {"environment": {"WORKERS": "2"}},
             "presidio-anonymizer": {"environment": {"WORKERS": "2"}},
         }
@@ -486,7 +474,7 @@ class EdgeAndAbuseContractTests(unittest.TestCase):
                     "--entrypoints.websecure.forwardedheaders.insecure=true",
                 ]
             },
-            "litellm-prod": {"labels": {}},
+            "litellm-prod": {},
             "presidio-analyzer": {"environment": {"WORKERS": "1"}},
         }
         failures = contracts.edge_and_abuse_compose_failures(regressed)
@@ -495,7 +483,6 @@ class EdgeAndAbuseContractTests(unittest.TestCase):
             "forwarded headers",
             "traefik must drop NET_RAW",
             "litellm-prod must drop NET_RAW",
-            "large-body",
             "presidio-analyzer needs at least two workers",
         ):
             self.assertTrue(any(expected in failure for failure in failures), (expected, failures))

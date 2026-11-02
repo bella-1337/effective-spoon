@@ -48,11 +48,3 @@ http:
       inFlightReq:
         amount: 1024
 
-    # Request-body cap for the LiteLLM routers. 100 MiB covers base64 images,
-    # audio, and documents in chat requests. The buffering middleware also
-    # buffers responses, which breaks server-sent event streaming, so LiteLLM
-    # labels route only requests whose body is >= 10 MB or of unknown length
-    # through it. docs/edge-and-abuse-protection.md documents this limit.
-    litellm-body-limit:
-      buffering:
-        maxRequestBodyBytes: 104857600

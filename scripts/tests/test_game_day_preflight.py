@@ -45,16 +45,6 @@ class GameDayPreflightTests(unittest.TestCase):
                     },
                     "volumes": [{"target": "/app/branding", "read_only": True}],
                     "cap_drop": ["NET_RAW"],
-                    "labels": {
-                        "traefik.http.routers.litellm-prod-large-body.rule": (
-                            "Host(`llm.example.test`) && Method(`POST`) && "
-                            "!HeaderRegexp(`Content-Length`, `^[0-9]{1,7}$`)"
-                        ),
-                        "traefik.http.routers.litellm-prod-large-body.middlewares": (
-                            "litellm-body-limit@file"
-                        ),
-                        "traefik.http.routers.litellm-prod-large-body.service": "litellm-prod",
-                    },
                 },
                 "alloy-docker-proxy": {"environment": {"NETWORKS": "1"}},
                 "alloy": {},

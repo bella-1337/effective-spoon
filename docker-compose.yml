@@ -942,15 +942,6 @@ services:
       - traefik.http.routers.litellm-prod.rule=Host(`${LITELLM_PROD_HOST:?Set LITELLM_PROD_HOST in .env}`)
       - traefik.http.routers.litellm-prod.entrypoints=websecure
       - traefik.http.routers.litellm-prod.tls=true
-      - traefik.http.routers.litellm-prod.service=litellm-prod
-      # Bodies of 10 MB or more, or of unknown length, go through the
-      # buffering body cap; smaller requests keep unbuffered streaming.
-      - "traefik.http.routers.litellm-prod-large-body.rule=Host(`${LITELLM_PROD_HOST:?Set LITELLM_PROD_HOST in .env}`) && (Method(`POST`) || Method(`PUT`) || Method(`PATCH`)) && !HeaderRegexp(`Content-Length`, `^[0-9]{1,7}$`)"
-      - traefik.http.routers.litellm-prod-large-body.priority=1000
-      - traefik.http.routers.litellm-prod-large-body.entrypoints=websecure
-      - traefik.http.routers.litellm-prod-large-body.tls=true
-      - traefik.http.routers.litellm-prod-large-body.middlewares=litellm-body-limit@file
-      - traefik.http.routers.litellm-prod-large-body.service=litellm-prod
       - traefik.http.services.litellm-prod.loadbalancer.server.port=4000
 
   litellm-demo-data-prod:
@@ -1071,13 +1062,6 @@ services:
       - traefik.http.routers.litellm-dev.rule=Host(`${LITELLM_DEV_HOST:?Set LITELLM_DEV_HOST in .env}`)
       - traefik.http.routers.litellm-dev.entrypoints=websecure
       - traefik.http.routers.litellm-dev.tls=true
-      - traefik.http.routers.litellm-dev.service=litellm-dev
-      - "traefik.http.routers.litellm-dev-large-body.rule=Host(`${LITELLM_DEV_HOST:?Set LITELLM_DEV_HOST in .env}`) && (Method(`POST`) || Method(`PUT`) || Method(`PATCH`)) && !HeaderRegexp(`Content-Length`, `^[0-9]{1,7}$`)"
-      - traefik.http.routers.litellm-dev-large-body.priority=1000
-      - traefik.http.routers.litellm-dev-large-body.entrypoints=websecure
-      - traefik.http.routers.litellm-dev-large-body.tls=true
-      - traefik.http.routers.litellm-dev-large-body.middlewares=litellm-body-limit@file
-      - traefik.http.routers.litellm-dev-large-body.service=litellm-dev
       - traefik.http.services.litellm-dev.loadbalancer.server.port=4000
 
   litellm-demo-data-dev:

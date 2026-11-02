@@ -67,7 +67,7 @@ To stop, restart, or remove the stack, see
 | [Observability](docs/observability.md) | OpenSearch users, roles, tenants, alerting and recovery; optional Langfuse and Grafana profiles; demonstration data and telemetry stores |
 | [Search, document extraction, and caching](docs/search-extraction-and-caching.md) | SearXNG search and engine terms of use, Xberg MCP document extraction, development semantic response cache |
 | [Presidio PII masking and guardrails](docs/presidio-guardrails.md) | Presidio masking and changing, adding, disabling, and verifying LiteLLM guardrails |
-| [Edge and abuse protection](docs/edge-and-abuse-protection.md) | TLS policy, HSTS, per-client rate and body limits, per-key defaults, Xberg sandbox egress and DNS, prompt-injection screening, and residual risks |
+| [Edge and abuse protection](docs/edge-and-abuse-protection.md) | TLS policy, HSTS, per-client rate limits, per-key defaults, Xberg sandbox egress and DNS, prompt-injection screening, and residual risks |
 | [EU technical-control baseline](docs/eu-technical-controls.md) | Modular policy configuration, data minimisation and retention, integrity and transport, deployment decisions outside this repository |
 | [Databases and pgvector storage](docs/databases-and-pgvector.md) | LiteLLM schema verification, pgvector store, opt-in Xberg auto-indexing |
 | [Maintenance runtime](docs/maintenance-runtime.md) | Installing `uv` for the maintenance scripts and why they use Python |
