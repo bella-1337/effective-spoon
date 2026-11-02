@@ -19,7 +19,9 @@ x-default-logging: &default-logging
     max-file: "${LOG_MAX_FILE:-3}"
 
 # Resource tiers, mirrored from docker-compose.yml because YAML anchors do not
-# cross the include boundary. Values come from .env.
+# cross the include boundary. Values come from .env. The maintenance contracts
+# fail when these, x-own-image-labels, or x-default-logging drift from the core
+# file.
 x-resources-tiny: &resources-tiny
   resources:
     limits:
@@ -93,6 +95,10 @@ volumes:
   langfuse-redis-data: {}
 
 services:
+  # ---------------------------------------------------------------------------
+  # grafana profile: Grafana, Loki, and the Loki collector
+  # ---------------------------------------------------------------------------
+
   loki:
     logging: *default-logging
     profiles: [grafana]
@@ -210,6 +216,10 @@ services:
       - traefik.http.routers.grafana.entrypoints=websecure
       - traefik.http.routers.grafana.tls=true
       - traefik.http.services.grafana.loadbalancer.server.port=3000
+
+  # ---------------------------------------------------------------------------
+  # langfuse profile: Langfuse web and worker with their stores
+  # ---------------------------------------------------------------------------
 
   langfuse-preflight:
     logging: *default-logging
@@ -473,6 +483,10 @@ services:
       - traefik.http.routers.langfuse.entrypoints=websecure
       - traefik.http.routers.langfuse.tls=true
       - traefik.http.services.langfuse.loadbalancer.server.port=3000
+
+  # ---------------------------------------------------------------------------
+  # security profile: scheduled image scanning
+  # ---------------------------------------------------------------------------
 
   image-security-docker-proxy:
     logging: *default-logging

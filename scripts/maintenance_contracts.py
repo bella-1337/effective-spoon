@@ -567,6 +567,48 @@ def brand_asset_failures(root: Path, env_examples: Mapping[str, str]) -> list[st
     return failures
 
 
+# YAML anchors cannot cross the Compose include boundary, so these top-level
+# fragments are duplicated in compose.optional.yml and must stay identical.
+SHARED_COMPOSE_FRAGMENTS = (
+    "x-own-image-labels",
+    "x-default-logging",
+    "x-resources-tiny",
+    "x-resources-small",
+    "x-resources-medium",
+    "x-resources-database",
+)
+
+
+def top_level_block(source: str, key: str) -> str | None:
+    lines = source.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith(f"{key}:"):
+            block = [line]
+            for following in lines[index + 1:]:
+                if following and not following[0].isspace():
+                    break
+                block.append(following)
+            return "\n".join(block).rstrip()
+    return None
+
+
+def shared_compose_fragment_failures(core_source: str, optional_source: str) -> list[str]:
+    """Keep the fragments duplicated across the include boundary in sync."""
+    failures: list[str] = []
+    for key in SHARED_COMPOSE_FRAGMENTS:
+        core = top_level_block(core_source, key)
+        optional = top_level_block(optional_source, key)
+        if core is None or optional is None:
+            missing = "docker-compose.yml" if core is None else "compose.optional.yml"
+            failures.append(f"Shared Compose fragment {key} is missing from {missing}")
+        elif core != optional:
+            failures.append(
+                f"Shared Compose fragment {key} differs between docker-compose.yml "
+                "and compose.optional.yml"
+            )
+    return failures
+
+
 def public_hostname_source_failures(
     compose_sources: Mapping[str, str],
     env_examples: Mapping[str, Mapping[str, str]],
@@ -900,6 +942,9 @@ def validate_repository_contracts(root: Path = ROOT) -> list[str]:
                 )
             }
 
+        failures.extend(
+            shared_compose_fragment_failures(compose_source, optional_compose_source)
+        )
         failures.extend(brand_asset_failures(root, env_values(core_env_example)))
         failures.extend(
             public_hostname_source_failures(

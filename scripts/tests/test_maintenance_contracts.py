@@ -171,6 +171,45 @@ class MaintenanceContractTests(unittest.TestCase):
         )
 
 
+    def test_shared_compose_fragments_must_match_across_include(self) -> None:
+        fragments = "".join(
+            f"{key}: &{key.removeprefix('x-')}\n  value: 1\n\n"
+            for key in contracts.SHARED_COMPOSE_FRAGMENTS
+        )
+        self.assertEqual(
+            contracts.shared_compose_fragment_failures(
+                "name: stack\n" + fragments, "# optional\n" + fragments
+            ),
+            [],
+        )
+
+        drifted = fragments.replace(
+            "x-resources-small: &resources-small\n  value: 1",
+            "x-resources-small: &resources-small\n  value: 2",
+        )
+        missing = fragments.replace("x-default-logging:", "x-other-logging:")
+        self.assertEqual(
+            contracts.shared_compose_fragment_failures(fragments, drifted),
+            [
+                "Shared Compose fragment x-resources-small differs between "
+                "docker-compose.yml and compose.optional.yml"
+            ],
+        )
+        self.assertEqual(
+            contracts.shared_compose_fragment_failures(fragments, missing),
+            ["Shared Compose fragment x-default-logging is missing from compose.optional.yml"],
+        )
+
+    def test_repository_shared_compose_fragments_are_in_sync(self) -> None:
+        root = contracts.ROOT
+        self.assertEqual(
+            contracts.shared_compose_fragment_failures(
+                (root / "docker-compose.yml").read_text(encoding="utf-8"),
+                (root / "compose.optional.yml").read_text(encoding="utf-8"),
+            ),
+            [],
+        )
+
     def test_public_hostnames_must_not_be_hard_coded(self) -> None:
         env_examples = {
             ".env.example": {

@@ -91,7 +91,12 @@ docker compose --profile prod --profile dev up -d
 ```
 
 The root `docker-compose.yml` includes `compose.optional.yml`, which owns
-Grafana/Loki, Langfuse, and image-security services and state. Profiles remain
+Grafana/Loki, Langfuse, and image-security services and state. The core file
+groups its services along the request path (edge, LiteLLM, guardrails and
+tools, data stores, the dev model plane, observability); the optional file
+groups them by profile. YAML anchors cannot cross the include boundary, so the
+logging, image-label, and resource-tier fragments are duplicated, and the
+maintenance contracts fail if the copies drift. Profiles remain
 the runtime gate. The included module declares the three networks shared across
 the file boundary once, because Compose include resources cannot be redeclared
 by the parent. Optional services load operator values from `.env.optional` when

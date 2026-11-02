@@ -7,12 +7,15 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import signal
 import sys
 import time
+from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from maintenance_common import (
     ROOT,
@@ -23,6 +26,7 @@ from maintenance_common import (
     run,
     run_main,
 )
+from maintenance_contracts import load_compose_config
 
 COMPOSE_FILE = ROOT / "docker-compose.yml"
 LITELLM_DIR = ROOT / "litellm"
@@ -87,18 +91,43 @@ def usage(stream: object = sys.stdout) -> None:
     print(USAGE, file=stream, end="")
 
 
-def service_block(service: str) -> str:
-    lines = COMPOSE_FILE.read_text(encoding="utf-8").splitlines()
-    output: list[str] = []
-    capturing = False
-    for line in lines:
-        if line == f"  {service}:":
-            capturing = True
-        elif capturing and re.fullmatch(r"  [A-Za-z0-9_-]+:", line):
-            break
-        if capturing:
-            output.append(line)
-    return "\n".join(output)
+@lru_cache(maxsize=1)
+def compose_model() -> dict[str, Any]:
+    """Rendered Compose model with every profile, resolved from the example env files.
+
+    Reading the merged model instead of docker-compose.yml text keeps these
+    checks independent of file layout, includes, and YAML anchors.
+    """
+    return load_compose_config(ROOT / ".env.example", ROOT / ".env.optional.example")
+
+
+def service(name: str) -> dict[str, Any]:
+    services = compose_model().get("services", {})
+    value = services.get(name, {}) if isinstance(services, dict) else {}
+    return value if isinstance(value, dict) else {}
+
+
+def service_image(name: str) -> str:
+    return str(service(name).get("image", ""))
+
+
+def service_environment(name: str) -> dict[str, str]:
+    environment = service(name).get("environment") or {}
+    if not isinstance(environment, dict):
+        return {}
+    return {key: "" if value is None else str(value) for key, value in environment.items()}
+
+
+def mounts_read_only(name: str, target: str) -> bool:
+    return any(
+        isinstance(volume, dict) and volume.get("target") == target and volume.get("read_only") is True
+        for volume in service(name).get("volumes") or []
+    )
+
+
+def routes_host(name: str, host: str) -> bool:
+    labels = service(name).get("labels") or {}
+    return bool(host) and isinstance(labels, dict) and f"Host(`{host}`)" in labels.values()
 
 
 def contains_exact(text: str, value: str) -> bool:
@@ -155,7 +184,7 @@ def static_checks(report: Reporter) -> None:
         "Qdrant semantic caching is development-only, opt-in, end-user scoped, and uses environment-sourced credentials"
     )
     prometheus = PROMETHEUS.read_text(encoding="utf-8")
-    compose_text = COMPOSE_FILE.read_text(encoding="utf-8")
+    compose_text = json.dumps(compose_model())
     decisions_router_ok = all(
         item in text
         for text in (prod_text, dev_text)
@@ -179,13 +208,9 @@ def static_checks(report: Reporter) -> None:
             "VLLM_SR_HOST",
         )
     ) and all(
-        item in service_block(service)
-        for service in ("litellm-prod", "litellm-dev")
-        for item in (
-            "D3_DECISION_CA_BUNDLE",
-            "/etc/ssl/certs/d3-decision-ca-bundle.pem:ro",
-            "SSL_CERT_FILE: /etc/ssl/certs/d3-decision-ca-bundle.pem",
-        )
+        mounts_read_only(proxy, "/etc/ssl/certs/d3-decision-ca-bundle.pem")
+        and service_environment(proxy).get("SSL_CERT_FILE") == "/etc/ssl/certs/d3-decision-ca-bundle.pem"
+        for proxy in ("litellm-prod", "litellm-dev")
     )
     (report.pass_ if decisions_router_ok else report.fail_)(
         "Both profiles use the authenticated remote D3 Decisions deployment through LiteLLM Auto Router"
@@ -206,24 +231,14 @@ def static_checks(report: Reporter) -> None:
     ) and all(
         all(
             (
-                'LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS: ""' in block,
-                'LITELLM_OTEL_BAGGAGE_METADATA_KEYS: ""' in block,
-                'LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS: ""' in block,
-                re.search(
-                    r'^\s*LITELLM_OTEL_V2:\s*"(?:true|\$\{LITELLM_OTEL_V2:-true\})"\s*$',
-                    block,
-                    re.M,
-                )
-                is not None,
-                re.search(
-                    r'^\s*OTEL_PYTHON_FASTAPI_EXCLUDED_URLS:\s*"(?:\.\*|\$\{OTEL_PYTHON_FASTAPI_EXCLUDED_URLS:-\.\*\})"\s*$',
-                    block,
-                    re.M,
-                )
-                is not None,
+                environment.get("LITELLM_OTEL_BAGGAGE_PROMOTED_KEYS") == "",
+                environment.get("LITELLM_OTEL_BAGGAGE_METADATA_KEYS") == "",
+                environment.get("LITELLM_OTEL_BAGGAGE_TEAM_METADATA_KEYS") == "",
+                environment.get("LITELLM_OTEL_V2") == "true",
+                environment.get("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS") == ".*",
             )
         )
-        for block in (service_block("litellm-prod"), service_block("litellm-dev"))
+        for environment in (service_environment("litellm-prod"), service_environment("litellm-dev"))
     ) and all(
         item in attribution
         for item in (
@@ -233,33 +248,29 @@ def static_checks(report: Reporter) -> None:
         )
     )
     (report.pass_ if retention_ok else report.fail_)("Privacy, retention, and authenticated pseudonymous Langfuse attribution settings match both profiles")
-    prod_block, dev_block, vector_block, demo_block, bge_block = (
-        service_block(service)
-        for service in (
-            "litellm-prod", "litellm-dev", "litellm-pgvector", "litellm-demo-data-prod",
-            "bge-m3-vllm",
-        )
-    )
-    isolation_ok = all(
-        block for block in (
-            prod_block, dev_block, vector_block, demo_block, bge_block
-        )
-    ) and all((
-        re.search(r"^\s*profiles:\s*\[prod\]\s*$", prod_block, re.M) is not None,
-        re.search(r"^\s*profiles:\s*\[dev\]\s*$", dev_block, re.M) is not None,
-        re.search(r"^\s*profiles:\s*\[dev\]\s*$", vector_block, re.M) is not None,
-        re.search(r"^\s*profiles:\s*\[demo\]\s*$", demo_block, re.M) is not None,
-        re.search(r"^\s*profiles:\s*\[dev\]\s*$", bge_block, re.M) is not None,
-        "litellm_prod" in prod_block, "litellm_dev" in dev_block,
-        "LITELLM_PROD_HOST" in prod_block, "LITELLM_DEV_HOST" in dev_block,
-        "litellm_dev" not in prod_block, "litellm_prod" not in dev_block,
+    expected_profiles = {
+        "litellm-prod": ["prod"],
+        "litellm-dev": ["dev"],
+        "litellm-pgvector": ["dev"],
+        "litellm-demo-data-prod": ["demo"],
+        "bge-m3-vllm": ["dev"],
+    }
+    prod_env, dev_env = service_environment("litellm-prod"), service_environment("litellm-dev")
+    prod_text_model, dev_text_model = json.dumps(service("litellm-prod")), json.dumps(service("litellm-dev"))
+    prod_host = prod_env.get("PROXY_BASE_URL", "").removeprefix("https://")
+    dev_host = dev_env.get("PROXY_BASE_URL", "").removeprefix("https://")
+    isolation_ok = all(service(name) for name in expected_profiles) and all((
+        *(service(name).get("profiles") == profiles for name, profiles in expected_profiles.items()),
+        "litellm_prod" in prod_env.get("DATABASE_URL", ""), "litellm_dev" in dev_env.get("DATABASE_URL", ""),
+        routes_host("litellm-prod", prod_host), routes_host("litellm-dev", dev_host), prod_host != dev_host,
+        "litellm_dev" not in prod_text_model, "litellm_prod" not in dev_text_model,
         "hosted_vllm/bge-m3" not in prod_text,
         "test-model" not in prod_text,
-        "ports:" not in bge_block,
+        not service("bge-m3-vllm").get("ports"),
         "vllm-semantic-router" not in compose_text,
         "envoyproxy/envoy" not in compose_text,
     ))
-    (report.pass_ if isolation_ok else report.fail_)("Development and production services, databases, hostnames, and model lists remain isolated in docker-compose.yml")
+    (report.pass_ if isolation_ok else report.fail_)("Development and production services, databases, hostnames, and model lists remain isolated in the rendered Compose model")
 
 
 def docker_run_validation(image: str, config: Path, network: str, extra_environment: list[str]) -> tuple[int, str]:
@@ -301,11 +312,7 @@ def docker_run_validation(image: str, config: Path, network: str, extra_environm
 
 def start_validation_mcp_server(network: str) -> str:
     """Start the digest-pinned Xberg dependency on the isolated network."""
-    xberg_image = next(
-        (line.split(maxsplit=1)[1] for line in service_block("xberg").splitlines()
-         if line.strip().startswith("image:")),
-        "",
-    )
+    xberg_image = service_image("xberg")
     if not re.search(r"@sha256:[0-9a-f]{64}$", xberg_image):
         fail("xberg must use a digest-pinned image before candidate validation", 2)
     name = f"litellm-upgrade-check-xberg-{os.getpid()}-{time.time_ns()}"
@@ -331,14 +338,7 @@ def start_validation_mcp_server(network: str) -> str:
 
 def start_validation_qdrant(network: str) -> str:
     """Start the digest-pinned Qdrant dependency on the isolated network."""
-    qdrant_image = next(
-        (
-            line.split(maxsplit=1)[1]
-            for line in service_block("qdrant").splitlines()
-            if line.strip().startswith("image:")
-        ),
-        "",
-    )
+    qdrant_image = service_image("qdrant")
     if not re.search(r"@sha256:[0-9a-f]{64}$", qdrant_image):
         fail("qdrant must use a digest-pinned image before candidate validation", 2)
     name = f"litellm-upgrade-check-qdrant-{os.getpid()}-{time.time_ns()}"
@@ -656,10 +656,12 @@ def main() -> None:
     report = Reporter()
     print("== Candidate image ==")
     print(candidate)
-    current_prod = next((line.split()[1] for line in service_block("litellm-prod").splitlines()
-                         if line.strip().startswith("image:")), "")
-    current_dev = next((line.split()[1] for line in service_block("litellm-dev").splitlines()
-                        if line.strip().startswith("image:")), "")
+    try:
+        compose_model()
+    except (ScriptError, ValueError) as error:
+        fail(f"could not render the Compose model: {error}", 2)
+    current_prod = service_image("litellm-prod")
+    current_dev = service_image("litellm-dev")
     print(f"Currently pinned production image: {current_prod}")
     print(f"Currently pinned development image: {current_dev}")
     if candidate == current_prod:
