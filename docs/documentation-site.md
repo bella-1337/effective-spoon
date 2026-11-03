@@ -111,8 +111,11 @@ that every release tag and the default branch are available.
 | Default-branch push or release tag, publishing enabled | `build`, then `deploy` to GitHub Pages | `pages` job deploys to GitLab Pages |
 | Default-branch push or release tag, publishing disabled | `build` only | `docs` only |
 
-Publishing is off until you enable it, so a fork or a repository without a
-Pages configuration only checks that the site builds. A release tag pipeline
+Publishing is on by default: `DOCS_PAGES_ENABLED` is `true` in
+`.github/workflows/docs.yml` and `.gitlab-ci.yml`. To only build the site, for
+example in a fork, set a repository (GitHub) or project CI/CD (GitLab)
+variable `DOCS_PAGES_ENABLED` to `false`; it overrides the default. A release
+tag pipeline
 rebuilds the whole site, so the new version appears in the selector as soon as
 the tag is pushed.
 
@@ -127,9 +130,7 @@ the tag is pushed.
 3. Under **Settings > Environments > github-pages > Deployment branches and
    tags**, keep the default branch and add the tag rule `v*.*.*`; otherwise
    release tag deployments are rejected.
-4. Under **Settings > Secrets and variables > Actions > Variables**, create the
-   repository variable `DOCS_PAGES_ENABLED` with the value `true`.
-5. Push to the default branch, or run the **Documentation** workflow on it.
+4. Push to the default branch, or run the **Documentation** workflow on it.
 
 Before building, the workflow reads the Pages settings with the job token. It
 stops when Pages is not enabled, when the source is not GitHub Actions, or when
@@ -141,9 +142,7 @@ the repository is private and GitHub does not report the site as private.
    self-managed instance an administrator enables it in the Pages settings.
 2. Under **Settings > General > Visibility, project features, permissions**,
    set **Pages** to **Only Project Members**.
-3. Under **Settings > CI/CD > Variables**, add `DOCS_PAGES_ENABLED` with the
-   value `true`.
-4. Run a pipeline on the default branch.
+3. Run a pipeline on the default branch.
 
 The `pages` job first requests `CI_PAGES_URL` without credentials. It stops
 when the current site answers with content instead of a sign-in redirect, so a

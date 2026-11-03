@@ -1,6 +1,6 @@
 # Mirrors .github/workflows/docs.yml: every pipeline builds the versioned
 # documentation site; the default branch and release tags publish it to
-# GitLab Pages when the CI/CD variable DOCS_PAGES_ENABLED is "true". The
+# GitLab Pages while DOCS_PAGES_ENABLED (.gitlab-ci.yml) is "true". The
 # `pages` job refuses to publish when the current site answers anonymous
 # visitors. Setup: docs/documentation-site.md#gitlab-pages
 

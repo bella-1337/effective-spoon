@@ -1,8 +1,9 @@
 name: Documentation
 
 # Builds the versioned documentation site on every pull request and publishes
-# it to GitHub Pages from the default branch and release tags when the
-# repository variable DOCS_PAGES_ENABLED is "true". A private repository's
+# it to GitHub Pages from the default branch and release tags. Publishing is on
+# by default (DOCS_PAGES_ENABLED below); set the repository variable
+# DOCS_PAGES_ENABLED to "false" to only build. A private repository's
 # site is published only when GitHub reports its Pages visibility as private.
 # Setup: docs/documentation-site.md#github-pages
 
@@ -22,6 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  DOCS_PAGES_ENABLED: ${{ vars.DOCS_PAGES_ENABLED || 'true' }}
   # The same digest as DOCS_IMAGE in .gitlab/ci/images.yml; update both together.
   DOCS_IMAGE: ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm@sha256:47965cdc9d53a515f68f78241161c901e70051ce428f12e791bd7fe19f6a631a
 
@@ -38,13 +40,12 @@ jobs:
       - name: Decide whether this run publishes
         id: target
         env:
-          ENABLED: ${{ vars.DOCS_PAGES_ENABLED }}
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           deploy=false
-          if [ "$ENABLED" = "true" ] && [ "$EVENT" != "pull_request" ]; then
+          if [ "$DOCS_PAGES_ENABLED" = "true" ] && [ "$EVENT" != "pull_request" ]; then
             case "$REF" in
               "refs/heads/$DEFAULT_BRANCH") deploy=true ;;
               refs/tags/v*)
