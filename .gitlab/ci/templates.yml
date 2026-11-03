@@ -1,0 +1,14 @@
+# Hidden job templates shared by the files in .gitlab/ci/.
+
+# Docker-in-Docker over TLS. Needs a Docker executor with `privileged = true`
+# and `/certs/client` in the runner's volumes.
+.docker-in-docker:
+  image: ${DOCKER_CLI_IMAGE}
+  services:
+    - name: ${DOCKER_DIND_IMAGE}
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: /certs
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: /certs/client

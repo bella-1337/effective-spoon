@@ -1,0 +1,14 @@
+title = "litellm-stack secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Documented placeholders in the committed example environment files"
+stopwords = ['''replace_with_''']
+
+[[allowlists]]
+description = "Stable OpenSearch notebook saved-object UUIDs, not credentials"
+condition = "AND"
+paths = ['''^opensearch/tools/litellm_opensearch/notebooks\.py$''']
+regexes = ['''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$''']

@@ -1,0 +1,5 @@
+failure-threshold: warning
+ignored:
+  # `COPY --from=upstream` reads the Compose `additional_contexts` named build
+  # context (the pinned upstream Git commit), not an earlier build stage.
+  - DL3022

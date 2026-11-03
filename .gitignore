@@ -40,3 +40,9 @@ Thumbs.db
 
 # Remote GPU host deployment state (secrets, certificates, model caches)
 gpu-host/state/
+
+# CI release bundles
+dist/
+
+# gitlab-ci-local state
+.gitlab-ci-local/

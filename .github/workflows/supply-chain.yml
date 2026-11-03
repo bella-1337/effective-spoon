@@ -1,0 +1,99 @@
+name: Supply chain
+
+on:
+  workflow_call:
+    inputs:
+      enforce:
+        description: Fail on unexcepted KEV or fixable Critical image findings
+        type: boolean
+        default: true
+  workflow_dispatch:
+  schedule:
+    # Nightly, so newly published CVEs surface without a code change.
+    - cron: "23 3 * * *"
+  pull_request:
+    paths:
+      - ".github/workflows/supply-chain.yml"
+      - ".dockerignore"
+      - ".env.example"
+      - ".env.optional.example"
+      - "compose.optional.yml"
+      - "docker-compose.yml"
+      - "grafana/alerting/**"
+      - "opensearch/tools/**"
+      - "pgvector/**"
+      - "scripts/ci/**"
+      - "scripts/generate-image-sbom.py"
+      - "scripts/maintenance_common.py"
+      - "scripts/maintenance_contracts.py"
+      - "scripts/monitor-image-vulnerabilities.py"
+      - "scripts/run-image-security-scheduler.py"
+      - "security/**"
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/supply-chain.yml"
+      - ".dockerignore"
+      - ".env.example"
+      - ".env.optional.example"
+      - "compose.optional.yml"
+      - "docker-compose.yml"
+      - "grafana/alerting/**"
+      - "opensearch/tools/**"
+      - "pgvector/**"
+      - "scripts/ci/**"
+      - "scripts/generate-image-sbom.py"
+      - "scripts/maintenance_common.py"
+      - "scripts/maintenance_contracts.py"
+      - "scripts/monitor-image-vulnerabilities.py"
+      - "scripts/run-image-security-scheduler.py"
+      - "security/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      MAINTENANCE_FILE_LOGGING: "false"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Build the locally built images and verify their OCI labels
+        run: python3 scripts/ci/images.py build
+
+      - name: Scan the images for unexcepted KEV and fixable Critical findings
+        env:
+          # Pull requests and branch pushes report; nightly, manual, and
+          # release runs fail on findings.
+          SCAN_MODE: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && !inputs.enforce && '--report-only' || '' }}
+        run: python3 scripts/ci/images.py scan ${SCAN_MODE:+"$SCAN_MODE"}
+
+  dependencies:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Scan pinned Python dependencies
+        run: |
+          docker run --rm \
+            --volume "$PWD:/repo:ro" \
+            --workdir /repo \
+            --env TRIVY_CACHE_DIR=/cache \
+            --volume litellm-stack-ci-trivy-cache:/cache \
+            --entrypoint sh \
+            aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c \
+            scripts/ci/static-checks.sh dependencies
