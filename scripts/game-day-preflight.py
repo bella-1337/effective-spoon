@@ -8,10 +8,9 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
-from maintenance_common import ENV_FILE_REMEDY, ROOT, ScriptError
+from maintenance_common import ENV_FILE_REMEDY, LOG, ROOT, ScriptError, file_logging
 from maintenance_contracts import (
     load_compose_config,
     rendered_supply_chain_failures,
@@ -52,20 +51,18 @@ def main() -> int:
     args = parse_args()
     env_candidate = args.env_file.expanduser()
     if not env_candidate.is_file() or env_candidate.is_symlink():
-        print(
+        LOG.error(
             f"ERROR: environment file is missing or unsafe: {env_candidate}; "
             f"{ENV_FILE_REMEDY}",
-            file=sys.stderr,
         )
         return 2
     env_file = env_candidate.resolve()
 
     optional_env_candidate = args.optional_env_file.expanduser()
     if not optional_env_candidate.is_file() or optional_env_candidate.is_symlink():
-        print(
+        LOG.error(
             "ERROR: optional environment file is missing or unsafe: "
             f"{optional_env_candidate}; {ENV_FILE_REMEDY}",
-            file=sys.stderr,
         )
         return 2
     optional_env_file = optional_env_candidate.resolve()
@@ -77,18 +74,20 @@ def main() -> int:
             *rendered_supply_chain_failures(config),
         ]
     except (OSError, ValueError, ScriptError) as error:
-        print(f"ERROR: {error}", file=sys.stderr)
+        LOG.error(f"ERROR: {error}")
         return 1
 
     if failures:
         for failure in failures:
-            print(f"FAIL: {failure}", file=sys.stderr)
+            LOG.error(f"FAIL: {failure}")
         return 1
 
-    print("PASS: game-day static safety contracts are satisfied")
-    print("NEXT: execute the isolated and live drills in OPERATIONS-GAME-DAY.md")
+    LOG.info("PASS: game-day static safety contracts are satisfied")
+    LOG.info("NEXT: execute the isolated and live drills in OPERATIONS-GAME-DAY.md")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    with file_logging(__file__):
+        exit_code = main()
+    raise SystemExit(exit_code)

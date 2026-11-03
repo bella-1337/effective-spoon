@@ -21,6 +21,7 @@ from pathlib import Path
 from types import ModuleType
 
 from maintenance_common import (
+    LOG,
     IMAGE_REF_RE,
     ROOT,
     ScriptError,
@@ -297,7 +298,7 @@ def generate_evidence(
     need_licences = licence_scan and (refresh or not licence_path.is_file())
     if not need_sbom and not need_licences:
         assert isinstance(previous, dict)
-        print(f"PASS: {entry.key} evidence already present")
+        LOG.info(f"PASS: {entry.key} evidence already present")
         return previous
 
     label = ", ".join(entry.services)
@@ -348,7 +349,7 @@ def generate_evidence(
         monitor.atomic_write(
             meta_path, json.dumps(meta, indent=2, sort_keys=True) + "\n", 0o600
         )
-        print(f"PASS: generated evidence for {entry.key} ({label})")
+        LOG.info(f"PASS: generated evidence for {entry.key} ({label})")
         return meta
     finally:
         if archive is not None and archive.exists() and not archive.is_symlink():
@@ -548,7 +549,7 @@ def prune_evidence(
             continue
         keys = referenced_keys(path)
         if keys is None:
-            print(f"WARNING: kept all image evidence; unreadable run {path.name}", file=sys.stderr)
+            LOG.warning(f"WARNING: kept all image evidence; unreadable run {path.name}")
             return
         retained |= keys
     for path in image_root.iterdir():
@@ -648,7 +649,7 @@ def run_sbom(arguments: argparse.Namespace) -> bool:
                 error = str(error_value)
                 labels = {}
                 failures.append(error)
-                print(f"FAIL: {error}", file=sys.stderr)
+                LOG.error(f"FAIL: {error}")
             components.append(stack_component(entry, meta, labels, error))
         stack = build_stack_bom(
             project=arguments.project,
@@ -662,11 +663,11 @@ def run_sbom(arguments: argparse.Namespace) -> bool:
             run_file = run_root / f"stack-{utc_timestamp()}.cdx.json"
         monitor.atomic_write(run_file, json.dumps(stack, indent=2) + "\n", 0o600)
         prune_evidence(run_root, image_root, retention_days, time.time())
-        print(f"Stack SBOM written: {run_file} ({len(components)} images)")
+        LOG.info(f"Stack SBOM written: {run_file} ({len(components)} images)")
         for line in review_lines(components):
-            print(line)
+            LOG.info(line)
         for failure in failures:
-            print(f"FAIL: {failure}", file=sys.stderr)
+            LOG.error(f"FAIL: {failure}")
         return not failures
 
 

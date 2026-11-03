@@ -24,6 +24,7 @@ from urllib import request as urlrequest
 import truststore
 
 from maintenance_common import (
+    LOG,
     ROOT,
     SCRIPTS_DIR,
     ScriptError,
@@ -105,20 +106,20 @@ class Suite:
 
     @staticmethod
     def pass_(message: str) -> None:
-        print(f"PASS: {message}")
+        LOG.info(f"PASS: {message}")
 
     @staticmethod
     def fail_(message: str) -> None:
-        print(f"FAIL: {message}", file=sys.stderr)
+        LOG.error(f"FAIL: {message}")
 
     @staticmethod
     def skip(message: str) -> int:
-        print(f"SKIP: {message}")
+        LOG.info(f"SKIP: {message}")
         return 2
 
     @staticmethod
     def info(message: str) -> None:
-        print(f"INFO: {message}")
+        LOG.info(f"INFO: {message}")
 
     @staticmethod
     def mkcert_root_ca() -> Path | None:
@@ -1277,7 +1278,7 @@ def main() -> None:
     skipped_names: list[str] = []
     failed_names: list[str] = []
     for name in selected:
-        print(f"--- {name} ---")
+        LOG.info(f"--- {name} ---")
         try:
             result = getattr(suite, f"check_{name.replace('-', '_')}")()
         except ScriptError as error:
@@ -1286,11 +1287,11 @@ def main() -> None:
         if result == 0: passed += 1
         elif result == 2: skipped += 1; skipped_names.append(name)
         else: failed += 1; failed_names.append(name)
-        print()
-    print("==========================================")
-    print(f"Summary: {passed} passed, {failed} failed, {skipped} skipped")
-    if skipped_names: print(f"Skipped (documented prerequisite absent): {' '.join(skipped_names)}")
-    if failed_names: print(f"Failed: {' '.join(failed_names)}")
+        LOG.info("")
+    LOG.info("==========================================")
+    LOG.info(f"Summary: {passed} passed, {failed} failed, {skipped} skipped")
+    if skipped_names: LOG.info(f"Skipped (documented prerequisite absent): {' '.join(skipped_names)}")
+    if failed_names: LOG.info(f"Failed: {' '.join(failed_names)}")
     if failed: raise SystemExit(1)
 
 

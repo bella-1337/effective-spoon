@@ -33,6 +33,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from maintenance_common import LOG, file_logging
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "traefik" / "certs" / "gpu-host-ca-bundle.pem"
 PUBLIC_ROOT_CANDIDATES = (
@@ -130,12 +132,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         write_atomically(arguments.output, bundle)
     except BundleError as error:
-        print(f"ERROR: {error}", file=sys.stderr)
+        LOG.error(f"ERROR: {error}")
         return 1
-    print(f"Wrote {arguments.output} ({len(certificates(bundle))} certificates, public roots from {public_path}).")
-    print("Set GPU_HOST_CA_BUNDLE to that path in .env, then recreate litellm-prod and litellm-dev.")
+    LOG.info(f"Wrote {arguments.output} ({len(certificates(bundle))} certificates, public roots from {public_path}).")
+    LOG.info("Set GPU_HOST_CA_BUNDLE to that path in .env, then recreate litellm-prod and litellm-dev.")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    with file_logging(__file__):
+        exit_code = main()
+    sys.exit(exit_code)

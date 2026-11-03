@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from maintenance_common import ROOT, fail, run_main
+from maintenance_common import LOG, ROOT, fail, run_main
 
 USAGE = """Usage:
   ./scripts/render-diagrams.py [DIAGRAM.mmd ...]   render all (or the named) diagrams
@@ -442,7 +442,7 @@ def render(path: Path, scripts: Path) -> None:
         if problems:
             fail(f"{path.name} does not match its Mermaid source:\n  " + "\n  ".join(problems))
         os.replace(rendered, html)
-    print(f"rendered {html.relative_to(ROOT)}")
+    LOG.info(f"rendered {html.relative_to(ROOT)}")
 
 
 def stale_diagrams(paths: list[Path]) -> list[str]:
@@ -467,10 +467,10 @@ def main() -> None:
     if args == ["--check"]:
         stale = stale_diagrams(sorted(DIAGRAMS_DIR.glob("*.mmd")))
         if stale:
-            print("Re-render with ./scripts/render-diagrams.py; stale or missing:")
-            print("\n".join(f"  {item}" for item in stale))
+            LOG.info("Re-render with ./scripts/render-diagrams.py; stale or missing:")
+            LOG.info("\n".join(f"  {item}" for item in stale))
             fail(f"{len(stale)} diagram(s) out of date")
-        print("All diagrams match their Mermaid sources.")
+        LOG.info("All diagrams match their Mermaid sources.")
         return
     if any(arg.startswith("-") for arg in args):
         fail("unknown option; see --help", 2)

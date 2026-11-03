@@ -542,6 +542,8 @@ services:
       IMAGE_SECURITY_SBOM_ENABLED: "${IMAGE_SECURITY_SBOM_ENABLED:-true}"
       IMAGE_SECURITY_SBOM_LICENCE_SCAN: "${IMAGE_SECURITY_SBOM_LICENCE_SCAN:-true}"
       IMAGE_SECURITY_SBOM_RETENTION_DAYS: "${IMAGE_SECURITY_SBOM_RETENTION_DAYS:-400}"
+      # Container output already reaches the log collectors; the root is read-only.
+      MAINTENANCE_FILE_LOGGING: "false"
     command: ["--all"]
     volumes:
       - ./security-state:/data/state

@@ -17,7 +17,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from maintenance_common import ROOT, fail, run, run_main
+from maintenance_common import LOG, ROOT, fail, run, run_main
 
 UNIT_BASENAME = "litellm-stack-image-security"
 SERVICE_NAME = f"{UNIT_BASENAME}.service"
@@ -247,6 +247,8 @@ def build_units(
         "IMAGE_SECURITY_REPORT_DIR": str(report_root),
         "IMAGE_SECURITY_METRICS_DIR": str(metrics_root),
         "IMAGE_SECURITY_EXCEPTIONS_FILE": str(policy),
+        # The repository is read-only under ProtectSystem=strict.
+        "MAINTENANCE_LOG_DIR": str(state_root / "logs"),
     }
     environment_lines = "\n".join(
         f"Environment={systemd_quote(f'{key}={value}')}"
@@ -380,15 +382,16 @@ def install(
     run([systemd_analyze, "verify", service_path, timer_path], capture=True)
     run([systemctl, "daemon-reload"])
     run([systemctl, "enable", "--now", TIMER_NAME])
-    print(f"Installed {TIMER_NAME} at {hour:02d}:{minute:02d} local time")
-    print(f"Service account: {account.name}")
-    print(f"Compose project: {project}")
-    print(f"State: {state_root}")
-    print(f"Reports: {report_root}")
-    print(f"Metrics: {metrics_root}")
-    print(f"Exceptions: {policy}")
-    print(f"SBOM generation: {'enabled' if sbom else 'disabled'}")
-    print(f"Units: {service_path}, {timer_path}")
+    LOG.info(f"Installed {TIMER_NAME} at {hour:02d}:{minute:02d} local time")
+    LOG.info(f"Service account: {account.name}")
+    LOG.info(f"Compose project: {project}")
+    LOG.info(f"State: {state_root}")
+    LOG.info(f"Script logs: {state_root / 'logs'}")
+    LOG.info(f"Reports: {report_root}")
+    LOG.info(f"Metrics: {metrics_root}")
+    LOG.info(f"Exceptions: {policy}")
+    LOG.info(f"SBOM generation: {'enabled' if sbom else 'disabled'}")
+    LOG.info(f"Units: {service_path}, {timer_path}")
 
 
 def uninstall() -> None:
@@ -404,7 +407,7 @@ def uninstall() -> None:
             path.unlink()
     run([systemctl, "daemon-reload"])
     run([systemctl, "reset-failed", SERVICE_NAME], check=False)
-    print(
+    LOG.info(
         f"Uninstalled {TIMER_NAME}; scan reports, state, and metrics were retained"
     )
 

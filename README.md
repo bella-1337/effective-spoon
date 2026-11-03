@@ -92,7 +92,7 @@ To stop, restart, or remove the stack, see
 | [Edge and abuse protection](docs/edge-and-abuse-protection.md) | TLS policy, HSTS, per-client rate limits, per-key defaults, Xberg sandbox egress and DNS, prompt-injection screening, and residual risks |
 | [EU technical-control baseline](docs/eu-technical-controls.md) | Modular policy configuration, data minimisation and retention, integrity and transport, deployment decisions outside this repository |
 | [Databases and pgvector storage](docs/databases-and-pgvector.md) | LiteLLM schema verification, pgvector store, opt-in Xberg auto-indexing |
-| [Maintenance runtime](docs/maintenance-runtime.md) | Installing `uv` for the maintenance scripts and why they use Python |
+| [Maintenance runtime](docs/maintenance-runtime.md) | Installing `uv` for the maintenance scripts, why they use Python, and where their logs are kept for review |
 | [Image security and supply-chain evidence](docs/image-security.md) | Trivy and CISA KEV image scanning, exceptions, alerts, scheduling, SBOMs, licence evidence, OCI image labels |
 | [Remote GPU host](gpu-host/README.md) | D3-mini and BGE-M3 on one shared GPU: engine choice, memory budget, deployment, network security |
 | [Back up and restore the databases](docs/backup-and-restore.md) | Database backups, restore, and the game-day preflight |

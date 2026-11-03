@@ -6,12 +6,15 @@ import hashlib
 import base64
 import http.client
 import json
+import logging
+import logging.handlers
 import os
 import re
 import shlex
 import signal
 import shutil
 import ssl
+import stat
 import subprocess
 import sys
 import tempfile
@@ -40,8 +43,151 @@ def fail(message: str, exit_code: int = 1) -> "None":
     raise ScriptError(message, exit_code)
 
 
+# Operator output goes to two streams: the console, unchanged from the
+# messages themselves, and a private per-script file under logs/ for later
+# review. Messages carry their own PASS:/FAIL:/WARNING:/ERROR: prefixes.
+LOG = logging.getLogger("litellm_stack.maintenance")
+LOG_DIR_VARIABLE = "MAINTENANCE_LOG_DIR"
+FILE_LOGGING_VARIABLE = "MAINTENANCE_FILE_LOGGING"
+DEFAULT_LOG_DIR = ROOT / "logs"
+LOG_FILE_MAX_BYTES = 5 * 1024 * 1024
+LOG_FILE_BACKUPS = 5
+
+
+class _ConsoleHandler(logging.Handler):
+    """Write INFO to stdout and WARNING and above to stderr.
+
+    The streams are looked up per record so redirected or captured
+    sys.stdout and sys.stderr keep working.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            stream = sys.stderr if record.levelno >= logging.WARNING else sys.stdout
+            stream.write(self.format(record) + "\n")
+            stream.flush()
+        except Exception:  # noqa: BLE001 - logging must never break the script
+            self.handleError(record)
+
+
+class _ReadableFileFormatter(logging.Formatter):
+    """Prefix every line with local time, level, and script for later review."""
+
+    def __init__(self, script: str) -> None:
+        super().__init__(datefmt="%Y-%m-%d %H:%M:%S %z")
+        self.script = script
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = record.getMessage()
+        redundant = f"{record.levelname}: "
+        if message.startswith(redundant):
+            message = message[len(redundant):]
+        if record.exc_info:
+            message = f"{message}\n{self.formatException(record.exc_info)}"
+        header = f"{self.formatTime(record, self.datefmt)} {record.levelname:<7} [{self.script}]"
+        lines = message.strip("\n").splitlines() or [""]
+        return "\n".join(f"{header} {line}".rstrip() for line in lines)
+
+
+def _sudo_owner() -> tuple[int, int] | None:
+    """Return the invoking operator's uid and gid when running as root via sudo."""
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return None
+    uid, gid = os.environ.get("SUDO_UID", ""), os.environ.get("SUDO_GID", "")
+    if not (uid.isdigit() and gid.isdigit()) or int(uid) == 0:
+        return None
+    return int(uid), int(gid)
+
+
+class _PrivateRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """Rotating file handler that never follows symlinks and keeps files 0600.
+
+    Under sudo, files are handed to the invoking operator so later runs
+    without sudo can keep appending to the same log.
+    """
+
+    def _open(self):  # type: ignore[override]
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(self.baseFilename, flags, 0o600)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise OSError(f"log file is not a regular file: {self.baseFilename}")
+            os.fchmod(descriptor, 0o600)
+            owner = _sudo_owner()
+            if owner is not None:
+                os.fchown(descriptor, *owner)
+            return os.fdopen(descriptor, self.mode, encoding=self.encoding, errors=self.errors)
+        except BaseException:
+            os.close(descriptor)
+            raise
+
+
+def _skip_blank_lines(record: logging.LogRecord) -> bool:
+    return bool(record.getMessage().strip())
+
+
+if not LOG.handlers:
+    LOG.setLevel(logging.INFO)
+    LOG.propagate = False
+    LOG.addHandler(_ConsoleHandler())
+
+
+def log_directory() -> Path | None:
+    """Return the file-log directory, or None when file logging is disabled."""
+    if os.environ.get(FILE_LOGGING_VARIABLE, "true").strip().lower() in {"0", "false", "no", "off"}:
+        return None
+    raw = os.environ.get(LOG_DIR_VARIABLE, "").strip()
+    directory = Path(raw).expanduser() if raw else DEFAULT_LOG_DIR
+    return directory if directory.is_absolute() else ROOT / directory
+
+
+@contextmanager
+def file_logging(script: str | os.PathLike[str]) -> Iterator[Path | None]:
+    """Also write this run's operator output to logs/<script>.log.
+
+    File logging is best effort: when the directory is unusable the script
+    warns once and keeps logging to the console.
+    """
+    directory = log_directory()
+    handler: logging.Handler | None = None
+    path: Path | None = None
+    if directory is not None:
+        name = Path(script).stem
+        path = directory / f"{name}.log"
+        try:
+            if directory.is_symlink():
+                raise OSError(f"log directory is a symbolic link: {directory}")
+            try:
+                directory.mkdir(mode=0o700, parents=True)
+            except FileExistsError:
+                pass
+            else:
+                owner = _sudo_owner()
+                if owner is not None:
+                    os.chown(directory, *owner, follow_symlinks=False)
+            handler = _PrivateRotatingFileHandler(
+                path,
+                maxBytes=LOG_FILE_MAX_BYTES,
+                backupCount=LOG_FILE_BACKUPS,
+                encoding="utf-8",
+            )
+        except OSError as error:
+            LOG.warning(f"WARNING: file logging is disabled for this run: {error}")
+            path = None
+        else:
+            handler.setFormatter(_ReadableFileFormatter(name))
+            handler.addFilter(_skip_blank_lines)
+            LOG.addHandler(handler)
+    try:
+        yield path
+    finally:
+        if handler is not None:
+            LOG.removeHandler(handler)
+            handler.close()
+
+
 def emit_error(message: str) -> None:
-    print(f"ERROR: {message}", file=sys.stderr)
+    LOG.error(f"ERROR: {message}")
 
 
 ENV_FILE_REMEDY = (
@@ -626,14 +772,19 @@ def run_main(main: Callable[[], None]) -> None:
 
     for sig in handled_signals:
         signal.signal(sig, terminate)
+    script = getattr(getattr(main, "__code__", None), "co_filename", None) or sys.argv[0]
     try:
-        try:
-            main()
-        except ScriptError as error:
-            emit_error(str(error))
-            raise SystemExit(error.exit_code)
-        except KeyboardInterrupt:
-            raise SystemExit(130)
+        with file_logging(script):
+            try:
+                main()
+            except ScriptError as error:
+                emit_error(str(error))
+                raise SystemExit(error.exit_code)
+            except KeyboardInterrupt:
+                raise SystemExit(130)
+            except Exception as error:  # noqa: BLE001 - keep crash tracebacks in the log file
+                LOG.exception(f"ERROR: unexpected {type(error).__name__}: {error}")
+                raise SystemExit(1)
     finally:
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)

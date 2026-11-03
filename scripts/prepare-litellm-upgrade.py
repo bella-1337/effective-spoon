@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from maintenance_common import (
+    LOG,
     IMAGE_REF_RE,
     ROOT,
     SCRIPTS_DIR,
@@ -115,7 +116,7 @@ def main() -> None:
     for service in services:
         if not service_is_running(service):
             skipped.append(f"{service}:service-not-running")
-            print(f"WARNING: skipping {service} (service-not-running)", file=sys.stderr)
+            LOG.warning(f"WARNING: skipping {service} (service-not-running)")
             continue
         image = compose_capture(["ps", "--format", "{{.Image}}", service]).strip()
         if not image:
@@ -130,7 +131,7 @@ def main() -> None:
             fail(f"image reference mismatch for {service} between 'docker compose ps' and 'docker inspect'")
         images[service] = image
         captured.append(service)
-        print(f"Captured rollback image for {service}: {image}")
+        LOG.info(f"Captured rollback image for {service}: {image}")
     if not captured:
         fail("no running target service was available to capture a rollback point for")
     files = config_files()
@@ -141,15 +142,16 @@ def main() -> None:
         )
         write_private_file(staging / "config-checksums.txt", checksum_lines)
         if skip_backup:
-            print("WARNING: --skip-backup was used; schema-incompatible rollback will require an explicit --backup argument", file=sys.stderr)
+            LOG.warning("WARNING: --skip-backup was used; schema-incompatible rollback will require an explicit --backup argument")
         else:
-            print("Creating pre-upgrade database backup...")
+            LOG.info("Creating pre-upgrade database backup...")
             backup = SCRIPTS_DIR / "backup-databases.py"
             result = run_python_script(backup, [], capture_stdout=True)
             if result.returncode:
                 fail("pre-upgrade backup failed; rerun with --skip-backup only if this is acceptable")
             assert isinstance(result.stdout, str)
-            print(result.stdout, end="")
+            if result.stdout:
+                LOG.info(result.stdout.rstrip("\n"))
             for line in result.stdout.splitlines():
                 if line.startswith("Backup completed: "):
                     backup_dir = line.removeprefix("Backup completed: ")
@@ -169,16 +171,16 @@ def main() -> None:
         staging.rename(final)
     write_private_file(state_root / ".LATEST.tmp", f"{state_name}\n")
     (state_root / ".LATEST.tmp").replace(state_root / "LATEST")
-    print(f"Prepared upgrade rollback point: {final}")
+    LOG.info(f"Prepared upgrade rollback point: {final}")
     if skipped:
-        print(f"Skipped services: {','.join(skipped)}")
+        LOG.info(f"Skipped services: {','.join(skipped)}")
     if skip_backup:
-        print("No database backup was captured (schema-incompatible rollback needs --backup).")
+        LOG.info("No database backup was captured (schema-incompatible rollback needs --backup).")
     else:
-        print(f"Database backup for schema-incompatible rollback: {backup_dir}")
-    print("\nAfter upgrading, if rollback is needed:")
-    print("  Image-only rollback:    scripts/rollback-litellm-upgrade.py --confirm-rollback --mode image-only")
-    print("  Schema-incompatible:     scripts/rollback-litellm-upgrade.py --confirm-rollback --mode restore-db")
+        LOG.info(f"Database backup for schema-incompatible rollback: {backup_dir}")
+    LOG.info("\nAfter upgrading, if rollback is needed:")
+    LOG.info("  Image-only rollback:    scripts/rollback-litellm-upgrade.py --confirm-rollback --mode image-only")
+    LOG.info("  Schema-incompatible:     scripts/rollback-litellm-upgrade.py --confirm-rollback --mode restore-db")
 
 
 if __name__ == "__main__":

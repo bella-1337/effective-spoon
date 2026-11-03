@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from maintenance_common import ROOT, fail, run_main
+from maintenance_common import LOG, ROOT, fail, run_main
 
 DASHBOARDS = (
     (
@@ -98,7 +98,7 @@ def main() -> None:
         finally:
             if temporary.exists():
                 temporary.unlink()
-    print(f"Dashboards fetched into {base}")
+    LOG.info(f"Dashboards fetched into {base}")
 
 
 if __name__ == "__main__":

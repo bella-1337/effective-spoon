@@ -15,6 +15,7 @@ import time
 import truststore
 
 from maintenance_common import (
+    LOG,
     compose_capture,
     container_http_request,
     fail,
@@ -70,7 +71,7 @@ def main() -> None:
     )
     if qdrant_status != 200:
         fail(f"authenticated Qdrant readiness returned HTTP {qdrant_status}")
-    print("PASS: LiteLLM can authenticate to Qdrant")
+    LOG.info("PASS: LiteLLM can authenticate to Qdrant")
 
     collection_url = "http://qdrant:6333/collections/litellm_dev_semantic_cache"
     initial_status, initial_body = container_http_request(
@@ -164,7 +165,7 @@ def main() -> None:
             f"expected one new cached response, point count changed from "
             f"{initial_count} to {points_count}"
         )
-    print("PASS: semantically similar prompts reused one cached response")
+    LOG.info("PASS: semantically similar prompts reused one cached response")
 
 
 if __name__ == "__main__":

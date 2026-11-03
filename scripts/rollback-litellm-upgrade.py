@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from maintenance_common import (
+    LOG,
     IMAGE_REF_RE,
     ROOT,
     SCRIPTS_DIR,
@@ -134,7 +135,7 @@ def detect_drift(state: Path, allow: bool) -> None:
     if drift and not allow:
         fail("configuration drift detected since prepare; re-run scripts/prepare-litellm-upgrade.py or pass --allow-config-drift to proceed knowingly")
     if drift:
-        print("WARNING: proceeding despite configuration drift because --allow-config-drift was given", file=sys.stderr)
+        LOG.warning("WARNING: proceeding despite configuration drift because --allow-config-drift was given")
 
 
 def override_file(path: Path, services: list[str], images: dict[str, str]) -> None:
@@ -174,7 +175,7 @@ def wait_running(service: str) -> None:
 
 def stop_if_running(service: str) -> None:
     if service_is_running(service):
-        print(f"Stopping {service}...")
+        LOG.info(f"Stopping {service}...")
         compose(["stop", service])
     if service_is_running(service):
         fail(f"service {service} did not stop; aborting to avoid an application/database race")
@@ -304,7 +305,7 @@ def main() -> None:
                 failed_stage = "database-startup"
                 compose(["up", "-d", "--wait", "postgres", "vector-postgres"])
                 failed_stage = "database-restore"
-                print(f"Restoring database backup: {backup}")
+                LOG.info(f"Restoring database backup: {backup}")
                 restore = run_python_script(
                     SCRIPTS_DIR / "restore-databases.py",
                     ["--confirm-restore", backup],
@@ -315,12 +316,12 @@ def main() -> None:
             failed_stage = "image-rollback"
             for service in targets:
                 if mode == "image-only" and previous[service] == images[service]:
-                    print(f"{service} is already running the rollback image; nothing to do")
+                    LOG.info(f"{service} is already running the rollback image; nothing to do")
                     actions[service] = "already-current"
                     continue
                 if mode == "image-only":
                     stop_if_running(service)
-                print(f"Starting {service} with rollback image...")
+                LOG.info(f"Starting {service} with rollback image...")
                 compose(["-f", "docker-compose.yml", "-f", str(override), "--profile", "prod", "--profile", "dev", "up", "-d", "--no-deps", service])
                 wait_running(service)
                 verify_image(service, images[service])
@@ -336,12 +337,12 @@ def main() -> None:
             applied = str(applied_path)
             if mode == "restore-db" and pgvector_was_running:
                 failed_stage = "pgvector-restart"
-                print("Restarting litellm-pgvector...")
+                LOG.info("Restarting litellm-pgvector...")
                 compose(["up", "-d", "--no-deps", "litellm-pgvector"])
                 wait_running("litellm-pgvector")
             if mode == "restore-db" and bridge_was_running:
                 failed_stage = "opensearch-bridge-restart"
-                print("Restarting opensearch-bridge...")
+                LOG.info("Restarting opensearch-bridge...")
                 compose(["up", "-d", "--no-deps", "opensearch-bridge"])
                 wait_running("opensearch-bridge")
             result = "SUCCESS"
@@ -364,16 +365,16 @@ def main() -> None:
                               *([f"failed_stage={failed_stage}"] if result == "FAILURE" else []),
                               f"completed_at_utc={utc_timestamp()}"))
                 write_private_file(report, "\n".join(lines) + "\n")
-                print(f"\nRollback report: {report}")
-                print(report.read_text(encoding="utf-8"), end="")
+                LOG.info(f"\nRollback report: {report}")
+                LOG.info(report.read_text(encoding="utf-8").rstrip("\n"))
             else:
-                print(f"WARNING: rollback report directory is unavailable: {reports}", file=sys.stderr)
+                LOG.warning(f"WARNING: rollback report directory is unavailable: {reports}")
         finally:
             lock.rmdir()
-    print(f"Rollback completed successfully (mode: {mode})")
+    LOG.info(f"Rollback completed successfully (mode: {mode})")
     if applied:
-        print(f"Activated persistent rollback override: {applied}")
-        print("Remove it only after docker-compose.yml is pinned to the intended image.")
+        LOG.info(f"Activated persistent rollback override: {applied}")
+        LOG.info("Remove it only after docker-compose.yml is pinned to the intended image.")
 
 
 if __name__ == "__main__":

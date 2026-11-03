@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from maintenance_common import (
+    LOG,
     ROOT,
     compose,
     compose_capture,
@@ -181,27 +182,27 @@ def rename_database(service: str, source: str, destination: str) -> bool:
 
 def remove_staging_database(service: str, staging: str) -> None:
     if not postgres_command(service, "dropdb", "--if-exists", "--force", staging):
-        print(f"WARNING: could not remove failed staging database {staging}", file=sys.stderr)
+        LOG.warning(f"WARNING: could not remove failed staging database {staging}")
 
 
 def restore_database(service: str, database: str, archive: Path) -> bool:
     staging, previous = restore_database_names(database, os.getpid())
     if not service_is_running(service):
-        print(f"ERROR: cannot restore {database} because service {service} is unavailable", file=sys.stderr)
+        LOG.error(f"ERROR: cannot restore {database} because service {service} is unavailable")
         return False
     if compose_from_file(
         ["exec", "-T", service, "pg_restore", "--list"],
         archive,
         check=False,
     ).returncode:
-        print(f"ERROR: archive validation failed for {database}", file=sys.stderr)
+        LOG.error(f"ERROR: archive validation failed for {database}")
         return False
-    print(f"Restoring {database} into staging database {staging}...")
+    LOG.info(f"Restoring {database} into staging database {staging}...")
     if not postgres_command(service, "dropdb", "--if-exists", "--force", staging):
-        print(f"ERROR: could not remove an existing staging database for {database}", file=sys.stderr)
+        LOG.error(f"ERROR: could not remove an existing staging database for {database}")
         return False
     if not postgres_command(service, "createdb", staging):
-        print(f"ERROR: could not create staging database for {database}", file=sys.stderr)
+        LOG.error(f"ERROR: could not create staging database for {database}")
         return False
     if compose_from_file(
         [
@@ -213,7 +214,7 @@ def restore_database(service: str, database: str, archive: Path) -> bool:
         archive,
         check=False,
     ).returncode:
-        print(f"ERROR: staged restore failed for {database}", file=sys.stderr)
+        LOG.error(f"ERROR: staged restore failed for {database}")
         remove_staging_database(service, staging)
         return False
     table_count = compose_capture(
@@ -227,36 +228,32 @@ def restore_database(service: str, database: str, archive: Path) -> bool:
         check=False,
     ).strip()
     if not table_count.isdigit() or int(table_count) <= 0:
-        print(f"ERROR: staged restore validation failed for {database}", file=sys.stderr)
+        LOG.error(f"ERROR: staged restore validation failed for {database}")
         remove_staging_database(service, staging)
         return False
-    print(f"Replacing target database {database}...")
+    LOG.info(f"Replacing target database {database}...")
     target_existed = database_exists(service, database)
     if target_existed:
         if database_exists(service, previous):
-            print(
+            LOG.error(
                 f"ERROR: safety database already exists for {database}: {previous}",
-                file=sys.stderr,
             )
             return False
         if not rename_database(service, database, previous):
-            print(
+            LOG.error(
                 f"ERROR: could not preserve current target database {database}",
-                file=sys.stderr,
             )
             return False
     if not rename_database(service, staging, database):
         if target_existed and not rename_database(service, previous, database):
-            print(
+            LOG.error(
                 f"ERROR: promotion and automatic recovery failed for {database}; "
                 f"recover the prior data from {previous}",
-                file=sys.stderr,
             )
         else:
-            print(
+            LOG.error(
                 f"ERROR: could not promote staged restore for {database}; "
                 f"recovered data remains in {staging}",
-                file=sys.stderr,
             )
         return False
     if not postgres_command(
@@ -271,19 +268,17 @@ def restore_database(service: str, database: str, archive: Path) -> bool:
                 service, previous, database
             )
             if not prior_restored:
-                print(
+                LOG.error(
                     f"ERROR: post-promotion check and automatic recovery failed for "
                     f"{database}; inspect {database}, {staging}, and {previous}",
-                    file=sys.stderr,
                 )
                 return False
-        print(
+        LOG.error(
             f"ERROR: post-promotion connection check failed for {database}",
-            file=sys.stderr,
         )
         return False
     if target_existed:
-        print(
+        LOG.info(
             f"Preserved the pre-restore database as {previous}; remove it only "
             "after application verification succeeds"
         )
@@ -317,18 +312,18 @@ def main() -> None:
     failed: list[str] = []
     for service, database in DATABASES:
         if database not in databases:
-            print(f"Skipping {database} because it is not present in this backup")
+            LOG.info(f"Skipping {database} because it is not present in this backup")
             continue
         if restore_database(service, database, backup / f"{database}.dump"):
             restored.append(database)
         else:
             failed.append(database)
     if failed:
-        print(f"ERROR: restore completed with failures: {','.join(failed)}", file=sys.stderr)
+        LOG.error(f"ERROR: restore completed with failures: {','.join(failed)}")
         if restored:
-            print(f"Successfully restored before failure: {','.join(restored)}")
+            LOG.info(f"Successfully restored before failure: {','.join(restored)}")
         raise SystemExit(1)
-    print(f"Restore completed successfully: {','.join(restored)}")
+    LOG.info(f"Restore completed successfully: {','.join(restored)}")
 
 
 if __name__ == "__main__":
