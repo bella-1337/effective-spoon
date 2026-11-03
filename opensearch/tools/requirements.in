@@ -2,3 +2,5 @@
 #   uv pip compile requirements.in --generate-hashes --universal --python-version 3.13 -o requirements.txt
 psycopg[binary]>=3.2,<4
 PyYAML>=6.0.2,<7
+python-json-logger>=4.2,<5
+orjson>=3.11,<4

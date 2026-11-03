@@ -101,6 +101,14 @@ CA created by `opensearch-certs`; only Traefik exposes OpenSearch Dashboards.
 | `opensearch-setup` | Idempotent provisioning of users, roles, templates, lifecycle policies, the Prometheus direct-query data source, and alert monitors |
 | `opensearch-dashboards-setup` | Imports index patterns, visualizations, saved searches, dashboards, and troubleshooting notebooks into the Global tenant |
 
+`opensearch-setup`, `opensearch-dashboards-setup`, and `opensearch-bridge` log
+one JSON object per line (`level`, `logger`, `message`, `time`, and `exc_info`
+for tracebacks) through python-json-logger with orjson. A traceback therefore
+stays in the same log entry as its error, and the level comes first so the
+collectors' severity detection reads it. To change verbosity, set
+`OPENSEARCH_TOOLS_LOG_LEVEL` (default `INFO`) in the service's environment, for
+example in a `docker-compose.override.yml`.
+
 Dashboards in the Global tenant (start at **LiteLLM Overview**):
 
 - **LiteLLM Management Summary** – executive usage, model spend, reliability,

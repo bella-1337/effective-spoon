@@ -26,6 +26,14 @@ try:
 except ImportError:  # pragma: no cover - depends on the local interpreter
     HAS_YAML = False
 
+try:
+    import orjson  # noqa: F401
+    import pythonjsonlogger  # noqa: F401
+
+    HAS_JSON_LOGGER = True
+except ImportError:  # pragma: no cover - depends on the local interpreter
+    HAS_JSON_LOGGER = False
+
 
 def rule_document(expr: str = "up == bool 0", **overrides: object) -> dict:
     rule = {
@@ -525,6 +533,41 @@ class NotebookTests(unittest.TestCase):
         ):
             self.assertIn(command, markdown)
         self.assertNotIn("OPENSEARCH_ADMIN_PASSWORD=", markdown)
+
+
+@unittest.skipUnless(HAS_JSON_LOGGER, "python-json-logger and orjson are not installed")
+class JsonLoggingTests(unittest.TestCase):
+    def test_each_record_is_one_json_line_with_the_level_first(self) -> None:
+        import io
+        import logging
+
+        from litellm_opensearch.__main__ import configure_logging
+
+        stream = io.StringIO()
+        root = logging.getLogger()
+        previous = (root.handlers[:], root.level)
+        try:
+            with patch.object(sys, "stderr", stream):
+                configure_logging()
+            logger = logging.getLogger("litellm_opensearch")
+            logger.info("Indexed %d new %s row(s) from %s", 3, "spend", "prod")
+            try:
+                raise RuntimeError("opensearch unavailable")
+            except RuntimeError:
+                logger.error("Bridge usage cycle failed", exc_info=True)
+        finally:
+            root.handlers[:] = previous[0]
+            root.setLevel(previous[1])
+
+        lines = stream.getvalue().splitlines()
+        self.assertEqual(len(lines), 2)
+        info, error = (json.loads(line) for line in lines)
+        self.assertTrue(lines[0].startswith('{"level":"INFO"'))
+        self.assertEqual(info["logger"], "litellm_opensearch")
+        self.assertEqual(info["message"], "Indexed 3 new spend row(s) from prod")
+        self.assertIn("time", info)
+        self.assertEqual(error["level"], "ERROR")
+        self.assertIn("RuntimeError: opensearch unavailable", error["exc_info"])
 
 
 if __name__ == "__main__":
