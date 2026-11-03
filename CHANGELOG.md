@@ -8,25 +8,9 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
-## [v1.0.1] - 2026-11-03
+## [v0.1.0] - 2026-11-03
 
-First published release. The `v1.0.0` release run was blocked by the
-enforcing image vulnerability gate, so no `v1.0.0` bundle was published.
-
-### Security
-
-- The three locally built images upgrade their Debian packages at build
-  time, fixing critical GnuTLS, OpenSSL, and Perl findings in the pinned base
-  images.
-- The `litellm-pgvector` connector installs patched LiteLLM (`1.106.6`),
-  FastAPI, Starlette, AnyIO, and python-multipart releases over its upstream
-  pins through `pgvector/requirements-overrides.txt`, removing CISA KEV and
-  critical findings.
-
-## [v1.0.0] - 2026-11-03
-
-Initial release of the self-hosted LiteLLM gateway stack. Not published; see
-`v1.0.1`.
+Initial release of the self-hosted LiteLLM gateway stack.
 
 ### Gateway and runtime profiles
 
@@ -66,6 +50,11 @@ Initial release of the self-hosted LiteLLM gateway stack. Not published; see
 - Every image pinned by digest, with Trivy and CISA KEV image scanning,
   reviewed exceptions, SBOMs, licence evidence, and OCI labels on local
   images.
+- The locally built images upgrade their Debian packages at build time, and
+  the `litellm-pgvector` connector installs patched LiteLLM, FastAPI,
+  Starlette, AnyIO, and python-multipart releases over its upstream pins
+  (`pgvector/requirements-overrides.txt`), so the release image gate has no
+  KEV or fixable Critical findings.
 - Edge hardening against DDoS, MITM, and prompt injection: TLS policy, HSTS,
   per-client rate limits, and per-key defaults.
 - Least-privilege observability database roles, restricted Docker socket
@@ -93,6 +82,5 @@ Initial release of the self-hosted LiteLLM gateway stack. Not published; see
   private, versioned documentation site built with Zensical and published to
   GitHub Pages or GitLab Pages.
 
-[Unreleased]: https://github.com/bella-1337/effective-spoon/compare/v1.0.1...HEAD
-[v1.0.1]: https://github.com/bella-1337/effective-spoon/compare/v1.0.0...v1.0.1
-[v1.0.0]: https://github.com/bella-1337/effective-spoon/tree/v1.0.0
+[Unreleased]: https://github.com/bella-1337/effective-spoon/compare/v0.1.0...HEAD
+[v0.1.0]: https://github.com/bella-1337/effective-spoon/releases/tag/v0.1.0
