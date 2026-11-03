@@ -16,6 +16,7 @@ cd "$ROOT"
 find_repository_files() {
   find . \
     \( -path ./.git -o -path ./.gitlab-ci-local -o -path ./node_modules \
+       -o -path ./.docs-cache \
        -o -name __pycache__ \) -prune \
     -o -type f \( "$@" \) -print \
     | sort
@@ -59,6 +60,7 @@ case "$1" in
       --ignore-unfixed \
       --skip-dirs .gitlab-ci-local \
       --skip-dirs node_modules \
+      --skip-dirs .docs-cache \
       --no-progress \
       --exit-code 1 \
       .

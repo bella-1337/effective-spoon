@@ -43,7 +43,7 @@ The biggest mistake would be interpreting the `prod` profile as a production dep
 
 The Prometheus image runs as `nobody`, while the setup instructs the operator to create a host-owned credential file with mode `0600`. That file is bind-mounted into Prometheus, so it is unreadable on Linux. Both LiteLLM scrape jobs then fail, dashboards lose application metrics, and alerts gated on `up{job="litellm-dev"}` cannot fire.
 
-Evidence: [docker-compose.yml:378](docker-compose.yml#L378), [README.md:302](README.md#L302), [prometheus.yml:5](litellm/prometheus.yml#L5).
+Evidence: [docker-compose.yml:378](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/docker-compose.yml#L378), [README.md:302](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/README.md#L302), [prometheus.yml:5](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/litellm/prometheus.yml#L5).
 
 **Correction:** use a Docker secret, or a shared group with `0640` plus `group_add`. Add a doctor check that executes `test -r` inside the Prometheus container.
 
@@ -51,7 +51,7 @@ Evidence: [docker-compose.yml:378](docker-compose.yml#L378), [README.md:302](REA
 
 `litellm-prod` cannot start or be recreated unless Xberg and Langfuse are healthy. Langfuse itself requires PostgreSQL, ClickHouse, Redis, and MinIO. A tracing or extraction outage can therefore prevent recovery of the core LLM gateway. Xberg's healthcheck only runs `xberg --version`, which does not verify its HTTP server.
 
-Evidence: [docker-compose.yml:587](docker-compose.yml#L587), especially [the dependency gates](docker-compose.yml#L613) and [Xberg's probe](docker-compose.yml#L370).
+Evidence: [docker-compose.yml:587](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/docker-compose.yml#L587), especially [the dependency gates](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/docker-compose.yml#L613) and [Xberg's probe](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/docker-compose.yml#L370).
 
 **Correction:** remove these hard health dependencies from the production proxy, let telemetry degrade explicitly, and give Xberg a real readiness probe.
 
@@ -59,7 +59,7 @@ Evidence: [docker-compose.yml:587](docker-compose.yml#L587), especially [the dep
 
 The backup script skips an unavailable database, publishes a partial backup successfully, and then performs age-based pruning unconditionally. If one database remains unavailable longer than the retention period, older complete backups can be deleted while only partial backups remain.
 
-Evidence: [backup-databases.py:96](scripts/backup-databases.py#L96) and [backup-databases.py:145](scripts/backup-databases.py#L145).
+Evidence: [backup-databases.py:96](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/scripts/backup-databases.py#L96) and [backup-databases.py:145](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/scripts/backup-databases.py#L145).
 
 **Correction:** do not prune after a partial run; return non-zero or a distinct degraded status; preserve the newest backup containing every configured database; emit a backup-age metric and alert.
 
@@ -69,7 +69,7 @@ Backup scope is also incomplete by design: Langfuse PostgreSQL, ClickHouse, MinI
 
 The rollback tool starts LiteLLM with a temporary override and saves a copy under reports, but the main Compose file remains pinned to the failed image. A later ordinary `docker compose up` silently deploys the bad version again.
 
-Evidence: [rollback-litellm-upgrade.py:294](scripts/rollback-litellm-upgrade.py#L294) and [rollback-litellm-upgrade.py:339](scripts/rollback-litellm-upgrade.py#L339).
+Evidence: [rollback-litellm-upgrade.py:294](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/scripts/rollback-litellm-upgrade.py#L294) and [rollback-litellm-upgrade.py:339](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/scripts/rollback-litellm-upgrade.py#L339).
 
 **Correction:** persist an active rollback override in stable state and make all maintenance commands include it, or make rollback revert the image pin in source control. `doctor` should fail if a saved rollback is not active.
 
@@ -77,7 +77,7 @@ Evidence: [rollback-litellm-upgrade.py:294](scripts/rollback-litellm-upgrade.py#
 
 Provisioned alerts cover the development semantic router and image scanning, but not production LiteLLM availability, error rate, latency, PostgreSQL, disk pressure, backup age, TLS expiry, or telemetry ingestion. No contact point or policy is provisioned. Eight image-security rules also use `noDataState: Alerting` even though the security profile is optional, creating an alert storm once notifications are configured without that profile.
 
-Evidence: [grafana/alerting/](grafana/alerting/), [vllm-semantic-router.yml](grafana/alerting/vllm-semantic-router.yml), and [image-security.yml](grafana/alerting/image-security.yml).
+Evidence: [grafana/alerting/](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/grafana/alerting/), [vllm-semantic-router.yml](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/grafana/alerting/vllm-semantic-router.yml), and [image-security.yml](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/grafana/alerting/image-security.yml).
 
 Grafana also lacks `GF_SECURITY_SECRET_KEY`, so UI-stored notification secrets rely on Grafana's default encryption key.
 
@@ -87,7 +87,7 @@ Grafana also lacks `GF_SECURITY_SECRET_KEY`, so UI-stored notification secrets r
 
 The same `${PG_USER}` creates the cluster and is used by both Grafana datasources and exporters. A Grafana user able to edit SQL-backed panels receives far more database authority than required. A correct read-only role is already suggested, but only as commented SQL.
 
-Evidence: [docker-compose.yml:82](docker-compose.yml#L82), [litellm-pg.yml:4](grafana/datasources/litellm-pg.yml#L4), [litellm-pg-dev.yml:4](grafana/datasources/litellm-pg-dev.yml#L4), and [verify-schema.sql:15](scripts/verify-schema.sql#L15).
+Evidence: [docker-compose.yml:82](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/docker-compose.yml#L82), [litellm-pg.yml:4](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/grafana/datasources/litellm-pg.yml#L4), [litellm-pg-dev.yml:4](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/grafana/datasources/litellm-pg-dev.yml#L4), and [verify-schema.sql:15](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/scripts/verify-schema.sql#L15).
 
 **Correction:** provision separate least-privilege roles for Grafana and exporters, restrict them to required views/tables, and cap datasource connections.
 
@@ -95,7 +95,7 @@ Evidence: [docker-compose.yml:82](docker-compose.yml#L82), [litellm-pg.yml:4](gr
 
 None of the 35 services defines Docker logging limits. The default `json-file` logs can fill the same host disk that holds databases, metrics, traces, and backups. This is more serious than the absence of CPU limits in a declared single-host environment.
 
-Evidence: the service definitions throughout [docker-compose.yml](docker-compose.yml).
+Evidence: the service definitions throughout [docker-compose.yml](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/docker-compose.yml).
 
 **Correction:** apply a shared logging anchor with `max-size` and `max-file`, add host/filesystem alerts, and add a Prometheus storage-size cap.
 
@@ -103,7 +103,7 @@ Evidence: the service definitions throughout [docker-compose.yml](docker-compose
 
 Xberg accepts caller-controlled remote URLs, is available through both LiteLLM profiles, and shares the same `internal` network as unauthenticated or highly privileged service APIs. The README accurately warns that internal placement does not block private destinations, but the risk remains implemented rather than mitigated.
 
-Evidence: [README.md:548](README.md#L548), [docker-compose.yml:336](docker-compose.yml#L336), [config.prod.yaml:16](litellm/config.prod.yaml#L16), and [config.dev.yaml:40](litellm/config.dev.yaml#L40).
+Evidence: [README.md:548](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/README.md#L548), [docker-compose.yml:336](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/docker-compose.yml#L336), [config.prod.yaml:16](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/litellm/config.prod.yaml#L16), and [config.dev.yaml:40](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/litellm/config.dev.yaml#L40).
 
 **Correction:** place Xberg behind an outbound allowlisting proxy, block loopback/RFC1918/link-local/cloud-metadata destinations after DNS resolution, isolate it from observability and database networks, and restrict MCP access to explicit trusted keys or teams.
 
@@ -111,19 +111,19 @@ Evidence: [README.md:548](README.md#L548), [docker-compose.yml:336](docker-compo
 
 The Docker socket is mounted into Traefik and root-running Alloy. A read-only socket mount does **not** make Docker API operations read-only; compromise of either container can reach host-root-equivalent Docker API operations. cAdvisor is also privileged with host mounts.
 
-Evidence: [docker-compose.yml:53](docker-compose.yml#L53), [docker-compose.yml:407](docker-compose.yml#L407), and [docker-compose.yml:883](docker-compose.yml#L883).
+Evidence: [docker-compose.yml:53](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/docker-compose.yml#L53), [docker-compose.yml:407](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/docker-compose.yml#L407), and [docker-compose.yml:883](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/docker-compose.yml#L883).
 
 **Correction:** use scoped socket proxies for Traefik and Alloy, remove Alloy's root user, and explicitly accept or replace cAdvisor's privileged deployment.
 
 ## Important but secondary improvements
 
-- The shared development RAG store intentionally shares data, so I do **not** classify it as an accidental tenant breach. However, every successful extraction is ingested without opt-in, principal metadata, PII processing, or source approval, and the callback writes directly to PostgreSQL. Improve [xberg_auto_index.py](litellm/modules/xberg_auto_index.py) before using it with non-public content.
-- Change `usage_bytes` from `integer` to `bigint` in [init.sql:8](pgvector/init.sql#L8).
-- Pin downloaded dashboards to immutable revisions/commits and verify checksums in [fetch-dashboards.py](scripts/fetch-dashboards.py).
+- The shared development RAG store intentionally shares data, so I do **not** classify it as an accidental tenant breach. However, every successful extraction is ingested without opt-in, principal metadata, PII processing, or source approval, and the callback writes directly to PostgreSQL. Improve [xberg_auto_index.py](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/litellm/modules/xberg_auto_index.py) before using it with non-public content.
+- Change `usage_bytes` from `integer` to `bigint` in [init.sql:8](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/pgvector/init.sql#L8).
+- Pin downloaded dashboards to immutable revisions/commits and verify checksums in [fetch-dashboards.py](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/scripts/fetch-dashboards.py).
 - Add CI. Existing tests cover image-security tooling but not backup, restore, rollback, callbacks, Compose behavior, or dashboard/alert validity.
 - Split the GPU-backed embedding service into an optional profile or align documentation with its 15-minute health start period. The current documented 150-second wait cannot cover it.
 - The restore flow is already staging-first and preserves the restored staging database if promotion fails. Improve it by renaming the old database aside or taking a safety dump; do not describe it as silent permanent data loss.
-- [ARCHITECTURE.md](ARCHITECTURE.md) is materially behind the stack: it omits many volumes, the security network, Langfuse, Qdrant, pgvector, Xberg, and the semantic router.
+- [ARCHITECTURE.md](https://github.com/bella-1337/effective-spoon/blob/7f611c88e05a828e7958faebe2f33f91025324d2/ARCHITECTURE.md) is materially behind the stack: it omits many volumes, the security network, Langfuse, Qdrant, pgvector, Xberg, and the semantic router.
 
 ## Claims rejected or deliberately down-ranked
 

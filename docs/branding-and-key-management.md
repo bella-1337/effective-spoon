@@ -7,7 +7,7 @@
 The LiteLLM Admin UI logo, dark-mode logo, and favicon use LiteLLM's native
 `UI_LOGO_PATH`, `UI_LOGO_PATH_DARK`, and `LITELLM_FAVICON_URL` settings. The
 example `.env` points them at the placeholder Foo-Bar images in
-[`branding/foo-bar`](../branding/foo-bar), mounted read-only into both gateways.
+[`branding/foo-bar`](../branding/README.md#foo-bar-example), mounted read-only into both gateways.
 Replace the images, or point the variables at `https://` URLs, then recreate
 the gateways:
 

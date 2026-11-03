@@ -46,3 +46,8 @@ dist/
 
 # gitlab-ci-local state
 .gitlab-ci-local/
+
+# Documentation site build output and toolchain cache
+/site/
+/public/
+.docs-cache/

@@ -31,7 +31,7 @@ results returned by the upstream service.
 ### Search-engine terms of use
 
 SearXNG itself is AGPL-3.0 and free to run internally unmodified, but it grants
-no right to use the search engines it queries. [`searxng/settings.yml`](../searxng/settings.yml)
+no right to use the search engines it queries. `searxng/settings.yml`
 sets `use_default_settings: true`, so the image's default engine set is active
 (for example DuckDuckGo, Brave, Wikipedia, and Bing and Google news/media
 engines). SearXNG obtains those results by scraping the public web pages, not

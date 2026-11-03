@@ -1,0 +1,15 @@
+{#-
+  Footer: copyright notice plus the version and revision this site was built from.
+-#}
+{%- set build = config.extra.build -%}
+<div class="md-copyright">
+  {% if config.copyright %}
+    <div class="md-copyright__highlight">{{ config.copyright }}</div>
+  {% endif %}
+  <div class="docs-build-info">
+    Version <strong>{{ build.version }}</strong>
+    {%- if build.source_ref %} · <code>{{ build.source_ref }}</code>{% endif %}
+    {%- if build.commit %} @ <code>{{ build.commit[:7] }}</code>{% endif %}
+    {%- if build.date %} · built {{ build.date }}{% endif %}
+  </div>
+</div>

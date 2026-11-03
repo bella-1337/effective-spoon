@@ -1,0 +1,140 @@
+name: Documentation
+
+# Builds the versioned documentation site on every pull request and publishes
+# it to GitHub Pages from the default branch and release tags. Publishing is on
+# by default (DOCS_PAGES_ENABLED below); set the repository variable
+# DOCS_PAGES_ENABLED to "false" to only build. A private repository's
+# site is published only when GitHub reports its Pages visibility as private.
+# Setup: docs/documentation-site.md#github-pages
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCS_PAGES_ENABLED: ${{ vars.DOCS_PAGES_ENABLED || 'true' }}
+  # The same digest as DOCS_IMAGE in .gitlab/ci/images.yml; update both together.
+  DOCS_IMAGE: ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm@sha256:47965cdc9d53a515f68f78241161c901e70051ce428f12e791bd7fe19f6a631a
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pages: read
+    outputs:
+      deploy: ${{ steps.target.outputs.deploy }}
+    steps:
+      - name: Decide whether this run publishes
+        id: target
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          deploy=false
+          if [ "$DOCS_PAGES_ENABLED" = "true" ] && [ "$EVENT" != "pull_request" ]; then
+            case "$REF" in
+              "refs/heads/$DEFAULT_BRANCH") deploy=true ;;
+              refs/tags/v*)
+                if printf '%s\n' "${REF#refs/tags/}" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+'; then
+                  deploy=true
+                fi
+                ;;
+            esac
+          fi
+          echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to publish private documentation publicly
+        id: pages
+        if: steps.target.outputs.deploy == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIVATE_REPOSITORY: ${{ github.event.repository.private }}
+          ALLOW_PUBLIC: ${{ vars.DOCS_ALLOW_PUBLIC_PAGES }}
+        run: |
+          set -euo pipefail
+          if ! site=$(gh api "repos/$GITHUB_REPOSITORY/pages"); then
+            echo "::error::GitHub Pages is not enabled. Set Settings > Pages > Source to GitHub Actions."
+            exit 1
+          fi
+          if [ "$(jq -r '.build_type' <<<"$site")" != "workflow" ]; then
+            echo "::error::Set Settings > Pages > Source to GitHub Actions."
+            exit 1
+          fi
+          public=$(jq -r '.public' <<<"$site")
+          if [ "$PRIVATE_REPOSITORY" = "true" ] && [ "$public" != "false" ]; then
+            if [ "$ALLOW_PUBLIC" != "true" ]; then
+              echo "::error::Pages of this private repository would be public (public=$public). Set Settings > Pages > Visibility to Private (GitHub Enterprise Cloud), or set DOCS_ALLOW_PUBLIC_PAGES=true to publish publicly on purpose."
+              exit 1
+            fi
+            echo "::warning::Publishing the documentation publicly because DOCS_ALLOW_PUBLIC_PAGES is true."
+          fi
+          echo "url=$(jq -r '.html_url' <<<"$site")" >> "$GITHUB_OUTPUT"
+
+      - name: Check out repository, branches, and tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build the versioned site
+        env:
+          MODE: ${{ steps.target.outputs.deploy == 'true' && 'publish' || 'check' }}
+          SITE_URL: ${{ steps.pages.outputs.url }}
+          DOCS_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -- "$MODE"
+          if [ "$MODE" = "publish" ]; then
+            set -- "$MODE" "$SITE_URL"
+          fi
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --volume "$PWD:/repo" \
+            --workdir /repo \
+            --env HOME=/tmp \
+            --env MAINTENANCE_FILE_LOGGING=false \
+            --env GITHUB_ACTIONS \
+            --env GITHUB_SERVER_URL \
+            --env GITHUB_REPOSITORY \
+            --env DOCS_DEFAULT_BRANCH \
+            --entrypoint sh \
+            "$DOCS_IMAGE" \
+            scripts/ci/docs.sh "$@"
+
+      - name: Upload the Pages artifact
+        if: steps.target.outputs.deploy == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.deploy == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346

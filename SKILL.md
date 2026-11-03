@@ -43,7 +43,9 @@ Map the change across these surfaces:
 - `gpu-host/` (the separate remote D3-mini and BGE-M3 stack: `compose.yml`,
   `deploy.py`, and its Nginx configuration), whose image and model pins the
   licence register must also cover;
-- the Mermaid diagram sources in `diagrams/*.mmd`.
+- the Mermaid diagram sources in `diagrams/*.mmd`;
+- `mkdocs.yml` `nav:` when a Markdown file is added, moved, or removed, so the
+  [documentation site](docs/documentation-site.md) strict build keeps passing.
 
 For every proposed removal, identify:
 
@@ -115,7 +117,12 @@ jq empty grafana/dashboards/litellm-stack/litellm-stack.json
 jq empty grafana/dashboards/litellm-cost/litellm-cost.json
 ```
 
-Validate changed YAML with an installed YAML parser when available.
+Validate changed YAML with an installed YAML parser when available. When
+Markdown files or `mkdocs.yml` change, also run the strict documentation build:
+
+```sh
+./scripts/build-docs.py build
+```
 
 ### 5. Deploy and validate runtime behavior
 

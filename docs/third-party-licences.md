@@ -115,6 +115,36 @@ Each model is pinned to an immutable revision.
 
 All other repository scripts use only the Python standard library.
 
+## Documentation toolchain
+
+`scripts/build-docs.py` installs these packages from the hash-locked
+`docs-site/requirements.txt` into a local virtual environment to build the
+[documentation site](documentation-site.md) with Zensical. They run only at
+build time, on a workstation or CI runner, and are neither deployed with the
+stack nor redistributed. The published site contains Zensical's theme
+JavaScript and stylesheets (MIT) and only Material Design Icons (Apache-2.0)
+plus the theme's own interface icons. It uses no Font Awesome icons or Twemoji
+emoji, whose CC BY 4.0 licence would require attribution.
+
+| Package | Version | Licence | Notes |
+| --- | --- | --- | --- |
+| `zensical` | 0.0.74 | MIT | Site generator; pre-1.0, pinned exactly (see [Maintenance](documentation-site.md#maintenance)). |
+| `zensical-ui` | 0.0.41 | MIT | Theme templates and assets; bundles icon sets under their own licences (Material Design Icons: Apache-2.0; Lucide: ISC; Octicons: MIT; Simple Icons: CC0-1.0; Font Awesome: CC BY 4.0 and MIT). Only Material Design Icons are used. |
+| `pymdown-extensions` | 12.3 | MIT | None. |
+| `markdown` | 3.11.2 | BSD-3-Clause | None. |
+| `jinja2` | 3.1.6 | BSD-3-Clause | None. |
+| `markupsafe` | 3.0.4 | BSD-3-Clause | None. |
+| `pygments` | 2.21.0 | BSD-2-Clause | None. |
+| `click` | 8.5.0 | BSD-3-Clause | None. |
+| `deepmerge` | 4.0.0 | MIT | None. |
+| `pathspec` | 1.1.1 | MPL-2.0 | Used unmodified; MPL-2.0 file-level obligations apply only on distribution of modified files. |
+| `pyyaml` | 6.0.3 | MIT | None. |
+| `tomli` | 2.5.0 | MIT | None. |
+
+The CI jobs build the site in `ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm`
+(uv: MIT OR Apache-2.0; Python: PSF-2.0; Debian packages under their own
+licences), a CI tool image like the linters, not part of the stack.
+
 ## External services and terms
 
 These are contractual terms rather than software licences, but they are
