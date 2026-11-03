@@ -572,6 +572,8 @@ class JsonLoggingTests(unittest.TestCase):
 
 class BridgeFailureLoggingTests(unittest.TestCase):
     def test_cycle_failures_are_logged_with_their_tracebacks(self) -> None:
+        # monotonic() counts from host boot, so 42 s models a freshly booted
+        # host, where the first entity snapshot must still run.
         from litellm_opensearch import bridge
 
         sync = Mock()
@@ -592,6 +594,7 @@ class BridgeFailureLoggingTests(unittest.TestCase):
                 patch.object(bridge, "evaluate_metrics", side_effect=OSError("prometheus unreachable")), \
                 patch.object(bridge.usage, "apply_retention", side_effect=RuntimeError("retention failed")), \
                 patch.object(bridge.time, "sleep", side_effect=stop_after_first_cycle), \
+                patch.object(bridge.time, "monotonic", return_value=42.0), \
                 self.assertLogs("litellm_opensearch", level="ERROR") as captured:
             self.assertEqual(bridge.run(), 0)
 

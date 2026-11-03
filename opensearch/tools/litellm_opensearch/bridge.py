@@ -115,7 +115,9 @@ def run() -> int:
         "OpenSearch bridge started: %d metric queries, %d alert rules, environments %s",
         len(catalog.expressions), len(rules), ",".join(environments) or "none",
     )
-    last_entities = 0.0
+    # None until the first success: monotonic() counts from host boot, so a
+    # 0.0 start would delay the first snapshot on a freshly booted host.
+    last_entities: float | None = None
     last_retention_day = None
     while not STOP:
         started = time.monotonic()
@@ -131,7 +133,7 @@ def run() -> int:
             except Exception as error:  # noqa: BLE001 - keep the daemon alive; retry next cycle
                 healthy = False
                 LOG.error("Bridge %s cycle failed: %s", label, error, exc_info=True)
-        if time.monotonic() - last_entities >= entity_interval:
+        if last_entities is None or time.monotonic() - last_entities >= entity_interval:
             try:
                 sync.run_entities(now)
                 last_entities = time.monotonic()
