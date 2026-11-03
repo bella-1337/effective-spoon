@@ -1,0 +1,38 @@
+name: Dev container
+
+# Proves that .devcontainer/ still builds: the pinned base image, the uv copy,
+# and the locked docker-outside-of-docker feature. It runs only when that
+# configuration changes, weekly to catch upstream breakage, and on demand.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 4 * * 1"
+  pull_request:
+    paths:
+      - ".devcontainer/**"
+      - ".github/workflows/devcontainer.yml"
+  push:
+    branches: [master]
+    paths:
+      - ".devcontainer/**"
+      - ".github/workflows/devcontainer.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devcontainer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  devcontainer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Build development container
+        run: npx --yes @devcontainers/cli@0.89.0 build --workspace-folder .

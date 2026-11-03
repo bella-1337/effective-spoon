@@ -1,0 +1,59 @@
+# Mirrors .github/workflows/validate.yml: runs on every pipeline.
+
+validate:
+  stage: validate
+  image: ${DOCKER_CLI_IMAGE}
+  needs: []
+  timeout: 20m
+  before_script:
+    # The CLI image already has Docker Compose and Git; validation runs
+    # `docker compose config` only, so no Docker daemon is needed. OpenSSL
+    # enables the certificate tests that the GitHub runner also executes.
+    - apk add --no-cache bash openssl python3 tzdata
+  script:
+    - ./scripts/ci/validate.sh
+
+lint-shell:
+  stage: validate
+  image:
+    name: ${SHELLCHECK_IMAGE}
+    entrypoint: [""]
+  needs: []
+  timeout: 10m
+  script:
+    - sh scripts/ci/static-checks.sh shell
+
+lint-dockerfiles:
+  stage: validate
+  image:
+    name: ${HADOLINT_IMAGE}
+    entrypoint: [""]
+  needs: []
+  timeout: 10m
+  script:
+    - sh scripts/ci/static-checks.sh dockerfiles
+
+lint-github-workflows:
+  stage: validate
+  image:
+    name: ${ACTIONLINT_IMAGE}
+    entrypoint: [""]
+  needs: []
+  timeout: 10m
+  rules:
+    - exists:
+        - .github/workflows/*.yml
+  script:
+    - actionlint -color
+
+secret-scan:
+  stage: validate
+  image:
+    name: ${GITLEAKS_IMAGE}
+    entrypoint: [""]
+  needs: []
+  timeout: 10m
+  variables:
+    GIT_DEPTH: "0"
+  script:
+    - sh scripts/ci/static-checks.sh secrets

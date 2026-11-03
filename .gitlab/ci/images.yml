@@ -1,0 +1,15 @@
+# Container images for every GitLab CI job and service.
+#
+# Each image is pinned to a sha256 digest; scripts/ci/validate.sh rejects a job
+# or service image that is not one of these variables or a digest reference.
+# The GitHub workflows use the same digests, so update both together.
+
+variables:
+  DOCKER_CLI_IMAGE: "docker:29.9.2-cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14809346814bbfdb"
+  DOCKER_DIND_IMAGE: "docker:29.9.2-dind@sha256:9e79b879b177fbd72c34376a3dd3d91747da5db49e1f560f76aea59561471977"
+  SHELLCHECK_IMAGE: "koalaman/shellcheck-alpine@sha256:5921d946dac740cbeec2fb1c898747b6105e585130cc7f0602eec9a10f7ddb63"
+  HADOLINT_IMAGE: "hadolint/hadolint:v2.15.1-alpine@sha256:a1d49ae1a4e83c1dbad26b8c1ad7588c8bd1e04f4866b34ad3cac50335198552"
+  ACTIONLINT_IMAGE: "rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9"
+  GITLEAKS_IMAGE: "zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
+  TRIVY_IMAGE: "aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c"
+  GLAB_IMAGE: "registry.gitlab.com/gitlab-org/cli:v1.128.0@sha256:00884510ffcbb6b03c0abc5dd058d7728a646cab2a419de4a7108d073ce90a03"

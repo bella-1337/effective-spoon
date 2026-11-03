@@ -4,6 +4,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app
 
+# Debian removes superseded package versions from its mirrors, so exact pins
+# would break rebuilds; the CI image scan checks the installed versions instead.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends build-essential curl postgresql-client \
     && rm -rf /var/lib/apt/lists/*

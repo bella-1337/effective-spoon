@@ -21,18 +21,51 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Run hermetic validation
+        env:
+          MAINTENANCE_FILE_LOGGING: "false"
         run: ./scripts/ci/validate.sh
+
+      - name: Record deferred external-service checks
+        if: always()
+        run: |
+          {
+            echo "### External-service checks"
+            echo
+            echo "Deferred by design: full Compose startup, GPU model loading,"
+            echo "provider API calls, and live on-prem deployment probes."
+            echo "Image and dependency vulnerability scans run in the Supply chain workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Lint shell scripts
         run: |
           docker run --rm \
-            --entrypoint shellcheck \
             --volume "$PWD:/repo:ro" \
+            --workdir /repo \
+            --entrypoint sh \
             koalaman/shellcheck-alpine@sha256:5921d946dac740cbeec2fb1c898747b6105e585130cc7f0602eec9a10f7ddb63 \
-            /repo/scripts/ci/validate.sh \
-            /repo/.devcontainer/post-create.sh
+            scripts/ci/static-checks.sh shell
+
+      - name: Lint Dockerfiles
+        run: |
+          docker run --rm \
+            --volume "$PWD:/repo:ro" \
+            --workdir /repo \
+            --entrypoint sh \
+            hadolint/hadolint:v2.15.1-alpine@sha256:a1d49ae1a4e83c1dbad26b8c1ad7588c8bd1e04f4866b34ad3cac50335198552 \
+            scripts/ci/static-checks.sh dockerfiles
 
       - name: Lint GitHub Actions workflows
         run: |
@@ -42,23 +75,21 @@ jobs:
             rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 \
             -color
 
-      - name: Record deferred external-service checks
-        if: always()
-        run: |
-          {
-            echo "### External-service checks"
-            echo
-            echo "Deferred by design: full Compose startup, GPU model loading,"
-            echo "provider API calls, vulnerability-database downloads, and"
-            echo "live on-prem deployment probes."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  devcontainer:
+  secrets:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
-      - name: Check out repository
+      - name: Check out full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Build development container
-        run: npx --yes @devcontainers/cli@0.89.0 build --workspace-folder .
+      - name: Scan the Git history for committed secrets
+        run: |
+          docker run --rm \
+            --volume "$PWD:/repo:ro" \
+            --workdir /repo \
+            --entrypoint sh \
+            zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            scripts/ci/static-checks.sh secrets

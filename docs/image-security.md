@@ -73,6 +73,12 @@ Do not add permanent wildcard exceptions. An expired exception is no longer
 applied, and Grafana warns seven days before the earliest active exception
 expires.
 
+The CI image gate (`scripts/ci/images.py scan`) reads the same file for the
+three images this repository builds. Because one image can serve several
+services (for example the OpenSearch tools image), CI accepts a finding only
+when exceptions cover every service that runs the image. See
+[Local and continuous integration](development-workflow.md#local-and-continuous-integration).
+
 ### Prometheus, OpenSearch, and Grafana alerts
 
 The Compose configuration enables node-exporter's official textfile collector
