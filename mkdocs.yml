@@ -184,6 +184,7 @@ nav:
       - Third-party licences: docs/third-party-licences.md
       - Dev-to-prod promotion register: docs/dev-to-prod-promotion-register.md
   - Development:
+      - Changelog: CHANGELOG.md
       - Development workflow: docs/development-workflow.md
       - Documentation site: docs/documentation-site.md
       - Stack maintenance skill: SKILL.md

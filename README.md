@@ -108,6 +108,7 @@ see [Documentation site](docs/documentation-site.md).
 
 | Document | Covers |
 | --- | --- |
+| [Changelog](CHANGELOG.md) | Notable changes in each release |
 | [Architecture](ARCHITECTURE.md) | Stack components and their interactions |
 | [Diagrams](diagrams/README.md) | Animated architecture and flow diagrams, including clients and external services, generated from Mermaid sources |
 | [Environment variable reference](docs/environment-variables.md) | Every variable, its format, default, classification, rotation, and change impact |

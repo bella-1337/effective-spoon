@@ -182,3 +182,21 @@ The release is a validated delivery artifact, not an automatic production
 rollout. On-prem deployment still requires an operator to supply secrets and
 TLS material, review the release, and follow the
 [upgrade and rollback procedure](upgrades-and-rollback.md).
+
+### Cut a release
+
+1. On `master`, move the `[Unreleased]` entries in
+   [`CHANGELOG.md`](../CHANGELOG.md) under a new `[vMAJOR.MINOR.PATCH] -
+   YYYY-MM-DD` heading, update the comparison links at the end of the file,
+   and merge that change.
+2. Run `./scripts/ci/validate.sh` and `scripts/ci/docs.sh check` on the merged
+   commit.
+3. Create an annotated tag on that commit and push it:
+
+   ```sh
+   git tag -a v1.2.3 -m "LiteLLM stack v1.2.3"
+   git push origin v1.2.3
+   ```
+
+The tag push starts the release pipelines described above. Never move or
+delete a published tag; fix a bad release with a new patch version.
