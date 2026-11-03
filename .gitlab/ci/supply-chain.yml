@@ -14,6 +14,7 @@
         - .env.optional.example
         - compose.optional.yml
         - docker-compose.yml
+        - docs-site/requirements.txt
         - grafana/alerting/**/*
         - opensearch/tools/**/*
         - pgvector/**/*

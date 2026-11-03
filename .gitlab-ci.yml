@@ -12,6 +12,7 @@ include:
   - local: .gitlab/ci/supply-chain.yml
   - local: .gitlab/ci/devcontainer.yml
   - local: .gitlab/ci/release.yml
+  - local: .gitlab/ci/docs.yml
 
 variables:
   MAINTENANCE_FILE_LOGGING: "false"

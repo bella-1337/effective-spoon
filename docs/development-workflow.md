@@ -52,6 +52,7 @@ workflow of the same name:
 | `supply-chain.yml` | `supply-chain.yml` | Image build and vulnerability gate, dependency scan |
 | `devcontainer.yml` | `devcontainer.yml` | Development container build |
 | `release.yml` | `release.yml` | Release publication |
+| `docs.yml` | `docs.yml` | Documentation site build and private Pages publication |
 
 The root `.gitlab-ci.yml` only includes these files and defines the pipeline
 rules, stages, and defaults. `.gitlab/ci/images.yml` holds every digest-pinned
@@ -72,6 +73,7 @@ The checks:
 | Image vulnerability gate (Trivy, CISA KEV, `security/exceptions.toml`) | `python3 scripts/ci/images.py scan` | Same as the build |
 | Python dependency scan (Trivy, fixable High and Critical) | `scripts/ci/static-checks.sh dependencies` | Same as the build |
 | Development container build | `npx @devcontainers/cli build` | Changes to `.devcontainer/`, weekly or nightly, and manual runs |
+| Versioned documentation site build (MkDocs strict mode) | `scripts/ci/docs.sh check` | Every pull or merge request, default-branch push, and tag |
 
 The image gate applies the policy of `maintenance.py security-scan --enforce`
 to the images CI has just built: an unexcepted CISA KEV match or fixable
@@ -170,6 +172,11 @@ environment to restrict who may start it. The job refuses an existing release,
 uploads the same bundle and `SHA256SUMS` to the project's generic package
 registry (`litellm-stack/<tag>`), and creates a GitLab release linking both
 files.
+
+The default branch and release tags also rebuild the versioned documentation
+site and, once enabled, publish it to GitHub Pages or GitLab Pages with access
+restricted to repository members; see
+[Documentation site](documentation-site.md#publishing).
 
 The release is a validated delivery artifact, not an automatic production
 rollout. On-prem deployment still requires an operator to supply secrets and

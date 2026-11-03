@@ -1,0 +1,6 @@
+# Documentation site toolchain (build time only; never deployed with the stack).
+# Regenerate requirements.txt after editing:
+#   uv pip compile docs-site/requirements.in --generate-hashes --universal --python-version 3.13 -o docs-site/requirements.txt
+mkdocs>=1.6.1,<2
+mkdocs-material>=9.8,<10
+pymdown-extensions>=12,<13

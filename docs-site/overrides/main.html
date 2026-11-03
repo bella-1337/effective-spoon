@@ -1,0 +1,36 @@
+{#-
+  Theme overrides for the LiteLLM stack documentation.
+  The banners read extra.build, which scripts/build-docs.py fills per version.
+-#}
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  {#- Internal documentation: keep it out of search engines and caches even if
+      the Pages site is ever exposed by mistake. -#}
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+{% endblock %}
+
+{% block announce -%}
+  {%- set build = config.extra.build -%}
+  {%- if build.kind == "dev" -%}
+    <span class="docs-banner docs-banner--dev">
+      <strong>Development docs</strong> for the unreleased
+      <code>{{ build.default_branch }}</code> branch
+      {%- if build.commit %} at <code>{{ build.commit[:7] }}</code>{% endif %}.
+      {%- if build.latest %}
+        <a href="{{ base_url }}/../latest/">Switch to the latest release ({{ build.latest }})</a>.
+      {%- endif %}
+    </span>
+  {%- elif build.kind == "local" -%}
+    <span class="docs-banner docs-banner--local">
+      <strong>Local preview</strong> of the working tree. This is not a published version.
+    </span>
+  {%- endif -%}
+{%- endblock %}
+
+{% block outdated %}
+  You are viewing the documentation of an older release.
+  <a href="{{ base_url }}/../latest/"><strong>Go to the latest release.</strong></a>
+{% endblock %}

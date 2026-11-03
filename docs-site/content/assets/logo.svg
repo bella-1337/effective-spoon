@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="LiteLLM stack">
+  <title>LiteLLM stack</title>
+  <g fill="none" stroke="#f8fafc" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 5 41 14.5 24 24 7 14.5Z"/>
+    <path d="M7 24 24 33.5 41 24" opacity=".8"/>
+    <path d="M7 33.5 24 43 41 33.5" opacity=".55"/>
+  </g>
+  <circle cx="24" cy="14.5" r="3.2" fill="#22d3ee"/>
+</svg>

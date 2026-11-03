@@ -78,6 +78,11 @@ To stop, restart, or remove the stack, see
 
 ## Documentation
 
+The guides below are also published as a private, versioned documentation site
+on GitHub Pages or GitLab Pages, with a version selector for each release and
+the unreleased `dev` branch. Preview it with `./scripts/build-docs.py serve`;
+see [Documentation site](docs/documentation-site.md).
+
 ### Guides
 
 | Guide | Covers |
@@ -85,6 +90,7 @@ To stop, restart, or remove the stack, see
 | [Getting started](docs/getting-started.md) | Environment files, `STACK_DOMAIN` hostnames, TLS certificates, host resolution, Prometheus authentication, validation, starting and verifying profiles, stopping and removing the stack |
 | [Hardware sizing](docs/hardware-sizing.md) | Prod, dev, and remote GPU host specifications, memory, CPU, and disk budgets, prod resource limits |
 | [Development and delivery workflow](docs/development-workflow.md) | Development container, local, GitHub Actions, and GitLab CI checks, release delivery |
+| [Documentation site](docs/documentation-site.md) | Local preview, versions and the dev switch, private GitHub Pages and GitLab Pages publishing |
 | [Corporate branding and virtual-key management](docs/branding-and-key-management.md) | Admin UI branding, Enterprise virtual-key rotation, key email notifications |
 | [Observability](docs/observability.md) | OpenSearch users, roles, tenants, alerting and recovery; optional Langfuse and Grafana profiles; demonstration data and telemetry stores |
 | [Search, document extraction, and caching](docs/search-extraction-and-caching.md) | SearXNG search and engine terms of use, Xberg MCP document extraction, development semantic response cache |

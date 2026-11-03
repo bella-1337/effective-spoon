@@ -4,7 +4,7 @@ title: Continuous integration and release
 flowchart TD
   %% Source for 20-ci-release-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
-  %% @subtitle Identical GitHub Actions and GitLab CI pipelines, and where a human still deploys
+  %% @subtitle Identical GitHub Actions and GitLab CI pipelines, the private documentation site, and where a human still deploys
 
   S(["PR, MR, PUSH, TAG, OR SCHEDULE"])
   VAL["scripts/ci/validate.sh"]
@@ -13,6 +13,7 @@ flowchart TD
   IMG["Image build and KEV gate"]
   DEP["Trivy dependency scan"]
   DC["Dev container build"]
+  DOCS["Versioned documentation site build"]
   PASS{"All checks pass?"}
   RED(["CHANGE BLOCKED"])
   TAG{"Semantic-version tag?"}
@@ -20,6 +21,10 @@ flowchart TD
   APR["Release approval"]
   PUB["Publish source bundle and SHA256SUMS"]
   E(["OPERATOR DEPLOYS ON-PREM"])
+  PG{"Default branch or release tag, Pages enabled?"}
+  PRIV{"Pages restricted to members?"}
+  REFUSE(["PUBLISHING REFUSED"])
+  SITE(["PRIVATE DOCS SITE UPDATED"])
 
   S --> VAL
   S --> LINT
@@ -27,12 +32,18 @@ flowchart TD
   S --> IMG
   S --> DEP
   S --> DC
+  S --> DOCS
   VAL --> PASS
   LINT --> PASS
   SEC --> PASS
   IMG --> PASS
   DEP --> PASS
   DC --> PASS
+  DOCS --> PASS
+  DOCS --> PG
+  PG -->|"yes"| PRIV
+  PRIV -->|"yes"| SITE
+  PRIV -->|"no"| REFUSE
   PASS -->|"no"| RED
   PASS -->|"yes"| TAG
   TAG -->|"no"| MERGE
