@@ -64,7 +64,7 @@ Set `MAINTENANCE_LOG_DIR` to write the logs elsewhere, or
 The scheduled image-security unit writes to `<state>/logs`, because the
 repository is read-only for its service account. The `image-security`
 container turns file logging off, because its output already reaches the log
-collectors.
+collectors. `gpu-host/deploy.py` writes to `gpu-host/state/logs/deploy.log`.
 
 ## Why use Python and uv for these scripts?
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("gpu_host_deploy", ROOT / "gpu-host" / "deploy.py")
@@ -103,6 +105,25 @@ class GpuHostDeployTests(unittest.TestCase):
         for path in [state, *state.rglob("*")]:
             mode = stat.S_IMODE(path.stat().st_mode)
             self.assertEqual(mode, 0o700 if path.is_dir() else 0o600, path)
+
+    def test_output_goes_to_the_console_and_a_private_readable_log_file(self) -> None:
+        state = self.root / "state"
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.object(sys, "stdout", stdout), patch.object(sys, "stderr", stderr):
+            with patch.dict(os.environ, {deploy.FILE_LOGGING_VARIABLE: "true"}):
+                with deploy.file_logging(state) as path:
+                    deploy.LOG.info("D3-mini and BGE-M3 are ready over TLS.")
+                    deploy.LOG.error("ERROR: curl is required")
+        self.assertEqual(stdout.getvalue(), "D3-mini and BGE-M3 are ready over TLS.\n")
+        self.assertEqual(stderr.getvalue(), "ERROR: curl is required\n")
+        assert path is not None
+        self.assertEqual(path, state / "logs" / "deploy.log")
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
+        lines = path.read_text(encoding="utf-8").splitlines()
+        self.assertRegex(lines[0], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4} INFO    \[deploy\] D3-mini and BGE-M3")
+        self.assertRegex(lines[1], r" ERROR   \[deploy\] curl is required$")
+        self.assertEqual(len(deploy.LOG.handlers), 1)
 
 
 if __name__ == "__main__":

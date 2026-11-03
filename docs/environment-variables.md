@@ -365,7 +365,7 @@ Export them in the shell, scheduler, or service that invokes the script.
 | `BACKUP_RETENTION_DAYS` | `14`; non-negative integer | Age after which complete backup sets are removed. Set from recovery objectives and compliance policy; verify off-host copies before reducing retention. |
 | `UPGRADE_STATE_DIR` | `./upgrade-state`; private directory path | Stores upgrade preparation and rollback state. Protect it with the same controls as backups because it contains operational metadata and database backup material. |
 | `MAINTENANCE_LOG_DIR` | `./logs`; private directory path | Where every maintenance script also writes its output, one human-readable `<script>.log` per script. Relative paths resolve against the repository root. The scheduled image-security unit sets it to `<state>/logs`. See [Script logs](maintenance-runtime.md#script-logs). |
-| `MAINTENANCE_FILE_LOGGING` | `true`; `true` or `false` | Set `false` to keep script output on the console only. The `image-security` container sets it, because its output already reaches the log collectors and its root filesystem is read-only. |
+| `MAINTENANCE_FILE_LOGGING` | `true`; `true` or `false` | Set `false` to keep script output on the console only. The `image-security` container sets it, because its output already reaches the log collectors and its root filesystem is read-only. `gpu-host/deploy.py` honours it too. |
 
 Standard operating-system variables such as `SUDO_USER`, `CAROOT`,
 `LOCALAPPDATA`, and `XDG_DATA_HOME` may be consulted by specific tools for

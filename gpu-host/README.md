@@ -85,6 +85,9 @@ install -m 600 .env.example .env
    and a 1,024-dimension embedding from BGE-M3.
 
 `./deploy.py --render-only` validates and renders without starting anything.
+Each run also appends its output, with timestamps and levels, to the private
+`state/logs/deploy.log` (rotated at 5 MiB, five old files kept) for later
+review; set `MAINTENANCE_FILE_LOGGING=false` to keep it on the console only.
 Run Compose commands with both environment files:
 
 ```sh
