@@ -34,3 +34,42 @@
   You are viewing the documentation of an older release.
   <a href="{{ base_url }}/../latest/"><strong>Go to the latest release.</strong></a>
 {% endblock %}
+
+{#- Home page banner, above the README. The illustration and backdrop are
+    described in docs-site/assets/stylesheets/extra.css. -#}
+{% block hero %}
+  {%- if page and page.url == "" %}
+  <section class="docs-hero" aria-label="Introduction">
+    <div class="docs-hero__inner md-grid md-typeset">
+      <div class="docs-hero__text">
+        <span class="docs-hero__eyebrow">Internal platform documentation</span>
+        <p class="docs-hero__title">Every model behind one guarded, observable gateway.</p>
+        <p class="docs-hero__lead">
+          Production and development LiteLLM proxies on Docker Compose, with PII
+          masking, sandboxed tools, a remote GPU host, and OpenSearch for every
+          log, metric, trace, and alert.
+        </p>
+        <div class="docs-hero__actions">
+          <a href="{{ 'docs/getting-started/' | url }}" class="md-button md-button--primary">
+            {% include ".icons/material/rocket-launch.svg" %} Deploy the stack
+          </a>
+          <a href="{{ 'ARCHITECTURE/' | url }}" class="md-button">
+            {% include ".icons/material/sitemap.svg" %} Architecture
+          </a>
+          <a href="{{ 'diagrams/' | url }}" class="md-button">
+            {% include ".icons/material/animation-play.svg" %} Diagrams
+          </a>
+        </div>
+        <ul class="docs-hero__chips">
+          <li><strong>prod</strong> and <strong>dev</strong> proxies</li>
+          <li><strong>7</strong> isolated networks</li>
+          <li><strong>OpenSearch</strong> by default</li>
+        </ul>
+      </div>
+      <div class="docs-hero__art">
+        <img src="{{ 'docs-site/assets/hero-stack.svg' | url }}" alt="The stack in three layers: edge, gateway, and data and telemetry" width="600" height="430">
+      </div>
+    </div>
+  </section>
+  {%- endif %}
+{% endblock %}

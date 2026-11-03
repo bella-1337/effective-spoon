@@ -3,9 +3,10 @@
 [← Back to the README](../README.md#documentation). Run all commands from the repository root.
 
 The guides in this repository are also published as a searchable, versioned
-documentation site with [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/).
-The site is built from the same Markdown files you read on GitHub or GitLab;
-there is no second copy to keep in step.
+documentation site built with [Zensical](https://zensical.org/), the successor
+of Material for MkDocs by the same team. The site is built from the same
+Markdown files you read on GitHub or GitLab, where they already live; there is
+no second copy to keep in step and no build plugin.
 
 The repository is private, and so is its documentation: it describes internal
 hostnames, network boundaries, security findings, and residual risks. Publish
@@ -24,9 +25,10 @@ require. The first run installs the hash-locked toolchain from
 ./scripts/build-docs.py build      # strict build of the working tree into site/
 ```
 
-`build` and the CI builds run MkDocs in strict mode, so they fail on a broken
-link or anchor, on a Markdown file that is missing from the navigation, and on
-any other MkDocs warning.
+`build` and the CI builds run Zensical in strict mode, so they fail on a broken
+link to a page or heading and on any other warning. A unit test fails when a
+Markdown file is missing from the navigation, and the build fails if it ever
+publishes a hidden path such as the toolchain cache.
 
 To build the full versioned site the way CI does, from committed revisions
 only:
@@ -50,7 +52,7 @@ The version selector next to the site title switches between:
 `scripts/build-docs.py site` builds each version from its own committed tree
 (`git archive`) with the toolchain pinned in that revision, so an old release
 renders as it did when it was tagged. It then writes `versions.json`, which
-the Material version selector reads, the root redirect, a `404.html`, and a
+the theme's version selector reads, the root redirect, a `404.html`, and a
 `robots.txt` that disallows crawling. Tags created before the documentation
 site existed are skipped.
 
@@ -62,32 +64,23 @@ file at the release tag for a release.
 
 | Path | Purpose |
 | --- | --- |
-| `mkdocs.yml` | Site configuration, theme, Markdown extensions, and the navigation |
-| `docs-site/hooks.py` | Adds the repository's Markdown files to the site and generates pages |
-| `docs-site/content/` | Site-only content: the home page and the theme assets |
-| `docs-site/overrides/` | Theme overrides: the dev and older-release banners, the build footer, the `noindex` header |
+| `mkdocs.yml` | Site configuration, theme, navigation, and the rules for which files are published |
+| `docs-site/overrides/main.html` | The home page banner, the dev, local, and older-release banners, and the `noindex` header |
+| `docs-site/overrides/partials/` | The build footer, a repository link without the GitHub API call, and a fix for the older-release banner script |
+| `docs-site/assets/` | Logo, favicon, banner illustration, and stylesheet |
 | `docs-site/requirements.in`, `requirements.txt` | The toolchain and its hash-locked pins |
 | `scripts/build-docs.py` | Installs the toolchain, previews, builds, and assembles the versioned site |
 | `scripts/ci/docs.sh` | The single build entry point shared by GitHub Actions and GitLab CI |
 
-The hook publishes every `*.md` file of the repository under its repository
-path, outside hidden directories and runtime output, so the relative links
-between guides work unchanged. `README.md` becomes the **Overview** page and
-each other `README.md` the index page of its directory. The hook also:
-
-- publishes the animated diagrams `diagrams/*.html` and any image under
-  `docs/`;
-- rewrites links to repository files that are not pages, such as
-  `docker-compose.yml`, scripts, or Mermaid sources, to the GitHub or GitLab
-  source browser at the built revision, and does the same for line anchors
-  such as `README.md#L12`. A report named `*-COMMIT-<sha>.md` links to the
-  files as they were at that commit;
-- generates the **Diagram gallery** page, which embeds every rendered diagram
-  listed in `diagrams/`, with titles from the Mermaid sources;
-- generates the **Changelog** page from the first-parent history of the
-  default branch: every merged pull or merge request and the commits it brought
-  in, grouped by release tag. Commit messages are escaped, so they cannot
-  inject markup into the site.
+Zensical reads `mkdocs.yml` with the repository root as its `docs_dir`, so
+every page keeps its repository path and the relative links between guides
+work unchanged. `README.md` is the home page, and each other `README.md` is the
+index page of its directory. `exclude_docs` first excludes everything, then
+re-includes only Markdown, the rendered diagrams and their Mermaid sources,
+images under `docs/`, and the site assets; hidden directories, build output,
+and runtime state stay excluded. Compose files, scripts, and other source
+files are not published, so a guide links to them only as code (for example
+`searxng/settings.yml`) or with an absolute link to the repository.
 
 The site loads no fonts, scripts, or API data from third parties and shows no
 repository statistics, so it works on an isolated network and does not reveal
@@ -97,13 +90,14 @@ page views outside the organisation.
 
 1. Write the guide as Markdown anywhere in the repository, usually under
    `docs/`, and link it from the [README](../README.md#documentation) table.
-2. Add it to `nav:` in `mkdocs.yml`. The strict build fails on a Markdown file
+2. Add it to `nav:` in `mkdocs.yml`; the unit tests fail on a Markdown file
    that is not in the navigation.
 3. Run `./scripts/build-docs.py build`.
 
 Use relative links between Markdown files, as GitHub and GitLab expect, and
 link to a heading with its GitHub-style anchor; the site uses the same
-anchors.
+anchors. Do not link to a line number (`#L12`) of a page or to a source file
+with a relative link: neither exists on the site.
 
 ## Publishing
 
@@ -171,17 +165,22 @@ publish unchecked.
 
 ## Maintenance
 
-- **Toolchain updates.** Dependabot proposes updates of
-  `docs-site/requirements.txt`. To change a pin by hand, edit
-  `docs-site/requirements.in` and regenerate the lock with the command in its
-  header. Record new packages in the
+- **Toolchain updates.** Zensical is pre-1.0 and changes quickly, so it is
+  pinned to an exact version. Dependabot proposes updates of
+  `docs-site/requirements.txt`; before merging one, read the
+  [Zensical release notes](https://github.com/zensical/zensical/releases) and
+  check the preview, especially the banners and the version selector. To
+  change a pin by hand, edit `docs-site/requirements.in` and regenerate the
+  lock with the command in its header. Record new packages in the
   [licence register](third-party-licences.md#documentation-toolchain).
 - **Image updates.** `DOCS_IMAGE` appears in `.github/workflows/docs.yml` and
   `.gitlab/ci/images.yml`; update both digests together.
-- **Material for MkDocs end of life.** Its maintainers provide critical fixes
-  and security updates until May 2027 and recommend their successor, Zensical,
-  which reads the same `mkdocs.yml`. Plan the move before then; the hook in
-  `docs-site/hooks.py` is the part to port.
-- **Diagrams.** The gallery embeds the rendered HTML, so re-render the diagrams
-  with `./scripts/render-diagrams.py` after changing a Mermaid source, as the
-  [diagram guide](../diagrams/README.md#updating-diagrams) describes.
+- **Why Zensical.** Material for MkDocs receives only security fixes until
+  5 May 2027, MkDocs 1.x has had no release since August 2024, and MkDocs 2.0
+  supports neither Material nor plugins. Zensical reads the same `mkdocs.yml`
+  and theme overrides. It does not run MkDocs plugins or hooks, so the site
+  uses none.
+- **Diagrams.** Re-render the diagrams with `./scripts/render-diagrams.py`
+  after changing a Mermaid source, as the
+  [diagram guide](../diagrams/README.md#updating-diagrams) describes; the site
+  publishes the rendered HTML.

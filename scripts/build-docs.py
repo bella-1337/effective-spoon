@@ -5,11 +5,11 @@
 # ///
 """Build, preview, and assemble the versioned documentation site.
 
-The pages are the repository's own Markdown files, published by MkDocs with
-the Material theme (mkdocs.yml, docs-site/). The toolchain is installed from
-the hash-locked docs-site/requirements.txt of each version into a cached uv
-virtual environment, so an old release is rebuilt with the toolchain it was
-released with.
+The pages are the repository's own Markdown files, published by Zensical
+from mkdocs.yml. The toolchain is installed from the hash-locked
+docs-site/requirements.txt of each version into a cached uv virtual
+environment, so an old release is rebuilt with the toolchain it was released
+with.
 """
 
 from __future__ import annotations
@@ -36,14 +36,14 @@ from maintenance_common import LOG, ROOT, capture, fail, run_main
 
 USAGE = """Usage: scripts/build-docs.py COMMAND [OPTIONS]
 
-Build the documentation site with the hash-locked MkDocs toolchain from
+Build the documentation site with the hash-locked Zensical toolchain from
 docs-site/requirements.txt, installed with uv into .docs-cache/.
 
 Commands:
   serve [--dev-addr HOST:PORT]
       Preview the working tree with live reload (default 127.0.0.1:8000).
-  build [--output DIR]
-      Build the working tree once in strict mode (default: site/).
+  build
+      Build the working tree once in strict mode into site/.
   site [--output DIR] [--dev-ref REF] [--site-url URL]
       Build the versioned site (default: public/): "dev" from the default
       branch, one version per release tag vMAJOR.MINOR.PATCH that contains
@@ -69,6 +69,7 @@ REQUIREMENTS = Path("docs-site") / "requirements.txt"
 CACHE = ROOT / ".docs-cache"
 DOCS_PYTHON = "3.13"
 OUTPUT_MARKER = ".docs-build"
+SITE_DIR = "site"  # site_dir in mkdocs.yml; Zensical has no option to override it
 RELEASE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 VERSION_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 REPO_KINDS = ("github", "gitlab")
@@ -207,7 +208,7 @@ def versions_manifest(versions: Sequence[Version]) -> list[dict[str, object]]:
 
 
 # --------------------------------------------------------------------------
-# Toolchain and MkDocs
+# Toolchain and Zensical
 
 
 def ensure_toolchain(requirements: Path) -> Path:
@@ -247,7 +248,6 @@ def docs_environment(
     version: str,
     kind: str,
     source_ref: str,
-    revision: str,
     commit: str,
     site_url: str = "",
     latest: str = "",
@@ -255,16 +255,13 @@ def docs_environment(
     env = dict(os.environ)
     env.update(
         {
-            "NO_MKDOCS_2_WARNING": "1",
             "DOCS_VERSION": version,
             "DOCS_VERSION_KIND": kind,
             "DOCS_SOURCE_REF": source_ref,
-            "DOCS_GIT_DIR": str(ROOT),
-            "DOCS_GIT_REVISION": revision,
             "DOCS_GIT_COMMIT": commit,
-            "DOCS_REPO_KIND": context.repo_kind,
+            "DOCS_EDIT_URI": edit_uri(context, kind, source_ref),
             "DOCS_DEFAULT_BRANCH": context.default_branch,
-            "DOCS_BUILD_DATE": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "DOCS_BUILD_DATE": datetime.now(timezone.utc).strftime("%Y-%m-%d UTC"),
             "DOCS_LATEST_VERSION": latest,
             "DOCS_SITE_URL": site_url,
         }
@@ -274,10 +271,46 @@ def docs_environment(
     return env
 
 
-def mkdocs(python: Path, arguments: Sequence[str], *, config: Path, env: dict[str, str]) -> None:
-    command = [str(python), "-m", "mkdocs", *arguments, "--config-file", str(config)]
+def edit_uri(context: Context, kind: str, source_ref: str) -> str:
+    """Edit on the default branch; a release links to its file at the tag."""
+    prefix = "-/" if context.repo_kind == "gitlab" else ""
+    if kind == "release":
+        return f"{prefix}blob/{source_ref}/"
+    return f"{prefix}edit/{context.default_branch}/"
+
+
+def zensical(python: Path, arguments: Sequence[str], *, config: Path, env: dict[str, str]) -> None:
+    command = [str(python.parent / "zensical"), *arguments, "--config-file", str(config)]
     if subprocess.run(command, cwd=config.parent, env=env, check=False).returncode:
-        fail(f"mkdocs {arguments[0]} failed for {config}")
+        fail(f"zensical {arguments[0]} failed for {config}")
+
+
+def check_published(site: Path) -> None:
+    """Fail when a build published a hidden path, such as the toolchain cache."""
+    leaked = sorted(
+        path.relative_to(site).as_posix()
+        for path in site.rglob("*")
+        if any(part.startswith(".") for part in path.relative_to(site).parts)
+    )
+    if leaked:
+        fail(
+            "the build published hidden paths; fix exclude_docs in mkdocs.yml: "
+            + ", ".join(leaked[:5])
+        )
+
+
+def build_into(python: Path, source: Path, output: Path, env: dict[str, str]) -> None:
+    """Build source in strict mode and move its site directory to output."""
+    site = source / SITE_DIR
+    if site.is_symlink() or (site.exists() and not site.is_dir()):
+        fail(f"{site} is not a directory")
+    shutil.rmtree(site, ignore_errors=True)
+    zensical(python, ["build", "--strict", "--clean"], config=source / "mkdocs.yml", env=env)
+    if not (site / "index.html").is_file():
+        fail(f"zensical produced no {SITE_DIR}/index.html in {source}")
+    check_published(site)
+    shutil.rmtree(output, ignore_errors=True)
+    shutil.move(str(site), str(output))
 
 
 def prepare_output(raw: str) -> Path:
@@ -375,7 +408,9 @@ def build_site(args: argparse.Namespace) -> None:
     CACHE.mkdir(mode=0o700, exist_ok=True)
     for version in versions:
         LOG.info(f"Building {version.name} from {version.ref} ({version.commit[:12]}).")
-        with tempfile.TemporaryDirectory(prefix="docs-", dir=CACHE) as work:
+        # Not under .docs-cache: Zensical matches exclude_docs against the
+        # full path, so a hidden parent directory would exclude every page.
+        with tempfile.TemporaryDirectory(prefix="litellm-docs-") as work:
             source = Path(work) / "src"
             source.mkdir()
             export_tree(version.commit, source)
@@ -386,17 +421,11 @@ def build_site(args: argparse.Namespace) -> None:
                 version=version.name,
                 kind=version.kind,
                 source_ref=version.source_ref,
-                revision=version.commit,
                 commit=version.commit,
                 site_url=site_url,
                 latest=latest,
             )
-            mkdocs(
-                python,
-                ["build", "--strict", "--site-dir", str(output / version.name)],
-                config=source / "mkdocs.yml",
-                env=env,
-            )
+            build_into(python, source, output / version.name, env)
     if latest:
         shutil.copytree(output / latest, output / LATEST)
     write_root_files(output, versions, args.site_url or "")
@@ -409,19 +438,17 @@ def build_site(args: argparse.Namespace) -> None:
 def build_working_tree(args: argparse.Namespace) -> None:
     context = detect_context(args)
     python = ensure_toolchain(ROOT / REQUIREMENTS)
-    output = prepare_output(args.output or "site")
     commit = git("rev-parse", "HEAD") if git_ok("rev-parse", "--verify", "--quiet", "HEAD") else ""
     env = docs_environment(
         context,
         version="local",
         kind="local",
         source_ref=context.default_branch,
-        revision="HEAD",
         commit=commit,
     )
-    mkdocs(python, ["build", "--strict", "--site-dir", str(output)], config=CONFIG, env=env)
-    (output / OUTPUT_MARKER).write_text("Generated by scripts/build-docs.py\n", encoding="utf-8")
-    LOG.info(f"PASS: built the working tree into {output}")
+    zensical(python, ["build", "--strict", "--clean"], config=CONFIG, env=env)
+    check_published(ROOT / SITE_DIR)
+    LOG.info(f"PASS: built the working tree into {ROOT / SITE_DIR}")
 
 
 def serve(args: argparse.Namespace) -> None:
@@ -432,10 +459,9 @@ def serve(args: argparse.Namespace) -> None:
         version="local",
         kind="local",
         source_ref=context.default_branch,
-        revision="HEAD",
         commit="",
     )
-    mkdocs(python, ["serve", "--dev-addr", args.dev_addr], config=CONFIG, env=env)
+    zensical(python, ["serve", "--dev-addr", args.dev_addr], config=CONFIG, env=env)
 
 
 def print_versions(args: argparse.Namespace) -> None:
@@ -506,7 +532,7 @@ def parser() -> argparse.ArgumentParser:
     with_context(commands.add_parser("serve", add_help=False)).add_argument(
         "--dev-addr", default="127.0.0.1:8000"
     )
-    with_context(commands.add_parser("build", add_help=False)).add_argument("--output")
+    with_context(commands.add_parser("build", add_help=False))
     site = with_context(commands.add_parser("site", add_help=False))
     site.add_argument("--output")
     site.add_argument("--dev-ref")

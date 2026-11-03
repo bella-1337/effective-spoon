@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import posixpath
 import subprocess
 import sys
 import tempfile
@@ -23,49 +22,6 @@ assert SPEC is not None and SPEC.loader is not None
 build_docs = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = build_docs
 SPEC.loader.exec_module(build_docs)
-
-
-def install_mkdocs_stubs() -> None:
-    """Minimal stand-ins so the hook's pure helpers run without MkDocs installed."""
-    if importlib.util.find_spec("mkdocs") and importlib.util.find_spec("markdown"):
-        return
-
-    def module(name: str, **attributes: object) -> None:
-        stub = types.ModuleType(name)
-        stub.__dict__.update(attributes)
-        sys.modules[name] = stub
-
-    class Placeholder:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
-
-    def get_relative_url(url: str, other: str) -> str:
-        other_dir = posixpath.dirname(other.rstrip("/")) if not other.endswith("/") else other
-        relative = posixpath.relpath(url or ".", other_dir or ".")
-        return relative + ("/" if url.endswith("/") and relative != "." else "")
-
-    module("markdown", Extension=Placeholder, Markdown=Placeholder)
-    module("markdown.treeprocessors", Treeprocessor=Placeholder)
-    module("mkdocs")
-    module("mkdocs.config")
-    module("mkdocs.config.defaults", MkDocsConfig=Placeholder)
-    module("mkdocs.structure")
-    module(
-        "mkdocs.structure.files",
-        File=Placeholder,
-        Files=Placeholder,
-        InclusionLevel=types.SimpleNamespace(EXCLUDED=object()),
-    )
-    module("mkdocs.structure.pages", Page=Placeholder)
-    module("mkdocs.utils", get_relative_url=get_relative_url)
-
-
-install_mkdocs_stubs()
-HOOK_SPEC = importlib.util.spec_from_file_location("docs_hooks", ROOT / "docs-site" / "hooks.py")
-assert HOOK_SPEC is not None and HOOK_SPEC.loader is not None
-hooks = importlib.util.module_from_spec(HOOK_SPEC)
-sys.modules[HOOK_SPEC.name] = hooks
-HOOK_SPEC.loader.exec_module(hooks)
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -255,114 +211,6 @@ class VisibilityTests(unittest.TestCase):
                 build_docs.verify_private(types.SimpleNamespace(url=url))
 
 
-class HookTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory()
-        self.root = Path(self.directory.name)
-        for relative in ("README.md", "docs/guide.md", "docker-compose.yml", "scripts/tool.py"):
-            path = self.root / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("x\n", encoding="utf-8")
-        hooks.STATE.root = self.root
-        hooks.STATE.repo_url = "https://github.com/example/stack"
-        hooks.STATE.repo_kind = "github"
-        hooks.STATE.source_ref = "v1.2.3"
-        hooks.STATE.edit_branch = ""
-        hooks.STATE.published = {"README.md", "docs/guide.md"}
-
-    def tearDown(self) -> None:
-        self.directory.cleanup()
-
-    def test_links_between_published_pages_stay_in_the_site(self) -> None:
-        self.assertEqual(hooks.rewrite_link("docs/guide.md", "../README.md#usage"), "../README.md#usage")
-
-    def test_links_to_repository_files_open_the_source_at_the_built_ref(self) -> None:
-        self.assertEqual(
-            hooks.rewrite_link("docs/guide.md", "../docker-compose.yml#L12"),
-            "https://github.com/example/stack/blob/v1.2.3/docker-compose.yml#L12",
-        )
-        self.assertEqual(
-            hooks.rewrite_link("docs/guide.md", "../scripts/"),
-            "https://github.com/example/stack/tree/v1.2.3/scripts",
-        )
-
-    def test_line_anchors_on_pages_open_the_source(self) -> None:
-        self.assertEqual(
-            hooks.rewrite_link("docs/guide.md", "../README.md#L40"),
-            "https://github.com/example/stack/blob/v1.2.3/README.md#L40",
-        )
-
-    def test_commit_reports_link_to_files_at_their_commit(self) -> None:
-        self.assertEqual(
-            hooks.rewrite_link("REVIEW-COMMIT-7f611c8.md", "grafana/removed.yml"),
-            "https://github.com/example/stack/blob/7f611c8/grafana/removed.yml",
-        )
-
-    def test_gitlab_uses_its_source_browser_paths(self) -> None:
-        hooks.STATE.repo_kind = "gitlab"
-        self.assertEqual(
-            hooks.rewrite_link("README.md", "docker-compose.yml"),
-            "https://github.com/example/stack/-/blob/v1.2.3/docker-compose.yml",
-        )
-
-    def test_external_missing_and_escaping_links_are_left_for_mkdocs(self) -> None:
-        for url in ("https://example.com/x", "#local", "missing.md", "../../outside.md", "/absolute"):
-            self.assertEqual(hooks.rewrite_link("docs/guide.md", url), url)
-
-    def test_untrusted_text_cannot_inject_markup(self) -> None:
-        escaped = hooks.escape_markdown("<script>alert(1)</script> [x](javascript:y) *b*")
-        self.assertNotIn("<", escaped)
-        self.assertIn("\\[x\\]\\(javascript:y\\)", escaped)
-        self.assertIn("\\*b\\*", escaped)
-
-    def test_walk_skips_hidden_and_runtime_directories(self) -> None:
-        for relative in (".git/x.md", ".docs-cache/y.md", "logs/z.md", "site/a.md", "docs-site/b.md"):
-            path = self.root / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("x\n", encoding="utf-8")
-        markdown = [p for p in hooks.walk_repository(self.root) if hooks.is_markdown_source(p)]
-        self.assertEqual(markdown, ["README.md", "docs/guide.md"])
-
-    def test_changelog_groups_merges_by_release_and_lists_their_commits(self) -> None:
-        repo = self.root / "repo"
-        repo.mkdir()
-        git(repo, "init", "--quiet", "--initial-branch=master")
-        git(repo, "commit", "--quiet", "--allow-empty", "-m", "Initial import")
-        git(repo, "tag", "v1.0.0")
-        git(repo, "checkout", "--quiet", "-b", "feature")
-        git(repo, "commit", "--quiet", "--allow-empty", "-m", "Add <b>bold</b> feature")
-        git(repo, "checkout", "--quiet", "master")
-        git(
-            repo, "merge", "--quiet", "--no-ff", "feature",
-            "-m", "Merge pull request #7 from example/feature", "-m", "Ship the feature",
-        )
-        changelog = hooks.changelog_markdown(repo, "HEAD")
-        self.assertLess(changelog.index("## Unreleased"), changelog.index("## v1.0.0"))
-        self.assertIn(
-            "- **Ship the feature** ([#7](https://github.com/example/stack/pull/7)", changelog
-        )
-        self.assertIn("    - Add &lt;b&gt;bold&lt;/b&gt; feature", changelog)
-        self.assertIn("- **Initial import**", changelog)
-
-    def test_changelog_without_history_says_so(self) -> None:
-        self.assertIn("History unavailable", hooks.changelog_markdown(self.root, "HEAD"))
-
-    def test_gallery_embeds_rendered_diagrams_with_escaped_titles(self) -> None:
-        diagrams = self.root / "diagrams"
-        diagrams.mkdir()
-        (diagrams / "01-sample.mmd").write_text(
-            '---\ntitle: LiteLLM stack — <sample> view\n---\nflowchart TD\n  %% @subtitle Shows "it"\n',
-            encoding="utf-8",
-        )
-        (diagrams / "02-unrendered.mmd").write_text("---\ntitle: Missing\n---\n", encoding="utf-8")
-        gallery = hooks.gallery_markdown(
-            self.root, "diagrams/gallery/", {"diagrams/01-sample.html": "diagrams/01-sample.html"}
-        )
-        self.assertIn("## &lt;sample&gt; view", gallery)
-        self.assertIn('<iframe src="../01-sample.html" title="&lt;sample&gt; view"', gallery)
-        self.assertNotIn("Missing", gallery)
-
-
 class RepositoryContractTests(unittest.TestCase):
     def test_docs_image_is_identical_on_both_platforms(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "docs.yml").read_text(encoding="utf-8")
@@ -379,13 +227,59 @@ class RepositoryContractTests(unittest.TestCase):
         )
         self.assertEqual(github, gitlab)
 
-    def test_every_published_markdown_file_is_in_the_navigation(self) -> None:
+    def test_every_markdown_file_is_in_the_navigation(self) -> None:
+        # Zensical publishes every Markdown file outside the excluded
+        # directories; one missing from nav is reachable only by search.
         config = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
         navigation = config[config.index("\nnav:") :]
-        for path in hooks.walk_repository(ROOT):
-            if hooks.is_markdown_source(path):
-                self.assertIn(f": {path}\n", navigation, f"{path} is missing from mkdocs.yml nav")
+        excluded = {"site", "public", "dist", "logs", "backups", "node_modules", "upgrade-state"}
+        for directory, subdirectories, files in os.walk(ROOT):
+            subdirectories[:] = [
+                name for name in subdirectories if not name.startswith(".") and name not in excluded
+            ]
+            for name in files:
+                if name.endswith(".md"):
+                    path = Path(directory, name).relative_to(ROOT).as_posix()
+                    self.assertIn(f": {path}\n", navigation, f"{path} is missing from mkdocs.yml nav")
 
+    def test_site_publishes_documentation_files_only(self) -> None:
+        config = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+        rules = config[config.index("exclude_docs: |") :].split("\n\n", 1)[0].splitlines()[1:]
+        rules = [rule.strip() for rule in rules]
+        self.assertEqual(rules[0], "*", "exclude_docs must start by excluding everything")
+        # Zensical honours a directory exclusion only in the /** form.
+        for hidden in ("**/.*/**", "/site/**", "/public/**"):
+            self.assertIn(hidden, rules)
+
+    def test_build_refuses_a_site_with_hidden_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            site = Path(directory)
+            (site / "index.html").write_text("ok", encoding="utf-8")
+            build_docs.check_published(site)
+            leaked = site / ".docs-cache" / "venvs" / "LICENSE"
+            leaked.mkdir(parents=True)
+            with self.assertRaises(maintenance_common.ScriptError):
+                build_docs.check_published(site)
+
+
+class EditLinkTests(unittest.TestCase):
+    def test_dev_and_local_builds_edit_on_the_default_branch(self) -> None:
+        github = build_docs.Context("https://github.com/example/stack", "github", "main")
+        gitlab = build_docs.Context("https://gitlab.example.internal/x/stack", "gitlab", "main")
+        self.assertEqual(build_docs.edit_uri(github, "dev", "main"), "edit/main/")
+        self.assertEqual(build_docs.edit_uri(gitlab, "local", "main"), "-/edit/main/")
+
+    def test_releases_link_to_the_file_at_their_tag(self) -> None:
+        github = build_docs.Context("https://github.com/example/stack", "github", "main")
+        gitlab = build_docs.Context("https://gitlab.example.internal/x/stack", "gitlab", "main")
+        self.assertEqual(build_docs.edit_uri(github, "release", "v1.2.3"), "blob/v1.2.3/")
+        self.assertEqual(build_docs.edit_uri(gitlab, "release", "v1.2.3"), "-/blob/v1.2.3/")
+
+    def test_build_date_is_not_parsed_as_a_yaml_date(self) -> None:
+        # !ENV values are parsed as YAML, and Zensical rejects date objects.
+        context = build_docs.Context("", "github", "main")
+        env = build_docs.docs_environment(context, version="dev", kind="dev", source_ref="main", commit="")
+        self.assertRegex(env["DOCS_BUILD_DATE"], r"^\d{4}-\d{2}-\d{2} UTC$")
 
 if __name__ == "__main__":
     unittest.main()

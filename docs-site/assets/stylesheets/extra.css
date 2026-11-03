@@ -1,0 +1,341 @@
+/* LiteLLM stack documentation theme: slate surfaces, cyan accent, and the
+   amber, violet, and rose of the animated diagrams. Every texture below is
+   CSS or inline SVG, so the site loads nothing from third parties. */
+
+:root,
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #0f172a;
+  --md-primary-fg-color--light: #1e293b;
+  --md-primary-fg-color--dark: #020617;
+  --md-primary-bg-color: #f8fafc;
+  --md-primary-bg-color--light: #f8fafcb3;
+  --md-accent-fg-color: #0891b2;
+  --md-accent-fg-color--transparent: #0891b21a;
+  --md-typeset-a-color: #0e7490;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-hue: 222;
+  --md-default-bg-color: #0b1120;
+  --md-primary-fg-color: #020617;
+  --md-primary-fg-color--light: #0f172a;
+  --md-primary-fg-color--dark: #000000;
+  --md-accent-fg-color: #22d3ee;
+  --md-accent-fg-color--transparent: #22d3ee1a;
+  --md-typeset-a-color: #67e8f9;
+}
+
+/* Page backdrop on every page: soft corner glows over a faint dot grid and
+   blueprint lines, fixed so the texture stays put while the text scrolls. */
+:root,
+[data-md-color-scheme="default"] {
+  --docs-bg-dot: #0f172a12;
+  --docs-bg-line: #0e749009;
+  --docs-bg-glow-1: #22d3ee14;
+  --docs-bg-glow-2: #a78bfa12;
+}
+[data-md-color-scheme="slate"] {
+  --docs-bg-dot: #94a3b81c;
+  --docs-bg-line: #22d3ee0a;
+  --docs-bg-glow-1: #0e74902e;
+  --docs-bg-glow-2: #7c3aed1f;
+}
+body {
+  background-color: var(--md-default-bg-color);
+  background-image:
+    radial-gradient(70% 55% at 100% 0%, var(--docs-bg-glow-1), transparent 70%),
+    radial-gradient(60% 50% at 0% 100%, var(--docs-bg-glow-2), transparent 70%),
+    radial-gradient(var(--docs-bg-dot) 1px, transparent 1.4px),
+    linear-gradient(var(--docs-bg-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--docs-bg-line) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 22px 22px, 110px 110px, 110px 110px;
+  background-attachment: fixed;
+}
+/* Let the backdrop show through the main column and sidebars. */
+.md-main,
+.md-content,
+.md-sidebar,
+.md-sidebar__scrollwrap {
+  background-color: transparent;
+}
+@media screen and (min-width: 76.25em) {
+  .md-sidebar--secondary .md-sidebar__inner,
+  .md-nav--secondary .md-nav__title {
+    background: transparent;
+    box-shadow: none;
+  }
+}
+
+/* Shared textures. */
+:root {
+  /* A sparse circuit-trace tile: traces, vias, and a pad. */
+  --docs-circuit: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140' fill='none' stroke='%2367e8f9' stroke-width='1.2'%3E%3Cpath d='M0 30h38l14 14h34M86 44l12-12h42M20 140v-36l16-16h30M66 88l14 14v38M110 0v28M110 70v20l-14 14h-30M140 96h-22'/%3E%3Ccircle cx='86' cy='44' r='3'/%3E%3Ccircle cx='66' cy='88' r='3'/%3E%3Ccircle cx='110' cy='70' r='3.5'/%3E%3Crect x='104' y='28' width='12' height='12' rx='2'/%3E%3Ccircle cx='118' cy='96' r='2.5'/%3E%3C/svg%3E");
+}
+
+/* Header and tabs: a faint dot matrix and an accent hairline. */
+.md-header,
+.md-tabs {
+  background-image: radial-gradient(#ffffff14 1px, transparent 1.2px);
+  background-size: 14px 14px;
+}
+.md-header {
+  box-shadow: 0 1px 0 #22d3ee33, 0 0 0.2rem #0000001a, 0 0.2rem 0.4rem #0003;
+}
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 1.6rem;
+}
+
+/* Announcement banners: dev reads as work in progress, local as a sandbox. */
+.md-banner {
+  background:
+    repeating-linear-gradient(-45deg, #fbbf2414 0 12px, transparent 12px 24px),
+    linear-gradient(90deg, #7c2d12, #9a3412 55%, #b45309);
+}
+.md-banner:has(.docs-banner--local) {
+  background:
+    radial-gradient(#ffffff1f 1px, transparent 1.2px) 0 0 / 10px 10px,
+    linear-gradient(90deg, #3b0764, #5b21b6);
+}
+.md-banner,
+.md-banner--warning {
+  color: #fff;
+}
+.md-banner .md-banner__button {
+  color: #fff;
+}
+.md-banner .docs-banner code {
+  background: #ffffff26;
+  color: inherit;
+}
+.md-banner a {
+  color: #fde68a;
+  text-decoration: underline;
+}
+/* Older-release banner. */
+.md-banner--warning {
+  background:
+    repeating-linear-gradient(-45deg, #b4530912 0 12px, transparent 12px 24px),
+    var(--md-warning-bg-color);
+}
+
+.docs-build-info {
+  margin-top: 0.2rem;
+  opacity: 0.8;
+}
+.md-footer-meta {
+  background-image: radial-gradient(#ffffff0f 1px, transparent 1.2px);
+  background-size: 14px 14px;
+}
+
+/* ------------------------------------------------------------------------
+   Home page hero (the hero block in docs-site/overrides/main.html): a
+   full-width band with a layered backdrop (base gradient, blueprint grid
+   fading out from the illustration, circuit traces, a dot field, colour
+   glows, and a slow scan line) and the isometric stack illustration. */
+
+.docs-hero {
+  --hero-edge: #fbbf24;
+  --hero-gateway: #22d3ee;
+  --hero-data: #a78bfa;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-bottom: 1px solid #22d3ee2e;
+  color: #e2e8f0;
+  background:
+    radial-gradient(60% 80% at 82% 45%, #0e749059 0, transparent 70%),
+    radial-gradient(40% 60% at 100% 100%, #7c3aed38 0, transparent 70%),
+    radial-gradient(35% 50% at 0% 0%, #f59e0b1f 0, transparent 70%),
+    linear-gradient(135deg, #020617 0%, #0b1324 45%, #0a2a36 100%);
+}
+
+.docs-hero__inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: center;
+  padding: 2.4rem 0.8rem 2.2rem;
+}
+
+/* Blueprint grid and circuit traces, strongest behind the illustration. */
+.docs-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    var(--docs-circuit) 0 0 / 140px 140px,
+    linear-gradient(#67e8f914 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, #67e8f914 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(#67e8f91f 1px, transparent 1px) 0 0 / 120px 120px,
+    linear-gradient(90deg, #67e8f91f 1px, transparent 1px) 0 0 / 120px 120px;
+  opacity: 0.4;
+  -webkit-mask-image: radial-gradient(55% 75% at 76% 50%, #000 0%, #0008 50%, transparent 90%);
+  mask-image: radial-gradient(55% 75% at 76% 50%, #000 0%, #0008 50%, transparent 90%);
+}
+
+/* Dot field on the text side and a scan line sweeping the card. */
+.docs-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(180deg, transparent 0%, #22d3ee12 48%, #22d3ee2e 50%, transparent 52%) 0 0 / 100% 300% no-repeat,
+    radial-gradient(#94a3b833 1px, transparent 1.3px) 0 0 / 16px 16px;
+  -webkit-mask-image: linear-gradient(100deg, #000 0%, #0008 40%, transparent 70%), linear-gradient(#000, #000);
+  mask-image: linear-gradient(100deg, #000 0%, #0008 40%, transparent 70%), linear-gradient(#000, #000);
+  -webkit-mask-size: 100% 100%, 100% 100%;
+  mask-size: 100% 100%, 100% 100%;
+  animation: docs-scan 9s linear infinite;
+}
+
+@keyframes docs-scan {
+  from { background-position: 0 100%, 0 0; }
+  to { background-position: 0 -200%, 0 0; }
+}
+
+.docs-hero__text {
+  position: relative;
+  padding: 0 0.4rem;
+}
+.docs-hero__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.25em 0.75em;
+  border: 1px solid #22d3ee55;
+  border-radius: 999px;
+  background: #22d3ee14;
+  color: #a5f3fc;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.docs-hero__eyebrow::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: #22d3ee;
+  box-shadow: 0 0 0 0.2rem #22d3ee33, 0 0 0.6rem #22d3ee;
+}
+.md-typeset .docs-hero__title {
+  max-width: 34rem;
+  margin: 0.8rem 0 0.7rem;
+  font-size: 2.1rem;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+  color: transparent;
+  background: linear-gradient(100deg, #f8fafc 0%, #f8fafc 45%, #67e8f9 75%, #c4b5fd 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.md-typeset .docs-hero__lead {
+  max-width: 36rem;
+  margin: 0 0 1rem;
+  color: #cbd5e1;
+  font-size: 0.85rem;
+  line-height: 1.65;
+}
+.docs-hero strong {
+  color: #f1f5f9;
+}
+.docs-hero .md-typeset .md-button svg {
+  width: 1.1em;
+  height: 1.1em;
+  margin-right: 0.2em;
+  vertical-align: -0.15em;
+  fill: currentcolor;
+}
+.docs-hero .md-typeset .md-button {
+  margin: 0.35rem 0.35rem 0 0;
+  border: 1px solid #22d3ee99;
+  border-radius: 0.5rem;
+  background: #0f172a99;
+  color: #f8fafc;
+  backdrop-filter: blur(4px);
+}
+.docs-hero .md-typeset .md-button--primary {
+  border-color: #22d3ee;
+  background: linear-gradient(135deg, #22d3ee, #67e8f9);
+  color: #042f2e;
+  box-shadow: 0 0.4rem 1.2rem -0.4rem #22d3ee99;
+}
+.docs-hero .md-typeset .md-button:hover,
+.docs-hero .md-typeset .md-button:focus-visible {
+  border-color: #a5f3fc;
+  background: #a5f3fc;
+  color: #0f172a;
+}
+
+.md-typeset ul.docs-hero__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1.4rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.md-typeset ul.docs-hero__chips li {
+  margin: 0;
+  padding: 0.3em 0.8em;
+  border: 1px solid #ffffff1f;
+  border-radius: 0.5rem;
+  background: #ffffff0a;
+  color: #94a3b8;
+  font-size: 0.64rem;
+}
+.md-typeset ul.docs-hero__chips li:nth-child(1) { border-left: 2px solid var(--hero-gateway); }
+.md-typeset ul.docs-hero__chips li:nth-child(2) { border-left: 2px solid var(--hero-edge); }
+.md-typeset ul.docs-hero__chips li:nth-child(3) { border-left: 2px solid var(--hero-data); }
+
+.docs-hero__art {
+  position: relative;
+  display: none;
+}
+.docs-hero__art::before {
+  /* Soft floor shadow under the stack. */
+  content: "";
+  position: absolute;
+  left: 8%;
+  right: 30%;
+  bottom: 4%;
+  height: 18%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, #22d3ee33, transparent);
+  filter: blur(8px);
+}
+.docs-hero__art img {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: auto;
+  animation: docs-float 7s ease-in-out infinite;
+}
+
+@keyframes docs-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@media screen and (min-width: 60em) {
+  .docs-hero__inner {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    padding: 3rem 0.8rem 2.6rem;
+  }
+  .docs-hero__art {
+    display: block;
+  }
+}
+
+/* Motion is decoration only. */
+@media (prefers-reduced-motion: reduce) {
+  .docs-hero::after,
+  .docs-hero__art img {
+    animation: none;
+  }
+}

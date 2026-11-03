@@ -1,9 +1,10 @@
-# Documentation site for the LiteLLM stack.
+# Documentation site for the LiteLLM stack, built with Zensical.
 #
-# The pages are the repository's own Markdown files; docs-site/hooks.py adds
-# them under their repository paths. Build and preview with
-# scripts/build-docs.py, which installs the hash-locked toolchain from
-# docs-site/requirements.txt. Guide: docs/documentation-site.md
+# The pages are the repository's own Markdown files, published from where
+# they live: docs_dir is the repository root and exclude_docs keeps everything
+# except Markdown, the rendered diagrams, and the site assets out of the site.
+# Build and preview with scripts/build-docs.py, which installs the hash-locked
+# toolchain from docs-site/requirements.txt. Guide: docs/documentation-site.md
 
 site_name: LiteLLM stack
 site_description: >-
@@ -12,20 +13,38 @@ site_description: >-
 site_url: !ENV [DOCS_SITE_URL, ""]
 repo_url: !ENV [DOCS_REPO_URL, "https://github.com/bella-1337/effective-spoon"]
 repo_name: !ENV [DOCS_REPO_NAME, "litellm-stack"]
-# hooks.py sets each page's edit link from its repository path.
-edit_uri: ""
+# Edit links open the file on the default branch; scripts/build-docs.py
+# points release versions at the file in the release tag instead.
+edit_uri: !ENV [DOCS_EDIT_URI, "edit/master/"]
 copyright: Internal documentation — do not share outside the organisation.
 
-docs_dir: docs-site/content
+docs_dir: .
 site_dir: site
-hooks:
-  - docs-site/hooks.py
 
-validation:
-  omitted_files: warn
-  absolute_links: warn
-  unrecognized_links: warn
-  anchors: warn
+# Gitignore syntax, read top to bottom: exclude everything, re-include the
+# published files, then exclude hidden directories (including the toolchain
+# cache), build output, and runtime state again. Zensical needs the trailing
+# /** to exclude a directory's contents after !*/ re-included directories.
+exclude_docs: |
+  *
+  !*/
+  !*.md
+  !/diagrams/*.html
+  !/diagrams/*.mmd
+  !/docs/**/*.png
+  !/docs/**/*.svg
+  !/docs-site/assets/**
+  **/.*/**
+  /site/**
+  /public/**
+  /dist/**
+  /logs/**
+  /backups/**
+  /upgrade-state/**
+  /security-metrics/**
+  /security-reports/**
+  /security-state/**
+  **/node_modules/**
 
 theme:
   name: material
@@ -33,8 +52,8 @@ theme:
   language: en
   # No Google Fonts: the site makes no third-party requests.
   font: false
-  logo: assets/logo.svg
-  favicon: assets/favicon.svg
+  logo: docs-site/assets/logo.svg
+  favicon: docs-site/assets/favicon.svg
   icon:
     repo: material/source-repository
     edit: material/file-edit-outline
@@ -95,16 +114,13 @@ extra:
     version: !ENV [DOCS_VERSION, local]
     kind: !ENV [DOCS_VERSION_KIND, local]
     source_ref: !ENV [DOCS_SOURCE_REF, master]
-    revision: !ENV [DOCS_GIT_REVISION, HEAD]
     commit: !ENV [DOCS_GIT_COMMIT, ""]
-    git_dir: !ENV [DOCS_GIT_DIR, ""]
-    repo_kind: !ENV [DOCS_REPO_KIND, github]
     default_branch: !ENV [DOCS_DEFAULT_BRANCH, master]
     date: !ENV [DOCS_BUILD_DATE, ""]
     latest: !ENV [DOCS_LATEST_VERSION, ""]
 
 extra_css:
-  - assets/stylesheets/extra.css
+  - docs-site/assets/stylesheets/extra.css
 
 markdown_extensions:
   - abbr
@@ -122,9 +138,6 @@ markdown_extensions:
   - pymdownx.betterem
   - pymdownx.caret
   - pymdownx.details
-  - pymdownx.emoji:
-      emoji_index: !!python/name:material.extensions.emoji.twemoji
-      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
@@ -144,9 +157,8 @@ markdown_extensions:
   - pymdownx.tilde
 
 nav:
-  - Home: index.md
+  - Home: README.md
   - Get started:
-      - Overview: README.md
       - First deployment: docs/getting-started.md
       - Hardware sizing: docs/hardware-sizing.md
       - Remote GPU host: gpu-host/README.md
@@ -154,7 +166,6 @@ nav:
   - Architecture:
       - Stack architecture: ARCHITECTURE.md
       - Diagrams: diagrams/README.md
-      - Diagram gallery: diagrams/gallery.md
       - Databases and pgvector: docs/databases-and-pgvector.md
       - Search, extraction, and caching: docs/search-extraction-and-caching.md
       - Presidio guardrails: docs/presidio-guardrails.md
@@ -181,4 +192,3 @@ nav:
   - Reports:
       - Security probe 2026-11-01: docs/security-probe-2026-11-01.md
       - Stack review 2026-10-26: STACK-REVIEW-2026-10-26-COMMIT-7f611c8.md
-      - Changelog: changelog.md

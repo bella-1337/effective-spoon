@@ -73,7 +73,7 @@ The checks:
 | Image vulnerability gate (Trivy, CISA KEV, `security/exceptions.toml`) | `python3 scripts/ci/images.py scan` | Same as the build |
 | Python dependency scan (Trivy, fixable High and Critical) | `scripts/ci/static-checks.sh dependencies` | Same as the build |
 | Development container build | `npx @devcontainers/cli build` | Changes to `.devcontainer/`, weekly or nightly, and manual runs |
-| Versioned documentation site build (MkDocs strict mode) | `scripts/ci/docs.sh check` | Every pull or merge request, default-branch push, and tag |
+| Versioned documentation site build (Zensical strict mode) | `scripts/ci/docs.sh check` | Every pull or merge request, default-branch push, and tag |
 
 The image gate applies the policy of `maintenance.py security-scan --enforce`
 to the images CI has just built: an unexcepted CISA KEV match or fixable
