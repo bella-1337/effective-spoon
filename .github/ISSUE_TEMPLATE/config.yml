@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/bella-1337/effective-spoon/security/advisories/new
+    about: Report security problems privately, never in a public issue.
+  - name: Documentation
+    url: https://bella-1337.github.io/effective-spoon/
+    about: Deployment, operations, and troubleshooting guides.

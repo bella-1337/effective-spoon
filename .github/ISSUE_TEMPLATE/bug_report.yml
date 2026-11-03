@@ -1,0 +1,60 @@
+name: Bug report
+description: Report a defect in the stack, its scripts, or its documentation.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Do not include credentials, `.env` contents, virtual keys, or private
+        certificates. Report security problems privately through the security
+        policy instead.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag or commit SHA.
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: profiles
+    attributes:
+      label: Affected profiles
+      multiple: true
+      options:
+        - prod
+        - dev
+        - grafana
+        - langfuse
+        - security
+        - remote GPU host
+        - CI/CD or documentation
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Include the expected behaviour.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. docker compose --profile prod up -d --wait
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Redact secrets and personal data first.
+      render: text
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Host OS, Docker Engine and Compose versions, single- or two-host deployment.

@@ -8,6 +8,20 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Status badges for every GitHub Actions workflow, the latest release, the
+  documentation site, and Dependabot in the README. The documentation site
+  drops them so it still makes no third-party requests.
+- Security policy, contributing guide, issue and pull request templates,
+  release-note categories, and `.editorconfig`.
+
+### Fixed
+
+- A release tag now publishes the documentation site through one
+  default-branch run, which the `github-pages` environment admits, instead of
+  a second, rejected tag deployment.
+
 ## [v0.1.0] - 2026-11-03
 
 Initial release of the self-hosted LiteLLM gateway stack.

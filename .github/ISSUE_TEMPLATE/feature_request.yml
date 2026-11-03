@@ -1,0 +1,29 @@
+name: Feature request
+description: Propose a new capability or a change to the stack.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What operator or user need is not met today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Services, profiles, data stores, or flows that would change.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Security, compliance, and licence impact
+      description: >-
+        New external services, images, or data flows; changes to PII handling,
+        retention, or the third-party licence register.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

@@ -1,0 +1,22 @@
+{#-
+  Page content without the README's status badges. The badges load images
+  from github.com and img.shields.io, and the documentation site makes no
+  third-party requests, so the block between the badge markers is removed.
+  Otherwise identical to the theme's partials/content.html.
+-#}
+{% include "partials/actions.html" %}
+{%- set content = page.content -%}
+{%- set badges_start = "<!-- badges:start -->" -%}
+{%- set badges_end = "<!-- badges:end -->" -%}
+{%- if badges_start in content and badges_end in content -%}
+  {%- set content = (content | split(badges_start, 1) | first)
+      ~ (content | split(badges_end, 1) | last) -%}
+{%- endif %}
+{% if "\u003ch1" not in content %}
+  <h1>{{ page.title | d(config.site_name, true)}}</h1>
+{% endif %}
+{{ content }}
+{% include "partials/tags.html" %}
+{% include "partials/source-file.html" %}
+{% include "partials/feedback.html" %}
+{% include "partials/comments.html" %}

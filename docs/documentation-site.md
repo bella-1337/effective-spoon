@@ -66,7 +66,7 @@ file at the release tag for a release.
 | --- | --- |
 | `mkdocs.yml` | Site configuration, theme, navigation, and the rules for which files are published |
 | `docs-site/overrides/main.html` | The home page banner, the dev, local, and older-release banners, and the `noindex` header |
-| `docs-site/overrides/partials/` | The build footer, a repository link without the GitHub API call, and a fix for the older-release banner script |
+| `docs-site/overrides/partials/` | The build footer, a repository link without the GitHub API call, a fix for the older-release banner script, and page content without the README's status badges, which would load third-party images |
 | `docs-site/assets/` | Logo, favicon, banner illustration, and stylesheet |
 | `docs-site/requirements.in`, `requirements.txt` | The toolchain and its hash-locked pins |
 | `scripts/build-docs.py` | Installs the toolchain, previews, builds, and assembles the versioned site |

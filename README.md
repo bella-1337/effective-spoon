@@ -1,5 +1,16 @@
 # LiteLLM stack
 
+<!-- badges:start -->
+[![CI](https://github.com/bella-1337/effective-spoon/actions/workflows/validate.yml/badge.svg)](https://github.com/bella-1337/effective-spoon/actions/workflows/validate.yml)
+[![Supply chain](https://github.com/bella-1337/effective-spoon/actions/workflows/supply-chain.yml/badge.svg)](https://github.com/bella-1337/effective-spoon/actions/workflows/supply-chain.yml)
+[![Documentation](https://github.com/bella-1337/effective-spoon/actions/workflows/docs.yml/badge.svg)](https://github.com/bella-1337/effective-spoon/actions/workflows/docs.yml)
+[![Release](https://github.com/bella-1337/effective-spoon/actions/workflows/release.yml/badge.svg)](https://github.com/bella-1337/effective-spoon/actions/workflows/release.yml)
+[![Dev container](https://github.com/bella-1337/effective-spoon/actions/workflows/devcontainer.yml/badge.svg)](https://github.com/bella-1337/effective-spoon/actions/workflows/devcontainer.yml)
+[![Latest release](https://img.shields.io/github/v/release/bella-1337/effective-spoon?sort=semver)](https://github.com/bella-1337/effective-spoon/releases/latest)
+[![Docs site](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://bella-1337.github.io/effective-spoon/)
+[![Dependabot](https://img.shields.io/badge/dependabot-enabled-brightgreen?logo=dependabot)](https://github.com/bella-1337/effective-spoon/blob/master/.github/dependabot.yml)
+<!-- badges:end -->
+
 A Docker Compose stack for running separate LiteLLM production and development
 proxies behind Traefik, with PostgreSQL, Presidio, SearXNG, Xberg MCP,
 development vLLM model servers, Prometheus, host/container exporters, and
@@ -119,6 +130,10 @@ see [Documentation site](docs/documentation-site.md).
 
 ## Security notes
 
+- Report vulnerabilities privately as described in the
+  [security policy](https://github.com/bella-1337/effective-spoon/blob/master/.github/SECURITY.md);
+  see the [contributing guide](https://github.com/bella-1337/effective-spoon/blob/master/.github/CONTRIBUTING.md)
+  for everything else.
 - Keep `.env` and everything under `traefik/certs/` private.
 - Rotate any credential that is accidentally exposed.
 - The Docker socket mounted by Traefik is security-sensitive; restrict host
