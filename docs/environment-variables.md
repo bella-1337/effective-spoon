@@ -181,8 +181,8 @@ service does not hold its cap, and a service that exceeds its memory cap is
 OOM-killed and restarted. Memory caps include the page cache the container
 uses, so a tight database cap mainly costs cache hits. Every long-running
 service without its own sizing variable belongs to one tier. One-shot setup
-jobs are not capped. The defaults suit the dev host; the README lists the
-[prod host values](../README.md#resource-limits).
+jobs are not capped. The defaults suit the dev host; the hardware sizing guide
+lists the [prod host values](hardware-sizing.md#resource-limits).
 
 | Variable | Default / format | Description and guidance |
 | --- | --- | --- |
