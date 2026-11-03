@@ -6,6 +6,12 @@ COPY --from=docker_cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker_cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
 
+# Debian removes superseded package versions from its mirrors, so the base
+# image's packages are upgraded at build time; the CI image scan checks them.
+RUN apt-get update \
+    && apt-get upgrade --yes --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV DOCKER_CONFIG=/tmp/docker-config \
     HOME=/tmp/home \
     PYTHONDONTWRITEBYTECODE=1 \

@@ -1,6 +1,7 @@
 **
 !pgvector/
 !pgvector/Dockerfile
+!pgvector/requirements-overrides.txt
 !scripts/
 !scripts/maintenance_common.py
 !scripts/monitor-image-vulnerabilities.py

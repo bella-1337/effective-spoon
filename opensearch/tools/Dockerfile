@@ -7,6 +7,12 @@ ENV HOME=/tmp/home \
     UV_CACHE_DIR=/tmp/uv-cache \
     UV_PYTHON_PREFERENCE=only-system
 
+# Debian removes superseded package versions from its mirrors, so the base
+# image's packages are upgraded at build time; the CI image scan checks them.
+RUN apt-get update \
+    && apt-get upgrade --yes --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Every dependency, including transitive ones, is pinned by version and hash.

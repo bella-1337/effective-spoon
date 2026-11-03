@@ -1,0 +1,7 @@
+# Patched releases installed over the pinned upstream requirements.txt of
+# BerriAI/litellm-pgvector. Remove an entry once upstream pins a fixed release.
+anyio==4.16.0
+fastapi==0.162.0
+litellm==1.106.6
+python-multipart==0.0.33
+starlette==1.10.0

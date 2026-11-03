@@ -41,7 +41,12 @@ only reachable on the internal Compose network. A separate PostgreSQL exporter
 exposes database metrics to Prometheus.
 
 The development profile builds BerriAI's official `litellm-pgvector` connector
-from commit `5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24`. The connector is internal
+from commit `5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24`. Because that commit pins
+releases with known exploited and critical vulnerabilities,
+`pgvector/requirements-overrides.txt` installs patched LiteLLM, FastAPI,
+Starlette, AnyIO, and python-multipart releases over its requirements, and the
+build fails if `pip check` finds them inconsistent. Remove an override once
+upstream pins a fixed release. The connector is internal
 only, authenticates every vector-store request, and uses development LiteLLM to
 embed search queries with the remote `bge-m3` model. `sme-knowledge` is declared
 in `litellm/config.dev.yaml`, so it appears in the development LiteLLM Vector
