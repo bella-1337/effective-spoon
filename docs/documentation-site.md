@@ -108,16 +108,19 @@ that every release tag and the default branch are available.
 | Event | GitHub Actions (`docs.yml`) | GitLab CI (`docs.yml`) |
 | --- | --- | --- |
 | Pull or merge request | `build` job: `docs.sh check`, with `dev` taken from the change | `docs` job, same command |
-| Default-branch push or release tag, publishing enabled | `build`, then `deploy` to GitHub Pages | `pages` job deploys to GitLab Pages |
+| Default-branch push, publishing enabled | `build`, then `deploy` to GitHub Pages | `pages` job deploys to GitLab Pages |
+| Release tag, publishing enabled | `publish-release` reruns the workflow on the default branch, which builds and deploys | `pages` job deploys to GitLab Pages |
 | Default-branch push or release tag, publishing disabled | `build` only | `docs` only |
 
 Publishing is on by default: `DOCS_PAGES_ENABLED` is `true` in
 `.github/workflows/docs.yml` and `.gitlab-ci.yml`. To only build the site, for
 example in a fork, set a repository (GitHub) or project CI/CD (GitLab)
 variable `DOCS_PAGES_ENABLED` to `false`; it overrides the default. A release
-tag pipeline
-rebuilds the whole site, so the new version appears in the selector as soon as
-the tag is pushed.
+tag rebuilds the whole site, so the new version appears in the selector as soon
+as the tag is pushed. On GitHub the rebuild runs on the default branch, so the
+`github-pages` environment only has to admit that branch, and it cancels a
+still-running default-branch build of the same commit instead of deploying
+twice.
 
 ### GitHub Pages
 
@@ -128,8 +131,8 @@ the tag is pushed.
 2. Under **Settings > Pages**, set **Source** to **GitHub Actions** and
    **Visibility** to **Private**.
 3. Under **Settings > Environments > github-pages > Deployment branches and
-   tags**, keep the default branch and add the tag rule `v*.*.*`; otherwise
-   release tag deployments are rejected.
+   tags**, keep the default branch. No tag rule is needed: release tags
+   publish through a default-branch run.
 4. Push to the default branch, or run the **Documentation** workflow on it.
 
 Before building, the workflow reads the Pages settings with the job token. It
