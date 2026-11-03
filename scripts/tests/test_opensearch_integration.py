@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "opensearch" / "tools"))
@@ -568,6 +568,46 @@ class JsonLoggingTests(unittest.TestCase):
         self.assertIn("time", info)
         self.assertEqual(error["level"], "ERROR")
         self.assertIn("RuntimeError: opensearch unavailable", error["exc_info"])
+
+
+class BridgeFailureLoggingTests(unittest.TestCase):
+    def test_cycle_failures_are_logged_with_their_tracebacks(self) -> None:
+        from litellm_opensearch import bridge
+
+        sync = Mock()
+        sync.run_events.side_effect = RuntimeError("usage sync failed")
+        sync.run_entities.side_effect = RuntimeError("entity snapshot failed")
+
+        def stop_after_first_cycle(_seconds: float) -> None:
+            bridge.STOP = True
+
+        self.addCleanup(setattr, bridge, "STOP", False)
+        with patch.object(bridge.signal, "signal"), \
+                patch.object(bridge, "postgres_connector"), \
+                patch.object(bridge, "opensearch_from_env"), \
+                patch.object(bridge, "HttpClient"), \
+                patch.object(bridge.metrics, "load_catalog"), \
+                patch.object(bridge.alert_rules, "load_rules", return_value=[]), \
+                patch.object(bridge.usage, "UsageSync", return_value=sync), \
+                patch.object(bridge, "evaluate_metrics", side_effect=OSError("prometheus unreachable")), \
+                patch.object(bridge.usage, "apply_retention", side_effect=RuntimeError("retention failed")), \
+                patch.object(bridge.time, "sleep", side_effect=stop_after_first_cycle), \
+                self.assertLogs("litellm_opensearch", level="ERROR") as captured:
+            self.assertEqual(bridge.run(), 0)
+
+        failures = {record.getMessage(): record for record in captured.records}
+        self.assertEqual(
+            set(failures),
+            {
+                "Bridge metrics cycle failed: prometheus unreachable",
+                "Bridge usage cycle failed: usage sync failed",
+                "Bridge entity snapshot failed: entity snapshot failed",
+                "Usage retention failed: retention failed",
+            },
+        )
+        for message, record in failures.items():
+            self.assertIsNotNone(record.exc_info, message)
+            self.assertIn(message.rsplit(": ", 1)[1], str(record.exc_info[1]))
 
 
 if __name__ == "__main__":
