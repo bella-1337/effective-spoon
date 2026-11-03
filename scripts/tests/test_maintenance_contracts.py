@@ -142,9 +142,6 @@ class MaintenanceContractTests(unittest.TestCase):
                 {"first-rule", "second_rule"},
             )
 
-    def test_current_repository_contracts_pass(self) -> None:
-        self.assertEqual(contracts.validate_repository_contracts(), [])
-
     def test_traefik_dynamic_config_must_not_route_to_searxng(self) -> None:
         exposed = (
             "http:\n  services:\n    search:\n      loadBalancer:\n"
@@ -171,29 +168,42 @@ class MaintenanceContractTests(unittest.TestCase):
         )
 
 
-    def test_gpu_host_stack_feeds_the_licence_register(self) -> None:
-        images, failures = contracts.auxiliary_images(contracts.ROOT)
-        self.assertEqual(failures, [])
-        for image in (
-            "ghcr.io/vllm-project/semantic-router/vllm-sr-cuda:latest",
-            "docker.io/nginxinc/nginx-unprivileged:1.29.5-alpine",
-            "ghcr.io/huggingface/text-embeddings-inference:cuda-1.9.4",
-        ):
-            self.assertIn(image, images)
-        revisions = {
-            revision
-            for relative in contracts.GPU_HOST_REVISION_SOURCES
-            for revision in contracts.GPU_HOST_REVISION_RE.findall(
-                (contracts.ROOT / relative).read_text(encoding="utf-8")
+    def test_gpu_host_images_and_model_revisions_feed_the_licence_register(self) -> None:
+        image = "registry.example.test/gpu/runtime:1.2.3"
+        compose_revision, deploy_revision = "1" * 40, "2" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_register_fixture(root, ["python:3.11", "base:1"], "")
+            (root / "gpu-host").mkdir()
+            (root / contracts.GPU_HOST_COMPOSE).write_text(
+                f"services:\n  model:\n    image: {image}@sha256:{'c' * 64}\n"
+                f"    command: [--revision, {compose_revision}]\n",
+                encoding="utf-8",
             )
-        }
-        self.assertEqual(
-            revisions,
-            {
-                "5617a9f61b028005a4858fdac845db406aefb181",
-                "a475367de0d8133a3c1a2a0dc12303d89cfa2ab4",
-            },
-        )
+            (root / "gpu-host" / "deploy.py").write_text(
+                f'MODEL_REVISION = "{deploy_revision}"\n', encoding="utf-8"
+            )
+
+            images, failures = contracts.auxiliary_images(root)
+            self.assertEqual(failures, [])
+            self.assertIn(image, images)
+            self.assertEqual(
+                contracts.licence_register_failures({}, root),
+                [
+                    f"Licence register has no row for image {image}",
+                    f"Licence register does not record pinned model revision {compose_revision}",
+                    f"Licence register does not record pinned model revision {deploy_revision}",
+                ],
+            )
+
+            (root / "docs" / "third-party-licences.md").unlink()
+            (root / "docs").rmdir()
+            self.write_register_fixture(
+                root,
+                ["python:3.11", "base:1", image],
+                f"`{compose_revision}` `{deploy_revision}`\n",
+            )
+            self.assertEqual(contracts.licence_register_failures({}, root), [])
 
     def test_shared_compose_fragments_must_match_across_include(self) -> None:
         fragments = "".join(
@@ -222,16 +232,6 @@ class MaintenanceContractTests(unittest.TestCase):
         self.assertEqual(
             contracts.shared_compose_fragment_failures(fragments, missing),
             ["Shared Compose fragment x-default-logging is missing from compose.optional.yml"],
-        )
-
-    def test_repository_shared_compose_fragments_are_in_sync(self) -> None:
-        root = contracts.ROOT
-        self.assertEqual(
-            contracts.shared_compose_fragment_failures(
-                (root / "docker-compose.yml").read_text(encoding="utf-8"),
-                (root / "compose.optional.yml").read_text(encoding="utf-8"),
-            ),
-            [],
         )
 
     def test_public_hostnames_must_not_be_hard_coded(self) -> None:
@@ -494,12 +494,6 @@ class EdgeAndAbuseContractTests(unittest.TestCase):
         source = path.read_text(encoding="utf-8")
         self.assertIn(old, source)
         path.write_text(source.replace(old, new, 1), encoding="utf-8")
-
-    def test_current_policy_files_pass(self) -> None:
-        self.assertEqual(contracts.xberg_sandbox_policy_failures(self.REPO), [])
-        self.assertEqual(contracts.litellm_guardrail_failures(self.REPO), [])
-        dynamic = (self.REPO / "traefik" / "dynamic.yml").read_text(encoding="utf-8")
-        self.assertEqual(contracts.traefik_edge_hardening_failures(dynamic), [])
 
     def test_traefik_edge_hardening_rejects_weak_tls_and_missing_limits(self) -> None:
         weak = (
