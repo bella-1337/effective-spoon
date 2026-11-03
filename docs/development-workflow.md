@@ -200,3 +200,44 @@ TLS material, review the release, and follow the
 
 The tag push starts the release pipelines described above. Never move or
 delete a published tag; fix a bad release with a new patch version.
+
+## Repository settings
+
+These settings live in GitHub, not in files, so apply them once with an
+authenticated GitHub CLI (`gh auth login -s admin:org,repo`). Custom
+properties need organisation-owner or property-admin rights.
+
+```sh
+REPO=bella-1337/effective-spoon
+
+# About section: description, documentation site, and topics.
+gh repo edit "$REPO" \
+  --description "Self-hosted LiteLLM gateway stack on Docker Compose: prod and dev proxies, PII guardrails, OpenSearch observability, and supply-chain-gated releases." \
+  --homepage "https://bella-1337.github.io/effective-spoon/" \
+  --add-topic litellm,llm-gateway,ai-gateway,llmops,docker-compose,self-hosted \
+  --add-topic opensearch,observability,prometheus,grafana-alloy,presidio,pgvector
+
+# The security policy routes reports to private vulnerability reporting.
+gh api -X PUT "repos/$REPO/private-vulnerability-reporting"
+
+# Custom properties: list the organisation's schema, then set the values that
+# the schema defines. Property names and allowed values come from the schema.
+gh api "orgs/bella-1337/properties/schema"
+gh api -X PATCH "repos/$REPO/properties/values" --input - <<'JSON'
+{"properties": [
+  {"property_name": "<name from the schema>", "value": "<allowed value>"}
+]}
+JSON
+gh api "repos/$REPO/properties/values"
+```
+
+Suggested custom property values, to map onto the organisation's schema:
+
+| Meaning | Value |
+| --- | --- |
+| System or product | `litellm-stack` |
+| Repository type | Infrastructure / deployment configuration |
+| Lifecycle | Active, released (`v0.1.0` and later) |
+| Data classification | Internal (no secrets are committed; see the security policy) |
+| Deployment | Self-hosted on-prem, Docker Compose |
+| Compliance scope | EU technical controls (`docs/eu-technical-controls.md`) |
