@@ -14,6 +14,7 @@ import sys
 import truststore
 
 from maintenance_common import (
+    LOG,
     compose,
     compose_capture,
     container_http_request,
@@ -46,9 +47,9 @@ def assert_rejected(description: str, sql: str) -> None:
         "--username", "vector", "--dbname", "vector_store", "--command", sql,
     ], check=False)
     if result.returncode == 0:
-        print(f"FAIL: {description} was accepted", file=sys.stderr)
+        LOG.error(f"FAIL: {description} was accepted")
         raise SystemExit(1)
-    print(f"PASS: {description} was rejected")
+    LOG.info(f"PASS: {description} was rejected")
 
 
 def json_response(url: str, method: str, headers: dict[str, str], payload: dict[str, object] | None) -> tuple[int, object]:
@@ -73,19 +74,19 @@ def main() -> None:
     initial = scalar(f"SELECT COUNT(*) FROM embeddings WHERE vector_store_id = '{STORE_ID}';")
     if not extension:
         fail("pgvector extension version is empty")
-    print(f"PASS: pgvector {extension} is installed and the knowledge store contains {initial} vector row(s)")
+    LOG.info(f"PASS: pgvector {extension} is installed and the knowledge store contains {initial} vector row(s)")
     status, _ = json_response(f"https://{prod_host}/v1/vector_stores", "POST", {"Content-Type": "application/json"},
                               {"name": "must-not-exist"})
     if status != 401:
         fail(f"unauthenticated vector-store request returned HTTP {status}")
-    print("PASS: unauthenticated vector-store request returned HTTP 401")
+    LOG.info("PASS: unauthenticated vector-store request returned HTTP 401")
     connector, _ = container_http_request(
         "litellm-pgvector",
         "http://localhost:8000/v1/vector_stores",
     )
     if connector not in {401, 403}:
         fail(f"unauthenticated pgvector connector request returned HTTP {connector}")
-    print(f"PASS: unauthenticated pgvector connector request returned HTTP {connector}")
+    LOG.info(f"PASS: unauthenticated pgvector connector request returned HTTP {connector}")
     master_key = compose_capture(["exec", "-T", "litellm-dev", "printenv", "LITELLM_MASTER_KEY"]).strip()
     if not master_key:
         fail("LITELLM_MASTER_KEY is empty")
@@ -96,12 +97,12 @@ def main() -> None:
         for item in registry.get("data", []) if isinstance(item, dict)
     ):
         fail("LiteLLM did not list the managed sme-knowledge pgvector store")
-    print("PASS: LiteLLM lists the managed sme-knowledge pgvector store")
+    LOG.info("PASS: LiteLLM lists the managed sme-knowledge pgvector store")
     status, search = json_response(f"https://{dev_host}/v1/vector_stores/{STORE_ID}/search", "POST", headers,
                                    {"query": "empty store verification", "max_num_results": 1})
     if status < 200 or status >= 300 or not isinstance(search, dict) or search.get("object") != "vector_store.search_results.page" or not isinstance(search.get("data"), list):
         fail("LiteLLM did not search the managed store through the official connector")
-    print("PASS: LiteLLM searched the managed store through the official connector")
+    LOG.info("PASS: LiteLLM searched the managed store through the official connector")
     status, _ = http_request(
         f"https://{dev_host}/v1/vector_stores",
         method="POST",
@@ -111,7 +112,7 @@ def main() -> None:
     )
     if status not in {400, 422}:
         fail(f"authenticated invalid JSON request returned HTTP {status}")
-    print(f"PASS: authenticated invalid JSON request returned HTTP {status}")
+    LOG.info(f"PASS: authenticated invalid JSON request returned HTTP {status}")
     assert_rejected("embedding for an unknown store",
                     "INSERT INTO embeddings (id, vector_store_id, content, embedding) VALUES (gen_random_uuid()::text, 'unknown-store', 'invalid', array_fill(0::real, ARRAY[1024])::vector);")
     assert_rejected("embedding with the wrong dimensions",
@@ -120,7 +121,7 @@ def main() -> None:
                     f"INSERT INTO embeddings (id, vector_store_id, content, embedding) VALUES (gen_random_uuid()::text, '{STORE_ID}', '', array_fill(0::real, ARRAY[1024])::vector);")
     if scalar(f"SELECT COUNT(*) FROM embeddings WHERE vector_store_id = '{STORE_ID}';") != initial:
         fail("rejected inputs created vector rows")
-    print("PASS: rejected inputs created no vector rows")
+    LOG.info("PASS: rejected inputs created no vector rows")
 
 
 if __name__ == "__main__":

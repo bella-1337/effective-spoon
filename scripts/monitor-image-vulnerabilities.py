@@ -12,7 +12,6 @@ import fcntl
 import json
 import os
 import re
-import sys
 import time
 import tomllib
 import urllib.error
@@ -24,6 +23,7 @@ from pathlib import Path
 from typing import Iterator
 
 from maintenance_common import (
+    LOG,
     IMAGE_REF_RE,
     ROOT,
     ScriptError,
@@ -702,9 +702,8 @@ def retain_reports(report_root: Path, retention_days: int) -> None:
             for entry in candidate.iterdir()
         )
         if not safe:
-            print(
+            LOG.warning(
                 f"WARNING: skipped security report retention for {candidate}",
-                file=sys.stderr,
             )
             continue
         for entry in candidate.iterdir():
@@ -1092,7 +1091,7 @@ def run_scan(arguments: argparse.Namespace) -> tuple[dict[str, object], bool]:
                         "finding_count": finding_count,
                     }
                     policy_failed = policy_failed or violations > 0
-                    print(
+                    LOG.info(
                         f"PASS: {service} scanned ({finding_count} findings, "
                         f"{violations} policy violations)"
                     )
@@ -1104,7 +1103,7 @@ def run_scan(arguments: argparse.Namespace) -> tuple[dict[str, object], bool]:
                     current_services = state["services"]
                     assert isinstance(current_services, dict)
                     failures.append(service)
-                    print(f"FAIL: {error}", file=sys.stderr)
+                    LOG.error(f"FAIL: {error}")
             state["services"] = current_services
             operational_success = not failures
             state["last_run"] = {
@@ -1138,7 +1137,7 @@ def run_scan(arguments: argparse.Namespace) -> tuple[dict[str, object], bool]:
                 parse_non_negative_int("IMAGE_SECURITY_RETENTION_DAYS", 30),
             )
         except ScriptError as error:
-            print(f"FAIL: {error}", file=sys.stderr)
+            LOG.error(f"FAIL: {error}")
             state["last_run"] = {"timestamp": timestamp, "success": False}
             invalidate_retained_services(state, timestamp, str(error))
         save_state(state_path, state)
@@ -1169,7 +1168,7 @@ def main() -> None:
         for current in services.values()
         if isinstance(current, dict) and current.get("status") == "not-applicable"
     ) if isinstance(services, dict) else 0
-    print(f"Image security state published: {scanned} covered, {unknown} unknown")
+    LOG.info(f"Image security state published: {scanned} covered, {unknown} unknown")
     if not success:
         raise SystemExit(1)
 

@@ -144,25 +144,18 @@ class RestoreSafetyTests(unittest.TestCase):
         ):
             self.module.require_application_services_stopped()
 
-        self.assertEqual(
-            checked,
-            [
-                "litellm-prod",
-                "litellm-dev",
-                "litellm-pgvector",
-                "grafana",
-                "opensearch-bridge",
-                "pgvector-exporter",
-            ],
-        )
+        self.assertEqual(checked, list(self.module.RESTORE_DATABASE_CLIENTS))
+
+        with patch.object(
+            self.module,
+            "service_is_running",
+            side_effect=lambda service: service == "opensearch-bridge",
+        ):
+            with self.assertRaisesRegex(RuntimeError, "opensearch-bridge"):
+                self.module.require_application_services_stopped()
 
 
 class DashboardSupplyChainTests(unittest.TestCase):
-    def test_loki_healthcheck_uses_a_binary_present_in_distroless_image(self) -> None:
-        compose = (SCRIPTS.parent / "compose.optional.yml").read_text(encoding="utf-8")
-        self.assertIn('test: ["CMD", "/usr/bin/loki", "-version"]', compose)
-        self.assertNotIn('test: ["CMD", "/busybox/wget"', compose)
-
     def test_all_provisioned_dashboards_are_valid_json(self) -> None:
         root = SCRIPTS.parent
         dashboards = list((root / "grafana" / "dashboards").glob("*/*.json"))

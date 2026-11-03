@@ -327,6 +327,22 @@ def validate_compose_contracts(config: Mapping[str, Any]) -> list[str]:
         if searxng.get("ports"):
             failures.append("SearXNG must not publish host ports")
 
+    # The Loki image is distroless: it has no shell, wget, or curl, so its
+    # healthcheck can only run the loki binary itself.
+    loki = services.get("loki")
+    if isinstance(loki, dict):
+        healthcheck = loki.get("healthcheck")
+        test = healthcheck.get("test") if isinstance(healthcheck, dict) else None
+        if not (
+            isinstance(test, list)
+            and len(test) >= 2
+            and test[0] == "CMD"
+            and str(test[1]).rsplit("/", 1)[-1] == "loki"
+        ):
+            failures.append(
+                "Loki healthcheck must run the loki binary directly; the distroless image has no shell or HTTP client"
+            )
+
     failures.extend(public_hostname_failures(services))
     failures.extend(branding_failures(services))
     failures.extend(edge_and_abuse_compose_failures(services))
@@ -1013,36 +1029,8 @@ def validate_repository_contracts(root: Path = ROOT) -> list[str]:
             + ", ".join(sorted(missing_alerts))
         )
 
-    metric = backup_freshness_metrics(1)
-    if (
-        f"# TYPE {BACKUP_FRESHNESS_METRIC} gauge" not in metric
-        or f"{BACKUP_FRESHNESS_METRIC} 1" not in metric
-    ):
-        failures.append("Complete-backup freshness metric contract is invalid")
-
-    staging, previous = restore_database_names("litellm_prod", 1)
-    if staging != "litellm_prod_restore_1" or previous != "litellm_prod_pre_restore_1":
-        failures.append("Restore rename-aside database naming contract is invalid")
-    if "pg_terminate_backend" not in terminate_database_connections_sql(
-        "litellm_prod"
-    ):
-        failures.append("Restore session-termination contract is invalid")
-    required_clients = {"pgvector-exporter", "opensearch-bridge"}
-    if not required_clients.issubset(RESTORE_DATABASE_CLIENTS):
-        failures.append(
-            "Restore database-client stop contract is missing: "
-            + ", ".join(sorted(required_clients - set(RESTORE_DATABASE_CLIENTS)))
-        )
-
-    sample_image = "example.invalid/litellm@sha256:" + ("0" * 64)
-    override = render_rollback_override(
-        ["litellm-prod"], {"litellm-prod": sample_image}
-    )
-    if not override.startswith(ACTIVE_ROLLBACK_MARKER + "\n"):
-        failures.append("Rollback override marker contract is invalid")
-    if f"image: {sample_image}" not in override:
-        failures.append("Rollback override image contract is invalid")
-
+    # The helpers' behaviour is covered by unit tests; the workflow bindings
+    # below make sure the scripts actually use them.
     gitignore = (root / ".gitignore").read_text(encoding="utf-8").splitlines()
     if ACTIVE_ROLLBACK_OVERRIDE.name not in gitignore:
         failures.append("The persistent rollback override is not ignored by Git")

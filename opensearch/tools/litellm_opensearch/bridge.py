@@ -115,7 +115,9 @@ def run() -> int:
         "OpenSearch bridge started: %d metric queries, %d alert rules, environments %s",
         len(catalog.expressions), len(rules), ",".join(environments) or "none",
     )
-    last_entities = 0.0
+    # None until the first success: monotonic() counts from host boot, so a
+    # 0.0 start would delay the first snapshot on a freshly booted host.
+    last_entities: float | None = None
     last_retention_day = None
     while not STOP:
         started = time.monotonic()
@@ -130,20 +132,20 @@ def run() -> int:
                 task()
             except Exception as error:  # noqa: BLE001 - keep the daemon alive; retry next cycle
                 healthy = False
-                LOG.error("Bridge %s cycle failed: %s", label, error)
-        if time.monotonic() - last_entities >= entity_interval:
+                LOG.error("Bridge %s cycle failed: %s", label, error, exc_info=True)
+        if last_entities is None or time.monotonic() - last_entities >= entity_interval:
             try:
                 sync.run_entities(now)
                 last_entities = time.monotonic()
             except Exception as error:  # noqa: BLE001 - keep the daemon alive; retry next cycle
                 healthy = False
-                LOG.error("Bridge entity snapshot failed: %s", error)
+                LOG.error("Bridge entity snapshot failed: %s", error, exc_info=True)
         if last_retention_day != now.date():
             try:
                 usage.apply_retention(opensearch, retention_days, now.date())
                 last_retention_day = now.date()
             except (OSError, RuntimeError, HttpError) as error:
-                LOG.error("Usage retention failed: %s", error)
+                LOG.error("Usage retention failed: %s", error, exc_info=True)
         if healthy:
             HEALTH_FILE.touch()
         remaining = interval - (time.monotonic() - started)

@@ -54,7 +54,10 @@ class GameDayPreflightTests(unittest.TestCase):
                 "data-prepper": {},
                 "grafana-db-init": {"profiles": ["grafana"]},
                 "grafana": {"profiles": ["grafana"]},
-                "loki": {"profiles": ["grafana"]},
+                "loki": {
+                    "profiles": ["grafana"],
+                    "healthcheck": {"test": ["CMD", "/usr/bin/loki", "-version"]},
+                },
                 "alloy-loki": {"profiles": ["grafana"]},
                 "langfuse-preflight": {"profiles": ["langfuse"]},
                 "langfuse-postgres": {
@@ -114,10 +117,10 @@ class GameDayPreflightTests(unittest.TestCase):
             }
         }
 
-    def test_current_contracts_pass(self) -> None:
+    def test_valid_config_passes(self) -> None:
         config = self.valid_config()
 
-        self.assertEqual(self.module.validate_contracts(config), [])
+        self.assertEqual(self.module.validate_compose_contracts(config), [])
 
     def test_custom_xberg_dns_address_passes_when_services_match(self) -> None:
         config = self.valid_config()
@@ -126,7 +129,7 @@ class GameDayPreflightTests(unittest.TestCase):
             "ipv4_address"
         ] = "172.29.0.54"
 
-        self.assertEqual(self.module.validate_contracts(config), [])
+        self.assertEqual(self.module.validate_compose_contracts(config), [])
 
     def test_auxiliary_production_dependency_fails(self) -> None:
         config = self.valid_config()
@@ -135,7 +138,7 @@ class GameDayPreflightTests(unittest.TestCase):
             "langfuse-web": {"condition": "service_healthy"},
         }
 
-        failures = self.module.validate_contracts(config)
+        failures = self.module.validate_compose_contracts(config)
 
         self.assertTrue(
             any("auxiliary services" in failure for failure in failures),
@@ -150,7 +153,7 @@ class GameDayPreflightTests(unittest.TestCase):
             "test": ["CMD", "curl", "--silent"]
         }
 
-        failures = self.module.validate_contracts(config)
+        failures = self.module.validate_compose_contracts(config)
 
         self.assertTrue(any("network metadata" in failure for failure in failures))
         self.assertTrue(any("loopback health" in failure for failure in failures))
@@ -164,7 +167,7 @@ class GameDayPreflightTests(unittest.TestCase):
         config["services"]["grafana"] = {}
         config["services"]["langfuse-web"] = {}
 
-        failures = self.module.validate_contracts(config)
+        failures = self.module.validate_compose_contracts(config)
 
         self.assertTrue(any("must not require a profile: opensearch" in f for f in failures), failures)
         self.assertTrue(any("missing: opensearch-bridge" in f for f in failures), failures)
@@ -183,7 +186,7 @@ class GameDayPreflightTests(unittest.TestCase):
                 config = self.valid_config()
                 config["services"]["searxng"][key] = value
 
-                failures = self.module.validate_contracts(config)
+                failures = self.module.validate_compose_contracts(config)
 
                 self.assertTrue(any(message in f for f in failures), failures)
 
@@ -192,11 +195,25 @@ class GameDayPreflightTests(unittest.TestCase):
             config = self.valid_config()
             config["services"]["langfuse-web"]["environment"] = environment
 
-            failures = self.module.validate_contracts(config)
+            failures = self.module.validate_compose_contracts(config)
 
             self.assertIn(
                 "langfuse-web must disable public self-registration", failures
             )
+
+    def test_loki_healthcheck_must_not_need_a_shell_or_http_client(self) -> None:
+        for test in (
+            ["CMD", "/busybox/wget", "-q", "-O", "-", "http://localhost:3100/ready"],
+            ["CMD-SHELL", "/usr/bin/loki -version"],
+            None,
+        ):
+            with self.subTest(test=test):
+                config = self.valid_config()
+                config["services"]["loki"]["healthcheck"] = {"test": test}
+
+                failures = self.module.validate_compose_contracts(config)
+
+                self.assertTrue(any("Loki healthcheck" in f for f in failures), failures)
 
     def test_explicit_symlinked_environment_files_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

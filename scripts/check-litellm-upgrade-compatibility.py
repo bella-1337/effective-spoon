@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from maintenance_common import (
+    LOG,
     ROOT,
     ScriptError,
     compose,
@@ -74,17 +75,17 @@ class Reporter:
         self.failed = 0
 
     def pass_(self, message: str) -> None:
-        print(f"PASS: {message}")
+        LOG.info(f"PASS: {message}")
         self.passed += 1
 
     def fail_(self, message: str, detail: str = "") -> None:
-        print(f"FAIL: {message}", file=sys.stderr)
+        LOG.error(f"FAIL: {message}")
         if detail:
-            print(f"      {detail}", file=sys.stderr)
+            LOG.error(f"      {detail}")
         self.failed += 1
 
     def note(self, message: str) -> None:
-        print(f"NOTE: {message}")
+        LOG.info(f"NOTE: {message}")
 
 
 def usage(stream: object = sys.stdout) -> None:
@@ -655,24 +656,24 @@ def main() -> None:
     if compose(["--env-file", str(ROOT / ".env.example"), "config", "--quiet"], check=False).returncode:
         fail("docker-compose.yml does not pass static validation with .env.example", 2)
     report = Reporter()
-    print("== Candidate image ==")
-    print(candidate)
+    LOG.info("== Candidate image ==")
+    LOG.info(candidate)
     try:
         compose_model()
     except (ScriptError, ValueError) as error:
         fail(f"could not render the Compose model: {error}", 2)
     current_prod = service_image("litellm-prod")
     current_dev = service_image("litellm-dev")
-    print(f"Currently pinned production image: {current_prod}")
-    print(f"Currently pinned development image: {current_dev}")
+    LOG.info(f"Currently pinned production image: {current_prod}")
+    LOG.info(f"Currently pinned development image: {current_dev}")
     if candidate == current_prod:
         report.note("candidate image matches the production pin; this is a re-verification for that profile")
     if candidate == current_dev:
         report.note("candidate image matches the development pin; this is a re-verification for that profile")
-    print()
-    print("== Repository configuration checks ==")
+    LOG.info("")
+    LOG.info("== Repository configuration checks ==")
     static_checks(report)
-    print("\n== Candidate image compatibility checks ==")
+    LOG.info("\n== Candidate image compatibility checks ==")
     valid = bool(IMAGE_PATTERN.fullmatch(candidate))
     if valid:
         report.pass_("Candidate image reference is pinned to an immutable digest")
@@ -687,7 +688,7 @@ def main() -> None:
         report.pass_("Candidate image is available locally")
         available = True
     elif valid and pull:
-        print("Candidate image is not present locally; pulling read-only (no service is started)...")
+        LOG.info("Candidate image is not present locally; pulling read-only (no service is started)...")
         if run(["docker", "pull", candidate], check=False).returncode == 0:
             report.pass_("Candidate image was retrieved read-only via 'docker pull'")
             available = True
@@ -834,12 +835,12 @@ def main() -> None:
             "Production and development candidate-image validations ran in fully isolated containers without leaking one profile's models into the other",
         ):
             report.fail_(message, "skipped: candidate image is unavailable")
-    print("\n== Summary ==")
-    print(f"Passed: {report.passed}\nFailed: {report.failed}")
+    LOG.info("\n== Summary ==")
+    LOG.info(f"Passed: {report.passed}\nFailed: {report.failed}")
     if report.failed:
-        print("Result: NOT compatible for upgrade. Resolve every FAIL above, then re-run this check before pinning the new digest in docker-compose.yml.")
+        LOG.info("Result: NOT compatible for upgrade. Resolve every FAIL above, then re-run this check before pinning the new digest in docker-compose.yml.")
         raise SystemExit(1)
-    print("Result: compatible. Still review upstream release notes, back up the databases (scripts/backup-databases.py), update the pinned digest, and re-run scripts/verify-schema.sql and scripts/verify-pgvector.py after deploying.")
+    LOG.info("Result: compatible. Still review upstream release notes, back up the databases (scripts/backup-databases.py), update the pinned digest, and re-run scripts/verify-schema.sql and scripts/verify-pgvector.py after deploying.")
 
 
 if __name__ == "__main__":

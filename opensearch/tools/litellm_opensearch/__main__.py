@@ -6,6 +6,8 @@ import logging
 import os
 import sys
 
+from pythonjsonlogger.orjson import OrjsonFormatter
+
 USAGE = """Usage: python -m litellm_opensearch COMMAND
 
 Commands:
@@ -16,11 +18,30 @@ Commands:
 """
 
 
-def main(argv: list[str]) -> int:
+def configure_logging() -> None:
+    """Write one JSON object per line so a traceback stays in one log entry.
+
+    The level comes first because the log collectors take the first
+    level-like token on a line as the entry's level.
+    """
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(
+        OrjsonFormatter(
+            "{levelname}{name}{message}",
+            style="{",
+            rename_fields={"levelname": "level", "name": "logger"},
+            timestamp="time",
+        )
+    )
     logging.basicConfig(
         level=os.environ.get("OPENSEARCH_TOOLS_LOG_LEVEL", "INFO").upper(),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        handlers=[handler],
+        force=True,
     )
+
+
+def main(argv: list[str]) -> int:
+    configure_logging()
     if len(argv) != 1 or argv[0] in ("-h", "--help"):
         print(USAGE, end="")
         return 0 if argv and argv[0] in ("-h", "--help") else 2

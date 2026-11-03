@@ -105,8 +105,10 @@ Each model is pinned to an immutable revision.
 
 | Package | Version | Used by | Licence | Notes |
 | --- | --- | --- | --- | --- |
+| `orjson` | 3.13.0 | `litellm-opensearch-tools` image (JSON log serialiser) | MPL-2.0 AND (Apache-2.0 OR MIT) | Used unmodified as a library; MPL-2.0 file-level obligations apply only on distribution of modified files. |
 | `psycopg` | 3.3.6 | `litellm-opensearch-tools` image | LGPL-3.0-only | Used unmodified as a library; LGPL obligations apply only on distribution. |
 | `psycopg-binary` | 3.3.6 | `litellm-opensearch-tools` image | LGPL-3.0-only; bundles libpq (PostgreSQL Licence) and OpenSSL (Apache-2.0) | Same as `psycopg`. |
+| `python-json-logger` | 4.2.0 | `litellm-opensearch-tools` image (JSON log formatter) | BSD-2-Clause | None. |
 | `pyyaml` | 6.0.3 | `litellm-opensearch-tools` image | MIT | None. |
 | `tzdata` | 2026.6 | Windows only; never installed on Linux | Apache-2.0 | Not deployed. |
 | `truststore` | 0.10.5 | `scripts/verify-litellm-upgrade.py`, `scripts/verify-pgvector.py` (host tooling) | MIT | Not deployed in any image. |

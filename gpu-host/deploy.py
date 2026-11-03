@@ -17,6 +17,8 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import logging
+import logging.handlers
 import os
 import re
 import shutil
@@ -24,8 +26,9 @@ import stat
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 HERE = Path(__file__).resolve().parent
 COMPOSE_FILE = HERE / "compose.yml"
@@ -70,6 +73,99 @@ DEFAULTS = {
 
 class DeployError(Exception):
     pass
+
+
+# Operator output goes to the console and to a private, human-readable
+# state/logs/deploy.log for later review. Same format as the main stack's
+# scripts/maintenance_common.py; this host has no copy of that module.
+LOG = logging.getLogger("gpu_host.deploy")
+FILE_LOGGING_VARIABLE = "MAINTENANCE_FILE_LOGGING"
+LOG_FILE_MAX_BYTES = 5 * 1024 * 1024
+LOG_FILE_BACKUPS = 5
+
+
+class _ConsoleHandler(logging.Handler):
+    """Write INFO to stdout and WARNING and above to stderr."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            stream = sys.stderr if record.levelno >= logging.WARNING else sys.stdout
+            stream.write(self.format(record) + "\n")
+            stream.flush()
+        except Exception:  # noqa: BLE001 - logging must never break the deployment
+            self.handleError(record)
+
+
+class _ReadableFileFormatter(logging.Formatter):
+    """Prefix every line with local time, level, and script for later review."""
+
+    def __init__(self) -> None:
+        super().__init__(datefmt="%Y-%m-%d %H:%M:%S %z")
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = record.getMessage()
+        redundant = f"{record.levelname}: "
+        if message.startswith(redundant):
+            message = message[len(redundant):]
+        if record.exc_info:
+            message = f"{message}\n{self.formatException(record.exc_info)}"
+        header = f"{self.formatTime(record, self.datefmt)} {record.levelname:<7} [deploy]"
+        lines = message.strip("\n").splitlines() or [""]
+        return "\n".join(f"{header} {line}".rstrip() for line in lines)
+
+
+class _PrivateRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """Rotating file handler that never follows symlinks and keeps files 0600."""
+
+    def _open(self):  # type: ignore[override]
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(self.baseFilename, flags, 0o600)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise OSError(f"log file is not a regular file: {self.baseFilename}")
+            os.fchmod(descriptor, 0o600)
+            return os.fdopen(descriptor, self.mode, encoding=self.encoding, errors=self.errors)
+        except BaseException:
+            os.close(descriptor)
+            raise
+
+
+if not LOG.handlers:
+    LOG.setLevel(logging.INFO)
+    LOG.propagate = False
+    LOG.addHandler(_ConsoleHandler())
+
+
+@contextmanager
+def file_logging(state: Path = STATE) -> Iterator[Path | None]:
+    """Also write this run's output to state/logs/deploy.log (best effort)."""
+    if os.environ.get(FILE_LOGGING_VARIABLE, "true").strip().lower() in {"0", "false", "no", "off"}:
+        yield None
+        return
+    directory = state / "logs"
+    path: Path | None = directory / "deploy.log"
+    handler: logging.Handler | None = None
+    try:
+        for candidate in (state, directory):
+            if candidate.is_symlink():
+                raise OSError(f"log directory must not be a symbolic link: {candidate}")
+            candidate.mkdir(mode=0o700, exist_ok=True)
+        handler = _PrivateRotatingFileHandler(
+            path, maxBytes=LOG_FILE_MAX_BYTES, backupCount=LOG_FILE_BACKUPS, encoding="utf-8"
+        )
+    except OSError as error:
+        LOG.warning(f"WARNING: file logging is disabled for this run: {error}")
+        path = None
+    else:
+        handler.setFormatter(_ReadableFileFormatter())
+        handler.addFilter(lambda record: bool(record.getMessage().strip()))
+        LOG.addHandler(handler)
+    try:
+        yield path
+    finally:
+        if handler is not None:
+            LOG.removeHandler(handler)
+            handler.close()
 
 
 def parse_env_file(path: Path) -> dict[str, str]:
@@ -388,7 +484,7 @@ def main(argv: list[str] | None = None) -> int:
         renewed = ensure_certificate(settings)
         compose(env_file, "config", "--quiet")
         if arguments.render_only:
-            print(f"Validated the GPU host deployment and rendered {STATE}")
+            LOG.info(f"Validated the GPU host deployment and rendered {STATE}")
             return 0
         compose(env_file, "up", "-d", "--remove-orphans")
         if renewed:
@@ -398,17 +494,19 @@ def main(argv: list[str] | None = None) -> int:
         probe_d3(settings, deadline)
         probe_bge_m3(settings, deadline)
     except DeployError as error:
-        print(f"ERROR: {error}", file=sys.stderr)
+        LOG.error(f"ERROR: {error}")
         return 1
-    print("D3-mini and BGE-M3 are ready over TLS. On the LiteLLM hosts:")
-    print(f"  1. Copy {STATE / 'mkcert' / 'rootCA.pem'} (the public CA certificate only;")
-    print("     never rootCA-key.pem) and run:")
-    print("     ./scripts/build-gpu-host-ca-bundle.py --root-ca /path/to/rootCA.pem")
-    print(f"  2. Set D3_DECISION_API_BASE=https://{settings['D3_SERVER_NAME']}:{settings['D3_PUBLIC_PORT']}")
-    print(f"     and BGE_M3_API_BASE=https://{settings['BGE_M3_SERVER_NAME']}:{settings['BGE_M3_PUBLIC_PORT']}/v1")
-    print("  3. Copy D3_API_KEY to D3_DECISION_API_KEY and BGE_M3_API_KEY unchanged.")
+    LOG.info("D3-mini and BGE-M3 are ready over TLS. On the LiteLLM hosts:")
+    LOG.info(f"  1. Copy {STATE / 'mkcert' / 'rootCA.pem'} (the public CA certificate only;")
+    LOG.info("     never rootCA-key.pem) and run:")
+    LOG.info("     ./scripts/build-gpu-host-ca-bundle.py --root-ca /path/to/rootCA.pem")
+    LOG.info(f"  2. Set D3_DECISION_API_BASE=https://{settings['D3_SERVER_NAME']}:{settings['D3_PUBLIC_PORT']}")
+    LOG.info(f"     and BGE_M3_API_BASE=https://{settings['BGE_M3_SERVER_NAME']}:{settings['BGE_M3_PUBLIC_PORT']}/v1")
+    LOG.info("  3. Copy D3_API_KEY to D3_DECISION_API_KEY and BGE_M3_API_KEY unchanged.")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    with file_logging():
+        exit_code = main()
+    sys.exit(exit_code)

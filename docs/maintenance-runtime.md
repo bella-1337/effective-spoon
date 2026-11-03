@@ -22,6 +22,50 @@ root with Python for roots installed only in an NSS/user store. Their adjacent u
 lock files record the exact resolution. `uv` enforces the declared Python version
 and can acquire a matching interpreter when one is not installed.
 
+## Script logs
+
+Every maintenance script writes its output to two streams:
+
+- **Console.** Unchanged: progress and `PASS:`/`NOTE:`/`SKIP:` lines go to
+  stdout; `WARNING:`, `ERROR:`, and `FAIL:` lines go to stderr.
+- **File.** The same lines, appended to `logs/<script>.log` for later review,
+  for example `logs/backup-databases.log`. Each line starts with the local
+  time, the level, and the script name:
+
+  ```text
+  2026-11-03 18:40:01 +0100 INFO    [backup-databases] Backing up litellm_prod from postgres...
+  2026-11-03 18:40:09 +0100 WARNING [backup-databases] skipping litellm_dev because service postgres is unavailable
+  2026-11-03 18:40:12 +0100 ERROR   [restore-databases] staged restore failed for litellm_prod
+  ```
+
+  An unexpected crash also records its full traceback there.
+
+Review recent runs with `tail -n 50 logs/<script>.log` or search across them with
+`grep -h ERROR logs/*.log`.
+
+- **Private.** The directory is created `0700` and each file `0600`. The script
+  never writes through a symbolic link. The files hold what the console shows:
+  hostnames, paths, image digests, and error text, but no credentials. Treat
+  them like the backup and upgrade-state directories.
+- **Bounded.** Each file rotates at 5 MiB and keeps five old files
+  (`<script>.log.1` to `.5`).
+- **Under sudo.** A log the script creates while running as root through `sudo`
+  belongs to the operator who invoked `sudo`, so later runs without `sudo` keep
+  appending to it.
+- **Best effort.** When the directory cannot be used, the script prints one
+  `WARNING: file logging is disabled for this run` line and continues with
+  console output only.
+- **Not logged.** Help text and machine-readable output, such as
+  `maintenance.py stack-env`, stay on stdout only so callers can parse them.
+
+Set `MAINTENANCE_LOG_DIR` to write the logs elsewhere, or
+`MAINTENANCE_FILE_LOGGING=false` to turn file logging off (see the
+[environment variable reference](environment-variables.md#maintenance-scripts)).
+The scheduled image-security unit writes to `<state>/logs`, because the
+repository is read-only for its service account. The `image-security`
+container turns file logging off, because its output already reaches the log
+collectors. `gpu-host/deploy.py` writes to `gpu-host/state/logs/deploy.log`.
+
 ## Why use Python and uv for these scripts?
 
 For this repository, the practical advantages are:

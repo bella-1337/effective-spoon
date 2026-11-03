@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from maintenance_common import (
+    LOG,
     ROOT,
     SCRIPTS_DIR,
     compose,
@@ -114,7 +115,7 @@ def usage(stream: object = sys.stdout) -> None:
 
 
 def usage_error(message: str) -> None:
-    print(f"ERROR: {message}\n", file=sys.stderr)
+    LOG.error(f"ERROR: {message}\n")
     usage(sys.stderr)
     raise SystemExit(2)
 
@@ -150,13 +151,13 @@ def doctor() -> None:
             compile(path.read_text(encoding="utf-8"), str(path), "exec")
         except SyntaxError:
             fail(f"scripts/{script} has invalid Python syntax")
-        print(f"PASS: scripts/{script} is executable and has valid Python syntax")
+        LOG.info(f"PASS: scripts/{script} is executable and has valid Python syntax")
     prometheus_key = SCRIPTS_DIR.parent / "litellm" / "secrets" / "litellm-master-key"
     if not prometheus_key.is_file() or prometheus_key.is_symlink():
         fail("litellm/secrets/litellm-master-key is missing or unsafe")
     if prometheus_key.stat().st_mode & 0o077:
         fail("litellm/secrets/litellm-master-key must not be accessible to group or other users")
-    print("PASS: Prometheus credential source exists with private permissions")
+    LOG.info("PASS: Prometheus credential source exists with private permissions")
     env_file = ROOT / ".env"
     if not env_file_is_present(env_file):
         fail(f"environment file is missing: {env_file}; copy .env.example to .env and set its values")
@@ -168,7 +169,7 @@ def doctor() -> None:
     ]
     if failures:
         fail("game-day safety contracts failed:\n- " + "\n- ".join(failures))
-    print("PASS: all Compose profiles and game-day safety contracts are valid")
+    LOG.info("PASS: all Compose profiles and game-day safety contracts are valid")
 
 
 def pre_upgrade(arguments: list[str]) -> None:
@@ -204,10 +205,10 @@ def pre_upgrade(arguments: list[str]) -> None:
             usage_error(f"unsupported pre-upgrade option: {arg}")
     if not candidate:
         usage_error("pre-upgrade requires --candidate-image")
-    print("== Candidate compatibility ==")
+    LOG.info("== Candidate compatibility ==")
     invoke("check-litellm-upgrade-compatibility.py",
            ["--candidate-image", candidate, *(["--pull"] if pull else [])])
-    print("\n== Rollback-point preparation ==")
+    LOG.info("\n== Rollback-point preparation ==")
     invoke("prepare-litellm-upgrade.py",
            [*(["--skip-backup"] if skip_backup else []), *(["--services", services] if services else [])])
 

@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
 SPEC = importlib.util.spec_from_file_location("build_gpu_host_ca_bundle", ROOT / "scripts" / "build-gpu-host-ca-bundle.py")
 assert SPEC and SPEC.loader
 bundle = importlib.util.module_from_spec(SPEC)

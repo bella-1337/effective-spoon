@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "opensearch" / "tools"))
@@ -25,6 +25,14 @@ try:
     HAS_YAML = True
 except ImportError:  # pragma: no cover - depends on the local interpreter
     HAS_YAML = False
+
+try:
+    import orjson  # noqa: F401
+    import pythonjsonlogger  # noqa: F401
+
+    HAS_JSON_LOGGER = True
+except ImportError:  # pragma: no cover - depends on the local interpreter
+    HAS_JSON_LOGGER = False
 
 
 def rule_document(expr: str = "up == bool 0", **overrides: object) -> dict:
@@ -525,6 +533,84 @@ class NotebookTests(unittest.TestCase):
         ):
             self.assertIn(command, markdown)
         self.assertNotIn("OPENSEARCH_ADMIN_PASSWORD=", markdown)
+
+
+@unittest.skipUnless(HAS_JSON_LOGGER, "python-json-logger and orjson are not installed")
+class JsonLoggingTests(unittest.TestCase):
+    def test_each_record_is_one_json_line_with_the_level_first(self) -> None:
+        import io
+        import logging
+
+        from litellm_opensearch.__main__ import configure_logging
+
+        stream = io.StringIO()
+        root = logging.getLogger()
+        previous = (root.handlers[:], root.level)
+        try:
+            with patch.object(sys, "stderr", stream):
+                configure_logging()
+            logger = logging.getLogger("litellm_opensearch")
+            logger.info("Indexed %d new %s row(s) from %s", 3, "spend", "prod")
+            try:
+                raise RuntimeError("opensearch unavailable")
+            except RuntimeError:
+                logger.error("Bridge usage cycle failed", exc_info=True)
+        finally:
+            root.handlers[:] = previous[0]
+            root.setLevel(previous[1])
+
+        lines = stream.getvalue().splitlines()
+        self.assertEqual(len(lines), 2)
+        info, error = (json.loads(line) for line in lines)
+        self.assertTrue(lines[0].startswith('{"level":"INFO"'))
+        self.assertEqual(info["logger"], "litellm_opensearch")
+        self.assertEqual(info["message"], "Indexed 3 new spend row(s) from prod")
+        self.assertIn("time", info)
+        self.assertEqual(error["level"], "ERROR")
+        self.assertIn("RuntimeError: opensearch unavailable", error["exc_info"])
+
+
+class BridgeFailureLoggingTests(unittest.TestCase):
+    def test_cycle_failures_are_logged_with_their_tracebacks(self) -> None:
+        # monotonic() counts from host boot, so 42 s models a freshly booted
+        # host, where the first entity snapshot must still run.
+        from litellm_opensearch import bridge
+
+        sync = Mock()
+        sync.run_events.side_effect = RuntimeError("usage sync failed")
+        sync.run_entities.side_effect = RuntimeError("entity snapshot failed")
+
+        def stop_after_first_cycle(_seconds: float) -> None:
+            bridge.STOP = True
+
+        self.addCleanup(setattr, bridge, "STOP", False)
+        with patch.object(bridge.signal, "signal"), \
+                patch.object(bridge, "postgres_connector"), \
+                patch.object(bridge, "opensearch_from_env"), \
+                patch.object(bridge, "HttpClient"), \
+                patch.object(bridge.metrics, "load_catalog"), \
+                patch.object(bridge.alert_rules, "load_rules", return_value=[]), \
+                patch.object(bridge.usage, "UsageSync", return_value=sync), \
+                patch.object(bridge, "evaluate_metrics", side_effect=OSError("prometheus unreachable")), \
+                patch.object(bridge.usage, "apply_retention", side_effect=RuntimeError("retention failed")), \
+                patch.object(bridge.time, "sleep", side_effect=stop_after_first_cycle), \
+                patch.object(bridge.time, "monotonic", return_value=42.0), \
+                self.assertLogs("litellm_opensearch", level="ERROR") as captured:
+            self.assertEqual(bridge.run(), 0)
+
+        failures = {record.getMessage(): record for record in captured.records}
+        self.assertEqual(
+            set(failures),
+            {
+                "Bridge metrics cycle failed: prometheus unreachable",
+                "Bridge usage cycle failed: usage sync failed",
+                "Bridge entity snapshot failed: entity snapshot failed",
+                "Usage retention failed: retention failed",
+            },
+        )
+        for message, record in failures.items():
+            self.assertIsNotNone(record.exc_info, message)
+            self.assertIn(message.rsplit(": ", 1)[1], str(record.exc_info[1]))
 
 
 if __name__ == "__main__":

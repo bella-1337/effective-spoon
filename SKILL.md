@@ -66,6 +66,11 @@ read the rendered model (`docker compose config --format json`); only
 source-level contracts, such as hard-coded hostname fallbacks and fragment
 sync, read the file text.
 
+Maintenance scripts report through `LOG` from `scripts/maintenance_common.py`,
+not `print()`, so their output reaches both the console and the private
+`logs/<script>.log` file; keep the existing `PASS:`/`WARNING:`/`ERROR:`/`FAIL:`
+message prefixes. Help text and machine-readable output stay on stdout.
+
 Example: changing a Presidio endpoint requires all of the following:
 
 ```yaml

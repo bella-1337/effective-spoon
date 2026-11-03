@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from maintenance_common import (
+    LOG,
     BACKUP_NAME_RE,
     ROOT,
     compose,
@@ -78,7 +79,7 @@ def database_exists(service: str, database: str) -> int:
 
 
 def dump_database(service: str, database: str, destination: Path) -> None:
-    print(f"Backing up {database} from {service}...")
+    LOG.info(f"Backing up {database} from {service}...")
     dump = compose_command([
         "exec", "-T", service, "pg_dump",
         "--username", container_environment(service, "POSTGRES_USER"),
@@ -117,12 +118,12 @@ def prune_old_backups(root: Path, retention_days: int) -> None:
         if datetime.fromtimestamp(candidate.stat().st_mtime, timezone.utc) >= cutoff:
             continue
         if not safe_backup_directory(candidate):
-            print(f"WARNING: skipped retention cleanup for unexpected contents in {candidate}", file=sys.stderr)
+            LOG.warning(f"WARNING: skipped retention cleanup for unexpected contents in {candidate}")
             continue
         for entry in candidate.iterdir():
             entry.unlink()
         candidate.rmdir()
-        print(f"Removed expired backup {candidate}")
+        LOG.info(f"Removed expired backup {candidate}")
 
 
 def publish_success_metric() -> None:
@@ -166,12 +167,12 @@ def main() -> None:
         dumps: list[str] = []
         for service, database, filename in DATABASES:
             if not service_is_running(service):
-                print(f"WARNING: skipping {database} because service {service} is unavailable", file=sys.stderr)
+                LOG.warning(f"WARNING: skipping {database} because service {service} is unavailable")
                 skipped.append(f"{database}:service-unavailable")
                 continue
             status = database_exists(service, database)
             if status == 1:
-                print(f"WARNING: skipping {database} because it does not exist in service {service}", file=sys.stderr)
+                LOG.warning(f"WARNING: skipping {database} because it does not exist in service {service}")
                 skipped.append(f"{database}:database-not-found")
                 continue
             if status != 0:
@@ -188,19 +189,19 @@ def main() -> None:
         )
         write_checksum_manifest(staging, [*dumps, "metadata.txt"])
         staging.rename(final)
-    print(f"Backup completed: {final}")
+    LOG.info(f"Backup completed: {final}")
     if skipped:
-        print(f"Completed with skipped resources: {','.join(skipped)}")
-        print("Older backups were not pruned because this backup is partial", file=sys.stderr)
+        LOG.info(f"Completed with skipped resources: {','.join(skipped)}")
+        LOG.warning("Older backups were not pruned because this backup is partial")
         raise SystemExit(3)
     publish_success_metric()
     prune_old_backups(root, int(retention_raw))
     if shutil.which("sha256sum"):
-        print(f"Verify with: cd {final} && sha256sum --check SHA256SUMS")
+        LOG.info(f"Verify with: cd {final} && sha256sum --check SHA256SUMS")
     elif shutil.which("shasum"):
-        print(f"Verify with: cd {final} && shasum -a 256 --check SHA256SUMS")
+        LOG.info(f"Verify with: cd {final} && shasum -a 256 --check SHA256SUMS")
     else:
-        print(f"Checksum manifest: {final / 'SHA256SUMS'}")
+        LOG.info(f"Checksum manifest: {final / 'SHA256SUMS'}")
 
 
 if __name__ == "__main__":

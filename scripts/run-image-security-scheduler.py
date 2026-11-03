@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from maintenance_common import fail, run_main
+from maintenance_common import LOG, fail, run_main
 
 STOP_EVENT = threading.Event()
 ACTIVE_PROCESS: subprocess.Popen[str] | None = None
@@ -97,19 +97,15 @@ def run_scheduled_jobs(
 ) -> None:
     result = run_monitor(scanner, scanner_arguments)
     if result:
-        print(
+        LOG.error(
             f"Image-security scan failed with exit code {result}",
-            file=sys.stderr,
-            flush=True,
         )
     if sbom_generator is None or STOP_EVENT.is_set():
         return
     result = run_monitor(sbom_generator, [])
     if result:
-        print(
+        LOG.error(
             f"Image SBOM generation failed with exit code {result}",
-            file=sys.stderr,
-            flush=True,
         )
 
 
@@ -141,9 +137,8 @@ def main() -> None:
         now = datetime.now(timezone)
         scheduled = next_run(now, hour, minute)
         delay = max(0.0, scheduled.timestamp() - now.timestamp())
-        print(
+        LOG.info(
             f"Next image-security scan: {scheduled.isoformat()}",
-            flush=True,
         )
         if STOP_EVENT.wait(delay):
             break
