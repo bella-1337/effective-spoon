@@ -1,32 +1,37 @@
 ---
 title: Stack start-up order
 ---
-flowchart TD
+sequenceDiagram
   %% Source for 14-stack-startup-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @subtitle One-shot init jobs and health checks that run when a profile starts, in Compose dependency order
+  %% @type cloud: DC
+  %% @type database: PG OS
+  actor OP as Operator
+  participant DC as Docker Compose
+  participant INIT as One-shot init jobs<br/>exit after setup
+  participant PG as PostgreSQL
+  participant OS as OpenSearch
+  participant SVC as Long-running services
 
-  S(["COMPOSE --PROFILE PROD UP"])
-  CERT["opensearch-certs creates the private CA"]
-  PGH["postgres becomes healthy"]
-  SEC["prometheus-secrets-init copies the metrics key"]
-  OS["OpenSearch becomes healthy"]
-  PGI["postgres-init creates litellm_dev"]
-  PM["Prometheus starts scraping"]
-  OSS["opensearch-setup provisions users, roles, monitors"]
-  LL["litellm-prod starts after Presidio is healthy"]
-  DSH["Dashboards, Data Prepper, and bridge start"]
-  E(["STACK READY FOR VERIFICATION"])
-
-  S --> CERT
-  S --> PGH
-  S --> SEC
-  CERT --> OS
-  PGH --> PGI
-  SEC --> PM
-  OS --> OSS
-  PGI --> LL
-  OSS --> DSH
-  LL --> E
-  DSH --> E
-  PM --> E
+  OP->>DC: docker compose --profile prod up
+  par search and dashboards
+    DC->>INIT: opensearch-certs creates the private CA
+    INIT-->>DC: certificates written
+    DC->>OS: start OpenSearch
+    OS-->>DC: healthy
+    DC->>INIT: opensearch-setup provisions users, roles, monitors
+    INIT-->>DC: provisioned
+    DC->>SVC: start Dashboards, Data Prepper, and bridge
+  and database and gateway
+    DC->>PG: start postgres
+    PG-->>DC: healthy
+    DC->>INIT: postgres-init creates litellm_dev
+    INIT-->>DC: database ready
+    DC->>SVC: start litellm-prod after Presidio is healthy
+  and metrics
+    DC->>INIT: prometheus-secrets-init copies the metrics key
+    INIT-->>DC: key in place
+    DC->>SVC: Prometheus starts scraping
+  end
+  DC-->>OP: stack ready for verification

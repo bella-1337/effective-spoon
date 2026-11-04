@@ -1,30 +1,35 @@
 ---
-title: Xberg extraction and opt-in auto-indexing
+title: Xberg auto-indexing
 ---
-flowchart TD
+sequenceDiagram
   %% Source for 13-xberg-auto-index-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @subtitle The caller always gets the extraction; indexing into pgvector runs as a bounded background task in dev
+  %% @type security: PR
+  %% @type external: BGE
+  %% @type database: PG
+  actor C as MCP client
+  participant LL as litellm-dev<br/>MCP gateway + index hook
+  participant XB as Xberg<br/>egress through Squid
+  participant PR as Presidio
+  participant BGE as bge-m3<br/>remote GPU host
+  participant PG as pgvector<br/>sme-knowledge
 
-  S(["MCP EXTRACT VIA LITELLM"])
-  FETCH["Xberg fetches the URL through Squid"]
-  EN{"Auto-index enabled and principal trusted?"}
-  RET(["RETURN EXTRACTION TO CALLER"])
-  BG["Start background task (3 min timeout)"]
-  CH["Chunk text (~4,000 chars, max 256)"]
-  RED{"Presidio anonymized every chunk?"}
-  SKIP(["INDEXING FAILS CLOSED AND IS LOGGED"])
-  EMB["Embed chunks with remote bge-m3"]
-  UP["Atomically replace source chunks"]
-  E(["INDEXED IN SME-KNOWLEDGE"])
-
-  S --> FETCH
-  FETCH --> EN
-  EN -->|"no"| RET
-  EN -->|"yes"| BG
-  BG --> CH
-  CH --> RED
-  RED -->|"no"| SKIP
-  RED -->|"yes"| EMB
-  EMB --> UP
-  UP --> E
+  C->>LL: MCP extract
+  LL->>XB: extract the URL
+  XB-->>LL: extracted text
+  LL-->>C: return the extraction
+  opt auto-index enabled and principal trusted
+    Note over LL: background task, 3 min timeout
+    LL->>LL: chunk text (about 4,000 chars, max 256)
+    LL->>PR: anonymize every chunk
+    alt any chunk not anonymized
+      PR--xLL: indexing fails closed and is logged
+    else all chunks anonymized
+      PR-->>LL: anonymized chunks
+      LL->>BGE: embed the chunks
+      BGE-->>LL: embeddings
+      LL->>PG: atomically replace the source's chunks
+      PG-->>LL: indexed in sme-knowledge
+    end
+  end

@@ -1,34 +1,31 @@
 ---
 title: First deployment
 ---
-flowchart TD
+sequenceDiagram
   %% Source for 19-first-deployment-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @subtitle The getting-started steps, including the on-prem versus local-development TLS choice
+  %% @type cloud: DC
+  %% @type security: TLS
+  actor OP as Operator
+  participant REPO as Repository checkout
+  participant TLS as TLS certificates
+  participant HOST as Host resolution
+  participant DC as Docker Compose
 
-  S(["CLONE THE REPOSITORY"])
-  ENV["Create .env and set STACK_DOMAIN"]
-  TLS{"On-prem certificate delivered?"}
-  DEL["Point Traefik at the delivered cert and key"]
-  MK["mkcert local-development fallback"]
-  HOST["Resolve the hostnames"]
-  GF{"Enabling the grafana profile?"}
-  FD["Fetch pinned Grafana dashboards"]
-  KEY["Write the Prometheus metrics key file"]
-  VAL["docker compose config --quiet"]
-  UP["Start the prod and/or dev profile"]
-  E(["VERIFY HEALTH AND ROUTES"])
-
-  S --> ENV
-  ENV --> TLS
-  TLS -->|"yes"| DEL
-  TLS -->|"no"| MK
-  DEL --> HOST
-  MK --> HOST
-  HOST --> GF
-  GF -->|"yes"| FD
-  GF -->|"no"| KEY
-  FD --> KEY
-  KEY --> VAL
-  VAL --> UP
-  UP --> E
+  OP->>REPO: clone the repository
+  OP->>REPO: create .env and set STACK_DOMAIN
+  alt on-prem certificate delivered
+    OP->>TLS: point Traefik at the delivered cert and key
+  else local development only
+    OP->>TLS: mkcert local-development fallback
+  end
+  OP->>HOST: resolve the hostnames
+  opt enabling the grafana profile
+    OP->>REPO: fetch pinned Grafana dashboards
+  end
+  OP->>REPO: write the Prometheus metrics key file
+  OP->>DC: docker compose config --quiet
+  DC-->>OP: configuration valid
+  OP->>DC: start the prod and/or dev profile
+  DC-->>OP: verify health and routes

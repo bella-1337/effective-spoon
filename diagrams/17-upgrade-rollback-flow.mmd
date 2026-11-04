@@ -1,37 +1,40 @@
 ---
-title: LiteLLM image upgrade and rollback
+title: Upgrade and rollback
 ---
-flowchart TD
+sequenceDiagram
   %% Source for 17-upgrade-rollback-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @subtitle Compatibility check, rollback point, regression suite, and the two rollback modes
+  %% @type security: CHK
+  %% @type database: STATE
+  actor OP as Operator
+  participant CHK as Compatibility check<br/>isolated, read-only
+  participant STATE as upgrade-state/<br/>images · checksums · backup
+  participant ST as LiteLLM proxies
+  participant V as verify-litellm-upgrade.py
+  participant RB as rollback-litellm-upgrade.py
 
-  S(["CANDIDATE TAG@DIGEST"])
-  CMP["Isolated compatibility check"]
-  CPASS{"Compatible?"}
-  STOP(["KEEP THE CURRENT IMAGE"])
-  PREP["Capture images, checksums, and a backup"]
-  UPD["Update digests and recreate the proxies"]
-  VER["Run verify-litellm-upgrade.py"]
-  VPASS{"All checks pass?"}
-  DONE(["UPGRADE COMPLETE"])
-  SCH{"Prior image reads the current schema?"}
-  IMG["Rollback --mode image-only"]
-  RDB["Rollback --mode restore-db"]
-  LIVE["Check proxy liveliness and write a report"]
-  E(["ROLLED BACK"])
-
-  S --> CMP
-  CMP --> CPASS
-  CPASS -->|"no"| STOP
-  CPASS -->|"yes"| PREP
-  PREP --> UPD
-  UPD --> VER
-  VER --> VPASS
-  VPASS -->|"yes"| DONE
-  VPASS -->|"no"| SCH
-  SCH -->|"yes"| IMG
-  SCH -->|"no"| RDB
-  IMG --> LIVE
-  RDB --> LIVE
-  LIVE --> E
+  OP->>CHK: candidate tag@digest
+  alt not compatible
+    CHK--xOP: keep the current image
+  else compatible
+    CHK-->>OP: compatible
+    OP->>STATE: capture images, checksums, and a backup
+    OP->>ST: update digests and recreate the proxies
+    OP->>V: run the regression suite
+    V->>ST: check every component
+    alt all checks pass
+      V-->>OP: upgrade complete
+    else a check fails
+      V--xOP: nonzero exit
+      alt prior image reads the current schema
+        OP->>RB: rollback --mode image-only
+      else schema migrated incompatibly
+        OP->>RB: rollback --mode restore-db
+      end
+      RB->>STATE: validate checksums and drift
+      RB->>ST: restore the prior images and data
+      RB->>ST: check proxy liveliness
+      RB-->>OP: rolled back, report written
+    end
+  end

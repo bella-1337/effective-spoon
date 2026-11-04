@@ -5,9 +5,11 @@
 # ///
 """Render the Mermaid sources in diagrams/ into animated dashmotion HTML.
 
-The Mermaid files are the source of truth. This script converts each one into
-dashmotion's semantic graph, calls dashmotion's layout engine to write the
-HTML beside it, and runs dashmotion's structural checker on the result.
+The Mermaid files are the source of truth. This script converts each flowchart
+into dashmotion's semantic graph and calls dashmotion's layout engine to write
+the HTML beside it. dashmotion has no sequence mode, so sequenceDiagram sources
+are laid out by sequence_diagrams.py in the same visual style. Every result
+must pass dashmotion's structural checker.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import sequence_diagrams
 from maintenance_common import LOG, ROOT, fail, run_main
 
 USAGE = """Usage:
@@ -235,7 +238,7 @@ def parse_mermaid(text: str, name: str = "diagram") -> Diagram:
             continue
         if not header_seen:
             if not re.match(r"^(flowchart|graph)(\s+(TD|TB|BT|LR|RL))?$", line):
-                raise DiagramError(f"{where}: only 'flowchart' diagrams are supported")
+                raise DiagramError(f"{where}: only 'flowchart' and 'sequenceDiagram' diagrams are supported")
             header_seen = True
             continue
         if line.startswith("subgraph "):
@@ -379,11 +382,21 @@ def dashmotion_scripts() -> Path:
     raise AssertionError
 
 
+def parse_graph(text: str, name: str) -> dict[str, Any]:
+    """The semantic graph of a flowchart or sequence diagram source."""
+    if sequence_diagrams.is_sequence(text):
+        try:
+            return sequence_diagrams.to_graph(sequence_diagrams.parse(text, name), name)
+        except sequence_diagrams.SequenceError as error:
+            raise DiagramError(str(error)) from None
+    return to_graph(parse_mermaid(text, name), name)
+
+
 def load(path: Path) -> dict[str, Any]:
     if path.is_symlink() or not path.is_file() or path.suffix != ".mmd":
         fail(f"not a regular .mmd file: {path}")
     try:
-        return to_graph(parse_mermaid(path.read_text(encoding="utf-8"), path.stem), path.stem)
+        return parse_graph(path.read_text(encoding="utf-8"), path.stem)
     except DiagramError as error:
         fail(str(error))
     raise AssertionError
@@ -418,14 +431,18 @@ def render(path: Path, scripts: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="dashmotion-") as temporary:
         graph_file = Path(temporary) / "graph.json"
         rendered = Path(temporary) / "diagram.html"
-        graph_file.write_text(json.dumps(graph), encoding="utf-8")
-        result = subprocess.run(
-            [sys.executable, str(scripts / "layout.py"), str(graph_file), "--render", str(rendered)],
-            capture_output=True, text=True, check=False,
-        )
-        if result.returncode != 0:
-            fail(f"dashmotion layout failed for {path.name}: {result.stderr.strip()}")
-        content = rendered.read_text(encoding="utf-8")
+        sequence = graph["mode"] == "sequence"
+        if sequence:
+            content = sequence_diagrams.render_html(graph)
+        else:
+            graph_file.write_text(json.dumps(graph), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(scripts / "layout.py"), str(graph_file), "--render", str(rendered)],
+                capture_output=True, text=True, check=False,
+            )
+            if result.returncode != 0:
+                fail(f"dashmotion layout failed for {path.name}: {result.stderr.strip()}")
+            content = rendered.read_text(encoding="utf-8")
         if "<head>" not in content:
             fail(f"dashmotion output for {path.name} has no <head> element")
         meta = f'<meta name="{SOURCE_META}" content="sha256:{source_digest(path)}">'
@@ -438,7 +455,7 @@ def render(path: Path, scripts: Path) -> None:
         )
         if check.returncode != 0 or "(0 violations)" not in check.stdout:
             fail(f"dashmotion structural check failed for {path.name}:\n{check.stdout}{check.stderr}")
-        problems = fidelity_problems(graph, content)
+        problems = (sequence_diagrams.fidelity_problems if sequence else fidelity_problems)(graph, content)
         if problems:
             fail(f"{path.name} does not match its Mermaid source:\n  " + "\n  ".join(problems))
         os.replace(rendered, html)
