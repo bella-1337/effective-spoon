@@ -1,37 +1,43 @@
 ---
 title: Chat completion request flow
 ---
-flowchart TD
+sequenceDiagram
   %% Source for 10-chat-request-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @subtitle From the client's HTTPS call to the response, through edge limits, authentication, policy, PII masking, routing, and telemetry
+  %% @type cloud: TR
+  %% @type security: PR
+  %% @type external: D3 OAI
+  %% @type database: OBS
+  actor C as Client
+  participant TR as Traefik<br/>TLS + edge limits
+  participant LL as LiteLLM proxy<br/>auth · policy · routing
+  participant PR as Presidio<br/>PII masking
+  participant D3 as D3-mini<br/>remote GPU host
+  participant OAI as OpenAI<br/>provider model
+  participant OBS as Telemetry<br/>spend · metrics · spans
 
-  S(["CLIENT SENDS REQUEST"])
-  TLS["Traefik terminates TLS and routes by host"]
-  LIM{"Within edge runaway-client limits?"}
-  REJ(["429 TO CLIENT"])
-  AUTH{"Key valid and model allowed?"}
-  DENY(["401 / 403 TO CLIENT"])
-  POL["Resolve eu-data-protection policy"]
-  PRE["Presidio pre_call masks PII in the input"]
-  RT{"Model is coding-router?"}
-  D3["D3-mini picks a tier (see routing flow)"]
-  PROV["Call the provider model (OpenAI)"]
-  POST["Presidio post_call masks PII in the output"]
-  TEL["Spend log, metrics, and content-free span"]
-  E(["RESPONSE TO CLIENT"])
-
-  S --> TLS
-  TLS --> LIM
-  LIM -->|"no"| REJ
-  LIM -->|"yes"| AUTH
-  AUTH -->|"no"| DENY
-  AUTH -->|"yes"| POL
-  POL --> PRE
-  PRE --> RT
-  RT -->|"yes"| D3
-  RT -->|"no"| PROV
-  D3 --> PROV
-  PROV --> POST
-  POST --> TEL
-  TEL --> E
+  C->>TR: POST /v1/chat/completions over HTTPS
+  alt over the runaway-client limits
+    TR--xC: 429 Too Many Requests
+  else within limits
+    TR->>LL: route by host
+    alt key invalid or model not allowed
+      LL--xC: 401 / 403 through Traefik
+    else authorized
+      Note over LL: resolve the eu-data-protection policy
+      LL->>PR: pre_call: mask PII in the input
+      PR-->>LL: masked input
+      opt model is coding-router
+        LL->>D3: classify the request (routing sequence)
+        D3-->>LL: tier
+      end
+      LL->>OAI: call the provider model
+      OAI-->>LL: completion
+      LL->>PR: post_call: mask PII in the output
+      PR-->>LL: masked output
+      LL-)OBS: spend log, metrics, content-free span
+      LL-->>TR: response
+      TR-->>C: response
+    end
+  end

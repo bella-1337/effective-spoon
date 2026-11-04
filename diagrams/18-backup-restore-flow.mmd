@@ -1,34 +1,34 @@
 ---
-title: Database backup and restore
+title: Backup and restore
 ---
-flowchart TD
+sequenceDiagram
   %% Source for 18-backup-restore-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @subtitle Validated, checksummed backups and a restore that never drops the existing database first
+  %% @type database: PG BK
+  actor OP as Operator
+  participant BS as backup-databases.py
+  participant PG as PostgreSQL<br/>litellm_prod · litellm_dev · vector_store
+  participant BK as backups/
+  participant RS as restore-databases.py
 
-  S(["BACKUP-DATABASES.PY"])
-  P["Dump litellm_prod"]
-  D["Dump litellm_dev"]
-  V["Dump vector_store"]
-  CHK["Validate with pg_restore and write SHA256SUMS"]
-  PUB["Atomically publish under backups/"]
-  RS["restore --confirm-restore"]
-  STG["Restore into a staging database"]
-  TOK{"Tables restored?"}
-  KEEP(["TARGET LEFT UNTOUCHED"])
-  SWAP["Rename target to *_pre_restore_*, promote staging"]
-  E(["RESTORED — RERUN STACK CHECKS"])
-
-  S --> P
-  S --> D
-  S --> V
-  P --> CHK
-  D --> CHK
-  V --> CHK
-  CHK --> PUB
-  PUB --> RS
-  RS --> STG
-  STG --> TOK
-  TOK -->|"no"| KEEP
-  TOK -->|"yes"| SWAP
-  SWAP --> E
+  OP->>BS: run a backup
+  par each database
+    BS->>PG: dump litellm_prod
+  and
+    BS->>PG: dump litellm_dev
+  and
+    BS->>PG: dump vector_store
+  end
+  PG-->>BS: archives
+  BS->>BS: validate with pg_restore and write SHA256SUMS
+  BS->>BK: atomically publish
+  OP->>RS: restore --confirm-restore
+  RS->>BK: read a verified archive
+  RS->>PG: restore into a staging database
+  alt tables not restored
+    RS--xOP: target left untouched
+  else tables restored
+    RS->>PG: rename target to *_pre_restore_*, promote staging
+    RS-->>OP: restored, rerun the stack checks
+  end

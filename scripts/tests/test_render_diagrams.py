@@ -62,8 +62,35 @@ flowchart TD
 """
 
 
+SEQUENCE = """---
+title: Sample sequence
+---
+sequenceDiagram
+  %% @subtitle A short exchange
+  %% @type external: P
+  actor C as Client
+  participant G as Gateway<br/>auth + routing
+  participant P as Provider
+  C->>G: request
+  alt key invalid
+    G--xC: 401
+  else key valid
+    G->>+P: call the model
+    P-->>-G: completion
+    G-)G: write the spend log
+  end
+  par one
+    G->>P: first
+  and
+    G->>P: second
+  end
+  Note over G,P: no content is logged
+  G-->>C: response
+"""
+
+
 def graph(text: str, name: str = "sample") -> dict:
-    return diagrams.to_graph(diagrams.parse_mermaid(text, name), name)
+    return diagrams.parse_graph(text, name)
 
 
 class FlowParsingTests(unittest.TestCase):
@@ -129,10 +156,63 @@ class ValidationTests(unittest.TestCase):
         self.assert_rejected("flowchart TD\n  A[\"a\"]\n", "front-matter title")
 
     def test_unsupported_diagram_type_is_rejected(self) -> None:
-        self.assert_rejected("---\ntitle: t\n---\nsequenceDiagram\n  A->>B: hi\n", "only 'flowchart'")
+        self.assert_rejected("---\ntitle: t\n---\nclassDiagram\n  A <|-- B\n", "only 'flowchart' and 'sequenceDiagram'")
 
     def test_unsupported_edge_syntax_is_rejected(self) -> None:
         self.assert_rejected("---\ntitle: t\n---\nflowchart TD\n  A[\"a\"] -- text --> B[\"b\"]\n", "unsupported syntax")
+
+
+class SequenceTests(unittest.TestCase):
+    def test_participants_messages_notes_and_blocks(self) -> None:
+        result = graph(SEQUENCE)
+        self.assertEqual(result["mode"], "sequence")
+        self.assertEqual(result["subtitle"], "A short exchange")
+        self.assertEqual(result["participants"], [
+            {"id": "C", "label": "Client", "type": "frontend"},
+            {"id": "G", "label": "Gateway", "type": "backend", "sublabel": "auth + routing"},
+            {"id": "P", "label": "Provider", "type": "external"},
+        ])
+        messages = [(e["from"], e["to"], e["style"]) for e in result["events"] if e["kind"] == "message"]
+        self.assertEqual(messages, [("C", "G", "call"), ("G", "C", "deny"), ("G", "P", "call"),
+                                    ("P", "G", "reply"), ("G", "G", "async"), ("G", "P", "call"),
+                                    ("G", "P", "call"), ("G", "C", "reply")])
+        kinds = [e["kind"] for e in result["events"]]
+        self.assertEqual(kinds.count("start"), 2)
+        self.assertEqual(kinds.count("end"), 2)
+        self.assertEqual(kinds.count("divider"), 2)
+        self.assertIn({"kind": "note", "placement": "over", "first": "G", "second": "P",
+                       "label": "no content is logged"}, result["events"])
+
+    def test_rendered_svg_keeps_every_label_and_message(self) -> None:
+        result = graph(SEQUENCE)
+        content = diagrams.sequence_diagrams.render_html(result)
+        self.assertEqual(diagrams.sequence_diagrams.fidelity_problems(result, content), [])
+        self.assertEqual(content.count('<animateMotion id="m'), 8)
+        self.assertIn('begin="0.4s;m7.end+1.2s"', content)
+        self.assertIn("prefers-reduced-motion", content)
+
+    def test_fidelity_reports_a_missing_message(self) -> None:
+        result = graph(SEQUENCE)
+        content = diagrams.sequence_diagrams.render_html(result).replace(">completion<", "><", 1)
+        problems = diagrams.sequence_diagrams.fidelity_problems(result, content)
+        self.assertEqual(problems, ["label missing from the diagram: 'completion'"])
+
+    def test_invalid_sequences_are_rejected(self) -> None:
+        cases = {
+            "  else orphan\n": "outside a matching block",
+            "  loop forever\n    A->>B: x\n": "block is not closed",
+            "  A->>B hi\n": "unsupported sequence syntax",
+            "  Note right of A, B: x\n": "only 'Note over'",
+            "  %% @type robot: A\n  A->>B: x\n": "@type needs",
+            "  participant A\n  participant A\n  A->>B: x\n": "declared twice",
+        }
+        for body, message in cases.items():
+            with self.subTest(body=body), self.assertRaisesRegex(diagrams.DiagramError, message):
+                graph("---\ntitle: t\n---\nsequenceDiagram\n" + body)
+        with self.assertRaisesRegex(diagrams.DiagramError, "at least one message"):
+            graph("---\ntitle: t\n---\nsequenceDiagram\n  participant A\n")
+        with self.assertRaisesRegex(diagrams.DiagramError, "front-matter title"):
+            graph("sequenceDiagram\n  A->>B: x\n")
 
 
 class FidelityTests(unittest.TestCase):

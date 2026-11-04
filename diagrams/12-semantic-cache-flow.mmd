@@ -1,28 +1,34 @@
 ---
-title: Development semantic cache
+title: Semantic cache
 ---
-flowchart TD
+sequenceDiagram
   %% Source for 12-semantic-cache-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @subtitle How litellm-dev decides between replaying a cached answer from Qdrant and calling the model
+  %% @type external: BGE GEN
+  %% @type database: Q
+  actor C as Client
+  participant LL as litellm-dev<br/>semantic cache default off
+  participant BGE as bge-m3<br/>remote GPU host
+  participant Q as Qdrant<br/>tmpfs, end-user scope
+  participant GEN as Generation model
 
-  S(["DEV CHAT COMPLETION"])
-  OPT{"cache.use-cache is true?"}
-  EMB["Embed messages with remote bge-m3"]
-  Q["Search Qdrant in the end-user scope"]
-  HIT{"Similarity at least 0.92?"}
-  REP["Replay cached response with similarity header"]
-  GEN["Call the generation model"]
-  STO["Store response in Qdrant (tmpfs)"]
-  E(["RESPONSE"])
-
-  S --> OPT
-  OPT -->|"yes"| EMB
-  OPT -->|"no"| GEN
-  EMB --> Q
-  Q --> HIT
-  HIT -->|"yes"| REP
-  HIT -->|"no"| GEN
-  GEN --> STO
-  REP --> E
-  STO --> E
+  C->>LL: chat completion
+  alt cache.use-cache is true
+    LL->>BGE: embed the messages
+    BGE-->>LL: embedding
+    LL->>Q: search in the end-user scope
+    Q-->>LL: closest cached response
+    alt similarity at least 0.92
+      LL-->>C: replay cached response with similarity header
+    else below 0.92
+      LL->>GEN: call the generation model
+      GEN-->>LL: completion
+      LL-)Q: store the response (tmpfs)
+      LL-->>C: response
+    end
+  else cache not requested
+    LL->>GEN: call the generation model
+    GEN-->>LL: completion
+    LL-->>C: response, nothing cached
+  end

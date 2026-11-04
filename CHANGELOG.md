@@ -27,6 +27,13 @@ All notable changes to this stack are recorded here. The format follows
   licence notice, are no longer built into the site.
 - The OCI `licenses` label of the stack's own images is now `MIT` instead of
   `LicenseRef-Proprietary`.
+- The eleven flow diagrams (`diagrams/10`–`20`) are now animated Mermaid
+  sequence diagrams that show who sends what to whom, rendered in the
+  dashmotion style by the new `scripts/sequence_diagrams.py`. The semantic
+  cache sequence no longer shows responses being stored when a request did
+  not opt in, matching the cache's `default_off` mode.
+- `gpu-host/deploy.py` runs as a uv script (`./deploy.py` or
+  `uv run deploy.py`).
 
 ### Fixed
 

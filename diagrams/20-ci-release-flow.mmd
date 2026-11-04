@@ -1,52 +1,50 @@
 ---
-title: Continuous integration and release
+title: CI and release
 ---
-flowchart TD
+sequenceDiagram
   %% Source for 20-ci-release-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @subtitle Identical GitHub Actions and GitLab CI pipelines, the documentation site, and where a human still deploys
+  %% @type cloud: CI
+  %% @type security: REL
+  %% @type external: PAGES
+  actor DEV as Contributor
+  participant CI as GitHub Actions or GitLab CI
+  participant REL as Release job
+  participant PAGES as GitHub or GitLab Pages
+  actor OP as Operator
 
-  S(["PR, MR, PUSH, TAG, OR SCHEDULE"])
-  VAL["scripts/ci/validate.sh"]
-  LINT["ShellCheck, Hadolint, and Actionlint"]
-  SEC["Gitleaks history scan"]
-  IMG["Image build and KEV gate"]
-  DEP["Trivy dependency scan"]
-  DC["Dev container build"]
-  DOCS["Versioned documentation site build"]
-  PASS{"All checks pass?"}
-  RED(["CHANGE BLOCKED"])
-  TAG{"Semantic-version tag?"}
-  MERGE(["READY TO MERGE"])
-  APR["Release approval"]
-  PUB["Publish source bundle and SHA256SUMS"]
-  E(["OPERATOR DEPLOYS ON-PREM"])
-  PG{"Default branch or release tag, Pages enabled?"}
-  PRIV{"Pages visibility check passed?"}
-  REFUSE(["PUBLISHING REFUSED"])
-  SITE(["DOCS SITE UPDATED"])
-
-  S --> VAL
-  S --> LINT
-  S --> SEC
-  S --> IMG
-  S --> DEP
-  S --> DC
-  S --> DOCS
-  VAL --> PASS
-  LINT --> PASS
-  SEC --> PASS
-  IMG --> PASS
-  DEP --> PASS
-  DC --> PASS
-  DOCS --> PASS
-  DOCS --> PG
-  PG -->|"yes"| PRIV
-  PRIV -->|"yes"| SITE
-  PRIV -->|"no"| REFUSE
-  PASS -->|"no"| RED
-  PASS -->|"yes"| TAG
-  TAG -->|"no"| MERGE
-  TAG -->|"yes"| APR
-  APR --> PUB
-  PUB --> E
+  DEV->>CI: PR, MR, push, tag, or schedule
+  par checks
+    CI->>CI: scripts/ci/validate.sh
+  and
+    CI->>CI: ShellCheck, Hadolint, and Actionlint
+  and
+    CI->>CI: Gitleaks history scan
+  and
+    CI->>CI: image build and KEV gate
+  and
+    CI->>CI: Trivy dependency scan
+  and
+    CI->>CI: dev container build
+  and
+    CI->>CI: versioned documentation site build
+  end
+  alt a check fails
+    CI--xDEV: change blocked
+  else all checks pass
+    alt semantic-version tag
+      CI->>REL: release approval
+      REL->>REL: publish source bundle and SHA256SUMS
+      REL-)OP: operator deploys on-prem
+    else no tag
+      CI-->>DEV: ready to merge
+    end
+  end
+  opt default branch or release tag, Pages enabled
+    alt Pages visibility check passed
+      CI->>PAGES: docs site updated
+    else check failed
+      CI--xDEV: publishing refused
+    end
+  end

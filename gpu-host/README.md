@@ -65,7 +65,9 @@ install -m 600 .env.example .env
 ./deploy.py
 ```
 
-`deploy.py` needs Python 3.9+, Docker, `curl`, `openssl`, and
+`deploy.py` is a [uv script](https://docs.astral.sh/uv/guides/scripts/): run
+it as `./deploy.py` or `uv run deploy.py`, and uv provides Python 3.9 or newer.
+It also needs Docker, `curl`, `openssl`, and
 [`mkcert`](https://github.com/FiloSottile/mkcert). It:
 
 1. validates `.env` (private file permissions, URL-safe keys of at least 32

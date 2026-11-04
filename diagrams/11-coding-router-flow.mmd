@@ -1,28 +1,28 @@
 ---
 title: coding-router tier selection
 ---
-flowchart TD
+sequenceDiagram
   %% Source for 11-coding-router-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @subtitle Only the classification request leaves for the remote D3-mini host; the completion goes to the selected tier
+  %% @type external: D3 OAI
+  actor C as Client
+  participant AR as LiteLLM Auto Router<br/>model = coding-router
+  participant D3 as D3-mini<br/>remote GPU host
+  participant OAI as OpenAI<br/>completion models
 
-  S(["MODEL = CODING-ROUTER"])
-  CL["Send classification request to D3-mini"]
-  OK{"D3 answered within 15 s?"}
-  FB["Fail safe to gpt-4o"]
-  TIER{"Tier is SIMPLE or MEDIUM?"}
-  MINI["Route to gpt-4o-mini"]
-  FULL["Route to gpt-4o (COMPLEX / REASONING)"]
-  CALL["Call OpenAI with the original request"]
-  E(["RESPONSE"])
-
-  S --> CL
-  CL --> OK
-  OK -->|"no"| FB
-  OK -->|"yes"| TIER
-  TIER -->|"yes"| MINI
-  TIER -->|"no"| FULL
-  FB --> CALL
-  MINI --> CALL
-  FULL --> CALL
-  CALL --> E
+  C->>AR: chat completion for coding-router
+  AR->>D3: classification request only
+  alt D3 answers within 15 s
+    D3-->>AR: tier SIMPLE, MEDIUM, COMPLEX, or REASONING
+    alt SIMPLE or MEDIUM
+      AR->>OAI: original request to gpt-4o-mini
+    else COMPLEX or REASONING
+      AR->>OAI: original request to gpt-4o
+    end
+  else timeout or error
+    D3--xAR: no answer within 15 s
+    AR->>OAI: fail safe: original request to gpt-4o
+  end
+  OAI-->>AR: completion
+  AR-->>C: response

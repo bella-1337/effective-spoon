@@ -29,8 +29,12 @@ In the architecture diagrams:
   is a denied or static relationship.
 - Moving dots follow an end-to-end request path.
 
-The flow diagrams read from top to bottom. Pills mark start and end states, and
-dashed boxes are decisions.
+The flows are sequence diagrams. Each participant has a lifeline, and time
+runs from top to bottom. Messages are coloured by kind: cyan requests, green
+dotted responses or results, amber dotted asynchronous messages, and rose
+dashed rejections or failures ending in a cross. Amber notes add context.
+Labelled frames mark alternatives (`alt`/`else`), optional steps (`opt`),
+loops, and parallel work (`par`/`and`). A dot replays the messages in order.
 
 ## Architecture
 
@@ -49,7 +53,7 @@ dashed boxes are decisions.
 | [Development profile](22-dev-profile.html) | [22-dev-profile.mmd](22-dev-profile.mmd) | Everything the `dev` profile adds, including the local model services |
 | [Coding request path](23-coding-request-path.html) | [23-coding-request-path.mmd](23-coding-request-path.mmd) | The components a `coding-router` request passes through |
 
-## Flows
+## Flows (sequence diagrams)
 
 | Diagram | Source | Shows |
 | --- | --- | --- |
@@ -97,8 +101,13 @@ The unit tests in `scripts/tests/test_render_diagrams.py` parse every committed
 
 ### Mermaid conventions
 
-Each source is an ordinary Mermaid `flowchart TD` with a front-matter `title`.
-It renders in any Mermaid viewer. The renderer supports this subset:
+Each source is an ordinary Mermaid diagram with a front-matter `title`, so it
+renders in any Mermaid viewer: a `flowchart TD` for the architecture diagrams
+and a `sequenceDiagram` for the flows. dashmotion has no sequence mode, so
+`scripts/sequence_diagrams.py` lays the sequences out in the same visual style;
+dashmotion's structural checker still checks the result.
+
+The renderer supports this flowchart subset:
 
 | Element | Syntax |
 | --- | --- |
@@ -131,3 +140,28 @@ Mermaid ignores:
 Each tier should belong to one top-level boundary, and a nested boundary should
 not share a tier with components outside it. Otherwise the boundary boxes
 overlap.
+
+#### Sequence diagrams
+
+The renderer supports this `sequenceDiagram` subset:
+
+| Element | Syntax |
+| --- | --- |
+| Participant | `participant ID as Label<br/>second line`; the second line becomes the sublabel. Participants are drawn in declaration order |
+| Person or client | `actor ID as Label`, drawn as a participant of type `frontend` |
+| Request | `A->>B: text` or `A->B: text` |
+| Response or result | `A-->>B: text` or `A-->B: text` |
+| Asynchronous message | `A-)B: text` or `A--)B: text` |
+| Rejection or failure | `A-xB: text` or `A--xB: text` |
+| Step inside one participant | `A->>A: text` |
+| Note | `Note over A: text`, `Note over A,B: text`, `Note left of A: text`, `Note right of A: text` |
+| Frames | `alt` … `else` … `end`, `opt`, `loop`, `par` … `and` … `end`, `critical` … `option` … `end`, `break` |
+| Numbered messages | `autonumber` |
+
+Activation markers (`+`/`-` and `activate`/`deactivate`) are accepted and not
+drawn. Keep message labels short; they wrap at 24 characters. The directives
+`%% @subtitle`, `%% @footer`, and this one apply:
+
+| Directive | Meaning |
+| --- | --- |
+| `%% @type frontend\|backend\|database\|cloud\|security\|bus\|external: ID ID` | Colour of the listed participants; the default is `backend`, and `frontend` for an `actor` |

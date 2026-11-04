@@ -1,34 +1,37 @@
 ---
-title: Image-security scan run
+title: Image-security scan
 ---
-flowchart TD
+sequenceDiagram
   %% Source for 16-image-scan-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @subtitle One scheduled or manual run of the fail-closed image scanner
+  %% @type security: MON
+  %% @type cloud: PX
+  %% @type external: FEED
+  %% @type database: OUT
+  actor TRG as Schedule or operator
+  participant MON as image-security-monitor<br/>Trivy scanner
+  participant PX as Docker socket proxy<br/>read-only
+  participant FEED as Vulnerability feeds<br/>Trivy DB · CISA KEV
+  participant OUT as Private evidence<br/>reports · metrics · SBOMs
 
-  S(["SCHEDULE OR MANUAL RUN"])
-  LOCK["Acquire the scanner lock"]
-  INV["Inventory running digests via the proxy"]
-  FEED["Download Trivy DB and validate CISA KEV"]
-  FOK{"Feeds fresh and valid?"}
-  FAIL(["OPERATIONAL FAILURE — NONZERO"])
-  SCAN["Scan each platform digest"]
-  EXC["Apply time-limited exceptions"]
-  OUT["Write private reports and textfile metrics"]
-  ENF{"--enforce and unexcepted KEV or fixable Critical?"}
-  GATE(["RELEASE GATE FAILS"])
-  SBOM["Generate SBOMs and licence evidence"]
-  E(["RUN COMPLETE"])
-
-  S --> LOCK
-  LOCK --> INV
-  INV --> FEED
-  FEED --> FOK
-  FOK -->|"no"| FAIL
-  FOK -->|"yes"| SCAN
-  SCAN --> EXC
-  EXC --> OUT
-  OUT --> ENF
-  ENF -->|"yes"| GATE
-  ENF -->|"no"| SBOM
-  SBOM --> E
+  TRG->>MON: start a scan run
+  MON->>MON: acquire the scanner lock
+  MON->>PX: inventory running digests
+  PX-->>MON: platform digests
+  MON->>FEED: download Trivy DB and CISA KEV
+  FEED-->>MON: feeds
+  alt feeds stale or invalid
+    MON--xTRG: operational failure, nonzero exit
+  else feeds fresh and valid
+    loop each platform digest
+      MON->>MON: scan and apply time-limited exceptions
+    end
+    MON->>OUT: write private reports and textfile metrics
+    alt --enforce and an unexcepted KEV or fixable Critical
+      MON--xTRG: release gate fails
+    else no blocking finding
+      MON->>OUT: generate SBOMs and licence evidence
+      MON-->>TRG: run complete
+    end
+  end

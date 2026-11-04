@@ -1,26 +1,34 @@
 ---
-title: Alert evaluation and notification
+title: Alerting
 ---
-flowchart TD
+sequenceDiagram
   %% Source for 15-alerting-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @subtitle Grafana rule files stay the single source; the bridge and OpenSearch monitors turn them into notifications
+  %% @type database: G OS P
+  %% @type external: CH
+  participant G as grafana/alerting<br/>rule files
+  participant SET as opensearch-setup
+  participant BR as opensearch-bridge
+  participant P as Prometheus
+  participant OS as OpenSearch<br/>monitors
+  participant CH as Alert channel
+  actor OP as Operator
 
-  S(["RULES IN GRAFANA/ALERTING"])
-  SET["opensearch-setup creates one monitor per rule"]
-  EV["Bridge evaluates each PromQL rule every minute"]
-  ST["Write litellm-alert-state-*"]
-  FOR{"Condition held for the full 'for' duration?"}
-  OK(["NO ALERT"])
-  CHN{"Alert channel configured?"}
-  UI(["VISIBLE IN THE UI ONLY"])
-  E(["OPERATOR NOTIFIED"])
-
-  S --> SET
-  SET --> EV
-  EV --> ST
-  ST --> FOR
-  FOR -->|"no"| OK
-  FOR -->|"yes"| CHN
-  CHN -->|"no"| UI
-  CHN -->|"yes"| E
+  SET->>G: read every rule
+  SET->>OS: create one monitor per rule
+  loop every minute
+    BR->>P: evaluate each PromQL rule
+    P-->>BR: result
+    BR->>OS: write litellm-alert-state-*
+    alt condition held for the full 'for' duration
+      alt alert channel configured
+        OS-)CH: notification, one-hour throttle
+        CH-)OP: operator notified
+      else no channel
+        Note over OS: visible in the UI only
+      end
+    else condition not held
+      Note over OS: no alert
+    end
+  end
