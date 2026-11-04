@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.9"
+# dependencies = []
+# ///
 """Deploy D3-mini and BGE-M3 on the remote GPU host.
 
 Reads gpu-host/.env, renders the secrets the containers need under
@@ -10,6 +14,7 @@ requests over verified TLS and refuse unauthenticated ones.
 Usage:
   ./deploy.py                 validate, render, start, and probe
   ./deploy.py --render-only   validate and render without starting anything
+  uv run deploy.py [...]      the same, without the executable bit
 """
 
 from __future__ import annotations
