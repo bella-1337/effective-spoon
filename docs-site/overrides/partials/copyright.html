@@ -1,11 +1,18 @@
 {#-
-  Footer: copyright notice plus the version and revision this site was built from.
+  Footer: the warranty disclaimer (copyright in mkdocs.yml), the licence notice,
+  and the version and revision this site was built from.
 -#}
 {%- set build = config.extra.build -%}
 <div class="md-copyright">
   {% if config.copyright %}
     <div class="md-copyright__highlight">{{ config.copyright }}</div>
   {% endif %}
+  <div class="docs-licence-info">
+    The stack's own container images are released under the MIT License.
+    Every third-party tool, image, model, and package it uses keeps its own
+    licence; see the
+    <a href="{{ 'docs/third-party-licences/' | url }}">third-party licence register</a>.
+  </div>
   <div class="docs-build-info">
     Version <strong>{{ build.version }}</strong>
     {%- if build.source_ref %} · <code>{{ build.source_ref }}</code>{% endif %}

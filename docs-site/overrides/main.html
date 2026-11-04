@@ -6,8 +6,7 @@
 
 {% block extrahead %}
   {{ super() }}
-  {#- Internal documentation: keep it out of search engines and caches even if
-      the Pages site is ever exposed by mistake. -#}
+  {#- Keep the site out of search engines and caches. -#}
   <meta name="robots" content="noindex, nofollow, noarchive">
   <meta name="referrer" content="strict-origin-when-cross-origin">
 {% endblock %}
@@ -42,7 +41,7 @@
   <section class="docs-hero" aria-label="Introduction">
     <div class="docs-hero__inner md-grid md-typeset">
       <div class="docs-hero__text">
-        <span class="docs-hero__eyebrow">Internal platform documentation</span>
+        <span class="docs-hero__eyebrow">Self-hosted LiteLLM gateway stack</span>
         <p class="docs-hero__title">Every model behind one guarded, observable gateway.</p>
         <p class="docs-hero__lead">
           Production and development LiteLLM proxies on Docker Compose, with PII

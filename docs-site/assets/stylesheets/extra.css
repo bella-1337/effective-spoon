@@ -119,6 +119,7 @@ body {
     var(--md-warning-bg-color);
 }
 
+.docs-licence-info,
 .docs-build-info {
   margin-top: 0.2rem;
   opacity: 0.8;

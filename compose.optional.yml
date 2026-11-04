@@ -6,7 +6,7 @@
 # Docker's own image creation time remains authoritative.
 x-own-image-labels: &own-image-labels
   org.opencontainers.image.vendor: ${STACK_DOMAIN:?Set STACK_DOMAIN in .env}
-  org.opencontainers.image.licenses: LicenseRef-Proprietary
+  org.opencontainers.image.licenses: MIT
   org.opencontainers.image.revision: ${STACK_REPOSITORY_REVISION:-unknown}
   org.opencontainers.image.source: ${STACK_REPOSITORY_URL:-}
   org.opencontainers.image.url: ${STACK_REPOSITORY_URL:-}

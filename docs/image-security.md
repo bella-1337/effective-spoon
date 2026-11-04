@@ -321,7 +321,7 @@ set in the Compose `build.labels` of `litellm-opensearch-tools`,
 | `org.opencontainers.image.title`, `.description` | Image name and purpose |
 | `org.opencontainers.image.version` | The Compose image tag |
 | `org.opencontainers.image.revision` | `STACK_REPOSITORY_REVISION`, or the upstream commit for `litellm-pgvector` |
-| `org.opencontainers.image.licenses` | `LicenseRef-Proprietary` for repository code; `MIT` for `litellm-pgvector` |
+| `org.opencontainers.image.licenses` | `MIT` for every image, including the upstream `litellm-pgvector` code |
 | `org.opencontainers.image.base.name` | The final `FROM` image of the Dockerfile, without digest |
 | `org.opencontainers.image.source`, `.url` | `STACK_REPOSITORY_URL` (empty when unset), or the upstream repository for `litellm-pgvector` |
 | `org.opencontainers.image.created` | Always empty; see below |

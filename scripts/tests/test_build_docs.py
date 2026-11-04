@@ -75,21 +75,29 @@ class VersionPlanTests(unittest.TestCase):
             (repo / "README.md").write_text("# Old\n", encoding="utf-8")
             git(repo, "add", "-A")
             git(repo, "commit", "--quiet", "-m", "Before the site")
-            git(repo, "tag", "v0.1.0")
+            git(repo, "tag", "v0.2.0")
             (repo / "docs-site").mkdir()
             (repo / "mkdocs.yml").write_text("site_name: Test\n", encoding="utf-8")
             (repo / "docs-site" / "requirements.txt").write_text("\n", encoding="utf-8")
             git(repo, "add", "-A")
             git(repo, "commit", "--quiet", "-m", "Add the site")
-            git(repo, "tag", "-a", "v0.2.0", "-m", "v0.2.0")
+            git(repo, "tag", "-a", "v0.3.0", "-m", "v0.3.0")
             with mock.patch.object(build_docs, "ROOT", repo), mock.patch.object(
                 maintenance_common, "ROOT", repo
             ), mock.patch.object(build_docs, "capture", lambda args: git(repo, *args[1:]) + "\n"):
                 versions = build_docs.plan_versions("refs/heads/master", "master")
         self.assertEqual([(v.name, v.kind, v.source_ref) for v in versions], [
             ("dev", "dev", "master"),
-            ("v0.2.0", "release", "v0.2.0"),
+            ("v0.3.0", "release", "v0.3.0"),
         ])
+
+    def test_plan_skips_releases_without_the_warranty_and_licence_notice(self) -> None:
+        tags = ["v0.1.1", "v0.1.0", "v0.0.9"]
+        with mock.patch.object(build_docs, "release_tags", return_value=tags), \
+                mock.patch.object(build_docs, "git", return_value="0" * 40), \
+                mock.patch.object(build_docs, "has_docs", return_value=True):
+            versions = build_docs.plan_versions("refs/heads/master", "master")
+        self.assertEqual([v.name for v in versions], ["dev", "v0.1.1"])
 
 
 class OutputSafetyTests(unittest.TestCase):

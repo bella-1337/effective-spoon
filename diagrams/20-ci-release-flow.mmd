@@ -4,7 +4,7 @@ title: Continuous integration and release
 flowchart TD
   %% Source for 20-ci-release-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
-  %% @subtitle Identical GitHub Actions and GitLab CI pipelines, the private documentation site, and where a human still deploys
+  %% @subtitle Identical GitHub Actions and GitLab CI pipelines, the documentation site, and where a human still deploys
 
   S(["PR, MR, PUSH, TAG, OR SCHEDULE"])
   VAL["scripts/ci/validate.sh"]
@@ -22,9 +22,9 @@ flowchart TD
   PUB["Publish source bundle and SHA256SUMS"]
   E(["OPERATOR DEPLOYS ON-PREM"])
   PG{"Default branch or release tag, Pages enabled?"}
-  PRIV{"Pages restricted to members?"}
+  PRIV{"Pages visibility check passed?"}
   REFUSE(["PUBLISHING REFUSED"])
-  SITE(["PRIVATE DOCS SITE UPDATED"])
+  SITE(["DOCS SITE UPDATED"])
 
   S --> VAL
   S --> LINT

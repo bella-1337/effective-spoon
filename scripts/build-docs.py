@@ -46,9 +46,10 @@ Commands:
       Build the working tree once in strict mode into site/.
   site [--output DIR] [--dev-ref REF] [--site-url URL]
       Build the versioned site (default: public/): "dev" from the default
-      branch, one version per release tag vMAJOR.MINOR.PATCH that contains
-      mkdocs.yml, a "latest" copy of the newest release, versions.json for the
-      version selector, and a root page that redirects to latest (or dev).
+      branch, one version per release tag vMAJOR.MINOR.PATCH newer than v0.1.0
+      that contains mkdocs.yml, a "latest" copy of the newest release,
+      versions.json for the version selector, and a root page that redirects
+      to latest (or dev).
   versions [--dev-ref REF]
       Print the versions the site command would build, as JSON.
   verify-private URL
@@ -76,6 +77,9 @@ REPO_KINDS = ("github", "gitlab")
 LATEST = "latest"
 DEV = "dev"
 HTTP_TIMEOUT_SECONDS = 20
+# Pages of releases up to and including this one carry no warranty disclaimer
+# or licence notice, so those releases are no longer published.
+LAST_UNPUBLISHED_RELEASE = (0, 1, 0)
 
 
 @dataclass(frozen=True)
@@ -159,10 +163,19 @@ def has_docs(ref: str) -> bool:
     )
 
 
+def release_number(tag: str) -> tuple[int, int, int]:
+    match = RELEASE_TAG.match(tag)
+    if match is None:
+        fail(f"not a release tag: {tag}")
+        raise AssertionError("unreachable")
+    major, minor, patch = (int(part) for part in match.groups())
+    return major, minor, patch
+
+
 def release_tags() -> list[str]:
     """Release tags, newest first."""
     names = [name for name in git("tag", "--list", "v*").splitlines() if RELEASE_TAG.match(name)]
-    return sorted(names, key=lambda name: tuple(int(n) for n in RELEASE_TAG.match(name).groups()), reverse=True)
+    return sorted(names, key=release_number, reverse=True)
 
 
 def plan_versions(dev_ref: str, default_branch: str) -> list[Version]:
@@ -176,6 +189,9 @@ def plan_versions(dev_ref: str, default_branch: str) -> list[Version]:
         )
     ]
     for tag in release_tags():
+        if release_number(tag) <= LAST_UNPUBLISHED_RELEASE:
+            LOG.info(f"Skipping {tag}: it predates the warranty and licence notice.")
+            continue
         if not has_docs(f"refs/tags/{tag}"):
             LOG.info(f"Skipping {tag}: it predates the documentation site.")
             continue

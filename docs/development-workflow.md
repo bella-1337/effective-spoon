@@ -52,7 +52,7 @@ workflow of the same name:
 | `supply-chain.yml` | `supply-chain.yml` | Image build and vulnerability gate, dependency scan |
 | `devcontainer.yml` | `devcontainer.yml` | Development container build |
 | `release.yml` | `release.yml` | Release publication |
-| `docs.yml` | `docs.yml` | Documentation site build and private Pages publication |
+| `docs.yml` | `docs.yml` | Documentation site build and Pages publication |
 
 The root `.gitlab-ci.yml` only includes these files and defines the pipeline
 rules, stages, and defaults. `.gitlab/ci/images.yml` holds every digest-pinned

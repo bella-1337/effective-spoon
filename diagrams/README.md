@@ -63,7 +63,7 @@ dashed boxes are decisions.
 | [Upgrade and rollback](17-upgrade-rollback-flow.html) | [17-upgrade-rollback-flow.mmd](17-upgrade-rollback-flow.mmd) | Compatibility check, rollback point, regression suite, and both rollback modes |
 | [Backup and restore](18-backup-restore-flow.html) | [18-backup-restore-flow.mmd](18-backup-restore-flow.mmd) | Validated backups and the staging-database restore |
 | [First deployment](19-first-deployment-flow.html) | [19-first-deployment-flow.mmd](19-first-deployment-flow.mmd) | The getting-started steps, including the TLS and Grafana choices |
-| [CI and release](20-ci-release-flow.html) | [20-ci-release-flow.mmd](20-ci-release-flow.mmd) | GitHub Actions and GitLab CI checks, tagged releases, publishing of the private documentation site, and the manual on-prem deployment |
+| [CI and release](20-ci-release-flow.html) | [20-ci-release-flow.mmd](20-ci-release-flow.mmd) | GitHub Actions and GitLab CI checks, tagged releases, publishing of the documentation site, and the manual on-prem deployment |
 
 ## Updating diagrams
 

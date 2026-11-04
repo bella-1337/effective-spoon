@@ -8,11 +8,10 @@ of Material for MkDocs by the same team. The site is built from the same
 Markdown files you read on GitHub or GitLab, where they already live; there is
 no second copy to keep in step and no build plugin.
 
-The repository is private, and so is its documentation: it describes internal
-hostnames, network boundaries, security findings, and residual risks. Publish
-it only to a Pages site that is restricted to repository members. Both
-pipelines refuse to publish a site that they can see is public; see
-[Keep the site private](#keep-the-site-private).
+Like the repository, the site is published as is, without warranty of any kind.
+Its footer says so on every page and states the licences: the stack's own
+container images are MIT-licensed, and every third-party tool keeps its own
+licence, as the [licence register](third-party-licences.md) records.
 
 ## Preview and build locally
 
@@ -54,7 +53,9 @@ The version selector next to the site title switches between:
 renders as it did when it was tagged. It then writes `versions.json`, which
 the theme's version selector reads, the root redirect, a `404.html`, and a
 `robots.txt` that disallows crawling. Tags created before the documentation
-site existed are skipped.
+site existed are skipped, and so is `v0.1.0` and every earlier release, whose
+pages carry no warranty disclaimer or licence notice. Until a newer release
+exists, the site root redirects to `dev`.
 
 The selector keeps you on the same page when it exists in the other version.
 Each page's edit button opens the file on the default branch for `dev`, or the
@@ -66,7 +67,7 @@ file at the release tag for a release.
 | --- | --- |
 | `mkdocs.yml` | Site configuration, theme, navigation, and the rules for which files are published |
 | `docs-site/overrides/main.html` | The home page banner, the dev, local, and older-release banners, and the `noindex` header |
-| `docs-site/overrides/partials/` | The build footer, a repository link without the GitHub API call, a fix for the older-release banner script, and page content without the README's status badges, which would load third-party images |
+| `docs-site/overrides/partials/` | The footer with the warranty disclaimer, licence notice, and build information, a repository link without the GitHub API call, a fix for the older-release banner script, and page content without the README's status badges, which would load third-party images |
 | `docs-site/assets/` | Logo, favicon, banner illustration, and stylesheet |
 | `docs-site/requirements.in`, `requirements.txt` | The toolchain and its hash-locked pins |
 | `scripts/build-docs.py` | Installs the toolchain, previews, builds, and assembles the versioned site |
@@ -84,7 +85,7 @@ files are not published, so a guide links to them only as code (for example
 
 The site loads no fonts, scripts, or API data from third parties and shows no
 repository statistics, so it works on an isolated network and does not reveal
-page views outside the organisation.
+page views to third parties.
 
 ### Add or move a page
 
@@ -124,20 +125,18 @@ twice.
 
 ### GitHub Pages
 
-1. Confirm that your plan can restrict Pages visibility. Private Pages
-   visibility requires GitHub Enterprise Cloud. On GitHub Free, Pro, or Team,
-   Pages of a private repository are **public on the Internet**, and the
-   workflow refuses to publish them.
-2. Under **Settings > Pages**, set **Source** to **GitHub Actions** and
-   **Visibility** to **Private**.
-3. Under **Settings > Environments > github-pages > Deployment branches and
+1. Under **Settings > Pages**, set **Source** to **GitHub Actions**.
+2. Under **Settings > Environments > github-pages > Deployment branches and
    tags**, keep the default branch. No tag rule is needed: release tags
    publish through a default-branch run.
-4. Push to the default branch, or run the **Documentation** workflow on it.
+3. Push to the default branch, or run the **Documentation** workflow on it.
 
 Before building, the workflow reads the Pages settings with the job token. It
-stops when Pages is not enabled, when the source is not GitHub Actions, or when
-the repository is private and GitHub does not report the site as private.
+stops when Pages is not enabled or when the source is not GitHub Actions. A
+public repository publishes a public site. A private repository publishes only
+when GitHub reports its site as private, which requires GitHub Enterprise
+Cloud, or when `DOCS_ALLOW_PUBLIC_PAGES` is `true`; on GitHub Free, Pro, or
+Team, Pages of a private repository are public on the Internet.
 
 ### GitLab Pages
 
@@ -155,15 +154,12 @@ open the site in a private browser window and confirm that GitLab asks you to
 sign in. When the runner cannot reach the Pages host, the job fails rather than
 publish unchecked.
 
-### Keep the site private
+### Visibility checks
 
-- Do not set `DOCS_ALLOW_PUBLIC_PAGES=true` for this repository. It exists only
-  for a deliberately public copy, and it turns both visibility checks into
-  warnings.
+- `DOCS_ALLOW_PUBLIC_PAGES=true` turns both visibility checks into warnings,
+  so a private repository or project can publish a public site on purpose.
 - Every page carries `noindex, nofollow, noarchive`, and the root `robots.txt`
-  disallows crawling, as a second line of defence if a site is ever exposed by
-  mistake.
-- Share links to the site only with people who can read the repository.
+  disallows crawling, so search engines do not index the site.
 
 ## Maintenance
 
