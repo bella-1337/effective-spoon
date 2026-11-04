@@ -131,9 +131,7 @@ see [Documentation site](docs/documentation-site.md).
 ## Security notes
 
 - Report vulnerabilities privately as described in the
-  [security policy](https://github.com/bella-1337/effective-spoon/blob/master/.github/SECURITY.md);
-  see the [contributing guide](https://github.com/bella-1337/effective-spoon/blob/master/.github/CONTRIBUTING.md)
-  for everything else.
+  [security policy](https://github.com/bella-1337/effective-spoon/blob/master/.github/SECURITY.md).
 - Keep `.env` and everything under `traefik/certs/` private.
 - Rotate any credential that is accidentally exposed.
 - The Docker socket mounted by Traefik is security-sensitive; restrict host
@@ -141,6 +139,12 @@ see [Documentation site](docs/documentation-site.md).
 - Do not expose the `dev` profile or its logs to untrusted users.
 - Keep image digests immutable in deployed revisions and review updates rather
   than returning to floating tags.
+
+## Contributing
+
+Contributions are not accepted at the moment, and pull requests will not be
+merged. Security vulnerabilities are the exception: report them privately as
+the security policy describes.
 
 ## Licence and warranty
 
