@@ -422,7 +422,7 @@ class MaintenanceContractTests(unittest.TestCase):
                 "description": "Tools",
                 "version": "0.1.0",
                 "revision": "abc123",
-                "licenses": "LicenseRef-Proprietary",
+                "licenses": "MIT",
                 "base.name": "base:1",
                 "created": "",
                 "source": "",

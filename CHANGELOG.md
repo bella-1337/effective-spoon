@@ -15,6 +15,18 @@ All notable changes to this stack are recorded here. The format follows
   drops them so it still makes no third-party requests.
 - Security policy, contributing guide, issue and pull request templates,
   release-note categories, and `.editorconfig`.
+- A warranty disclaimer and licence notice in the README and in the
+  documentation site footer: the stack is published as is, without warranty;
+  its own container images are MIT-licensed; every third-party tool keeps its
+  own licence.
+
+### Changed
+
+- The documentation site's home page banner and footer are rewritten for a
+  published stack. Releases up to `v0.1.0`, whose pages lack the warranty and
+  licence notice, are no longer built into the site.
+- The OCI `licenses` label of the stack's own images is now `MIT` instead of
+  `LicenseRef-Proprietary`.
 
 ### Fixed
 
@@ -93,8 +105,8 @@ Initial release of the self-hosted LiteLLM gateway stack.
   vulnerability gates, and a development container build.
 - Tag-triggered release publication of the source bundle and `SHA256SUMS`.
 - Animated architecture diagrams generated from Mermaid sources, and a
-  private, versioned documentation site built with Zensical and published to
-  GitHub Pages or GitLab Pages.
+  versioned documentation site built with Zensical and published to GitHub
+  Pages or GitLab Pages.
 
 [Unreleased]: https://github.com/bella-1337/effective-spoon/compare/v0.1.0...HEAD
 [v0.1.0]: https://github.com/bella-1337/effective-spoon/releases/tag/v0.1.0

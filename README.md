@@ -89,8 +89,8 @@ To stop, restart, or remove the stack, see
 
 ## Documentation
 
-The guides below are also published as a private, versioned documentation site
-on GitHub Pages or GitLab Pages, with a version selector for each release and
+The guides below are also published as a versioned documentation site on
+GitHub Pages or GitLab Pages, with a version selector for each release and
 the unreleased `dev` branch. Preview it with `./scripts/build-docs.py serve`;
 see [Documentation site](docs/documentation-site.md).
 
@@ -101,7 +101,7 @@ see [Documentation site](docs/documentation-site.md).
 | [Getting started](docs/getting-started.md) | Environment files, `STACK_DOMAIN` hostnames, TLS certificates, host resolution, Prometheus authentication, validation, starting and verifying profiles, stopping and removing the stack |
 | [Hardware sizing](docs/hardware-sizing.md) | Prod, dev, and remote GPU host specifications, memory, CPU, and disk budgets, prod resource limits |
 | [Development and delivery workflow](docs/development-workflow.md) | Development container, local, GitHub Actions, and GitLab CI checks, release delivery |
-| [Documentation site](docs/documentation-site.md) | Local preview, versions and the dev switch, private GitHub Pages and GitLab Pages publishing |
+| [Documentation site](docs/documentation-site.md) | Local preview, versions and the dev switch, GitHub Pages and GitLab Pages publishing |
 | [Corporate branding and virtual-key management](docs/branding-and-key-management.md) | Admin UI branding, Enterprise virtual-key rotation, key email notifications |
 | [Observability](docs/observability.md) | OpenSearch users, roles, tenants, alerting and recovery; optional Langfuse and Grafana profiles; demonstration data and telemetry stores |
 | [Search, document extraction, and caching](docs/search-extraction-and-caching.md) | SearXNG search and engine terms of use, Xberg MCP document extraction, development semantic response cache |
@@ -141,3 +141,21 @@ see [Documentation site](docs/documentation-site.md).
 - Do not expose the `dev` profile or its logs to untrusted users.
 - Keep image digests immutable in deployed revisions and review updates rather
   than returning to floating tags.
+
+## Licence and warranty
+
+This stack is published as is, **without warranty of any kind**, express or
+implied, including the warranties of merchantability, fitness for a particular
+purpose, and non-infringement. Use it at your own risk; the authors are not
+liable for any claim, damage, or other liability arising from its use.
+
+- The stack's own container images (`litellm-opensearch-tools` and
+  `litellm-image-security-monitor`) are released under the
+  [MIT License](https://opensource.org/license/mit). The packages and tools
+  they bundle keep their own licences.
+- Every third-party tool the stack uses, including each container image,
+  model, and package, is distributed under its own licence, which you must
+  comply with. The [third-party licence register](docs/third-party-licences.md)
+  lists them.
+- The repository's own files are licensed under the
+  [Apache License 2.0](https://github.com/bella-1337/effective-spoon/blob/master/LICENSE).
