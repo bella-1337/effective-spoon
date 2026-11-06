@@ -131,9 +131,7 @@ see [Documentation site](docs/documentation-site.md).
 ## Security notes
 
 - Report vulnerabilities privately as described in the
-  [security policy](https://github.com/bella-1337/effective-spoon/blob/master/.github/SECURITY.md);
-  see the [contributing guide](https://github.com/bella-1337/effective-spoon/blob/master/.github/CONTRIBUTING.md)
-  for everything else.
+  [security policy](https://github.com/bella-1337/effective-spoon/blob/master/.github/SECURITY.md).
 - Keep `.env` and everything under `traefik/certs/` private.
 - Rotate any credential that is accidentally exposed.
 - The Docker socket mounted by Traefik is security-sensitive; restrict host
@@ -141,6 +139,27 @@ see [Documentation site](docs/documentation-site.md).
 - Do not expose the `dev` profile or its logs to untrusted users.
 - Keep image digests immutable in deployed revisions and review updates rather
   than returning to floating tags.
+
+## Contributing
+
+This project does not accept outside contributions at the moment. Please do
+not open pull requests or feature requests; they will not be reviewed or
+merged. You are welcome to fork the repository under the terms of its licence.
+
+The one exception is security. If you find a vulnerability, do not open a
+public issue, pull request, or discussion. Report it privately through
+[GitHub private vulnerability reporting](https://github.com/bella-1337/effective-spoon/security/advisories/new)
+and include:
+
+- the affected file, service, or release tag;
+- steps to reproduce, or a proof of concept that uses placeholder credentials
+  only;
+- the impact you expect, for example credential exposure, privilege
+  escalation, or data leaving the stack.
+
+If a live credential was exposed, rotate it first and say so in the report.
+The [security policy](https://github.com/bella-1337/effective-spoon/blob/master/.github/SECURITY.md)
+describes the supported versions and what is in scope.
 
 ## Licence and warranty
 

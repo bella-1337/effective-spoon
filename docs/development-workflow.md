@@ -174,8 +174,7 @@ registry (`litellm-stack/<tag>`), and creates a GitLab release linking both
 files.
 
 The default branch and release tags also rebuild the versioned documentation
-site and, once enabled, publish it to GitHub Pages or GitLab Pages with access
-restricted to repository members; see
+site and publish it to GitHub Pages or GitLab Pages; see
 [Documentation site](documentation-site.md#publishing).
 
 The release is a validated delivery artifact, not an automatic production
