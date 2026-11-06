@@ -8,6 +8,8 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+## [v0.1.1] - 2026-11-06
+
 ### Added
 
 - Status badges for every GitHub Actions workflow, the latest release, the
@@ -34,12 +36,16 @@ All notable changes to this stack are recorded here. The format follows
   not opt in, matching the cache's `default_off` mode.
 - `gpu-host/deploy.py` runs as a uv script (`./deploy.py` or
   `uv run deploy.py`).
+- The README says that outside contributions are not accepted at the moment
+  and explains how to report a vulnerability privately.
 
 ### Fixed
 
 - A release tag now publishes the documentation site through one
   default-branch run, which the `github-pages` environment admits, instead of
   a second, rejected tag deployment.
+- The development workflow guide no longer says the documentation site is
+  restricted to repository members.
 
 ## [v0.1.0] - 2026-11-03
 
@@ -115,5 +121,6 @@ Initial release of the self-hosted LiteLLM gateway stack.
   versioned documentation site built with Zensical and published to GitHub
   Pages or GitLab Pages.
 
-[Unreleased]: https://github.com/bella-1337/effective-spoon/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/bella-1337/effective-spoon/compare/v0.1.1...HEAD
+[v0.1.1]: https://github.com/bella-1337/effective-spoon/compare/v0.1.0...v0.1.1
 [v0.1.0]: https://github.com/bella-1337/effective-spoon/releases/tag/v0.1.0
