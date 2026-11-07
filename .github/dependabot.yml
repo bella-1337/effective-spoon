@@ -22,7 +22,6 @@ updates:
     directories:
       - /.devcontainer
       - /opensearch/tools
-      - /pgvector
       - /security
     schedule:
       interval: weekly
@@ -30,6 +29,22 @@ updates:
     labels:
       - dependencies
       - containers
+
+  - package-ecosystem: docker
+    directory: /pgvector
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - containers
+    ignore:
+      # litellm-pgvector is validated on Python 3.11. Keep patch and digest
+      # updates automatic without jumping to a newer interpreter series.
+      - dependency-name: python
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
 
   - package-ecosystem: pip
     directory: /opensearch/tools

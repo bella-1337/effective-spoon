@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -166,6 +167,117 @@ class MaintenanceContractTests(unittest.TestCase):
             any("disconnected from shared contracts" in failure for failure in failures),
             failures,
         )
+
+    def write_runtime_lifecycle_fixture(self, root: Path) -> None:
+        (root / "security").mkdir()
+        (root / "security" / "runtime-lifecycle.toml").write_text(
+            """[[runtime]]
+name = "pgvector-python"
+dockerfile = "pgvector/Dockerfile"
+base_image = "python:3.11-slim-bookworm"
+series = "3.11"
+review_on = 2027-04-01
+support_ends = 2027-10-01
+owner = "stack maintainers"
+runbook = "docs/image-security.md#runtime-lifecycle-upgrades"
+dependabot_directory = "/pgvector"
+dependabot_dependency = "python"
+security_notes = [
+  "Dependabot supplies same-series patch security updates.",
+  "Vulnerability scanners do not make unsupported runtimes safe.",
+  "Series migrations follow the upgrade runbook before support ends.",
+]
+""",
+            encoding="utf-8",
+        )
+        (root / "pgvector").mkdir()
+        (root / "pgvector" / "Dockerfile").write_text(
+            f"FROM python:3.11-slim-bookworm@sha256:{'a' * 64}\n",
+            encoding="utf-8",
+        )
+        (root / ".github").mkdir()
+        (root / ".github" / "dependabot.yml").write_text(
+            """version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /pgvector
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: python
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+""",
+            encoding="utf-8",
+        )
+
+    def test_runtime_lifecycle_keeps_patch_updates_and_forces_series_review(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_runtime_lifecycle_fixture(root)
+            self.assertEqual(
+                contracts.runtime_lifecycle_failures(root, date(2026, 11, 7)),
+                [],
+            )
+            self.assertEqual(
+                contracts.runtime_lifecycle_failures(root, date(2027, 4, 1)),
+                [
+                    "Runtime pgvector-python upgrade review was due on 2027-04-01, "
+                    "before support ends on 2027-10-01; complete "
+                    "docs/image-security.md#runtime-lifecycle-upgrades"
+                ],
+            )
+            self.assertEqual(
+                contracts.runtime_lifecycle_failures(root, date(2027, 10, 1)),
+                [
+                    "Runtime pgvector-python passed its support end on 2027-10-01; "
+                    "complete docs/image-security.md#runtime-lifecycle-upgrades immediately"
+                ],
+            )
+
+            policy = root / "security" / "runtime-lifecycle.toml"
+            policy.write_text(
+                policy.read_text(encoding="utf-8").replace(
+                    "security_notes = [",
+                    'security_notes = [\n  "",',
+                ),
+                encoding="utf-8",
+            )
+            self.assertIn(
+                "Runtime lifecycle policy for pgvector-python needs security notes for "
+                "patch updates, scanner limits, and series migration",
+                contracts.runtime_lifecycle_failures(root, date(2026, 11, 7)),
+            )
+
+            dependabot = root / ".github" / "dependabot.yml"
+            dependabot.write_text(
+                dependabot.read_text(encoding="utf-8")
+                + "          - version-update:semver-patch\n",
+                encoding="utf-8",
+            )
+            self.assertIn(
+                "Dependabot lifecycle rule for pgvector-python must allow patch security updates",
+                contracts.runtime_lifecycle_failures(root, date(2026, 11, 7)),
+            )
+
+    def test_runtime_lifecycle_detects_untracked_base_image_change(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_runtime_lifecycle_fixture(root)
+            (root / "pgvector" / "Dockerfile").write_text(
+                f"FROM python:3.12-slim-bookworm@sha256:{'b' * 64}\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                contracts.runtime_lifecycle_failures(root, date(2026, 11, 7)),
+                [
+                    "Runtime lifecycle base image for pgvector-python is "
+                    "python:3.11-slim-bookworm, but pgvector/Dockerfile uses "
+                    "python:3.12-slim-bookworm"
+                ],
+            )
 
 
     def test_gpu_host_images_and_model_revisions_feed_the_licence_register(self) -> None:

@@ -82,7 +82,7 @@ stack is built, scanned, or extended.
 
 | Image | Used by | Licence | Category | Obligations and notes |
 | --- | --- | --- | --- | --- |
-| `python:3.11.18-slim-bookworm` | Base of `pgvector/Dockerfile` | Python: PSF-2.0; Debian packages under their own licences | Permissive base, mixed OS packages | None for internal use. |
+| `python:3.11-slim-bookworm` | Base of `pgvector/Dockerfile` | Python: PSF-2.0; Debian packages under their own licences | Permissive base, mixed OS packages | None for internal use. |
 | `ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm-slim` | Base of `opensearch/tools/Dockerfile` and `security/image-monitor.Dockerfile` | uv: MIT OR Apache-2.0; Python: PSF-2.0; Debian packages under their own licences | Permissive base, mixed OS packages | None for internal use. |
 | `docker:29.9.2-cli` | Docker CLI and buildx copied into `security/image-monitor.Dockerfile` | Apache-2.0 | Permissive | None. |
 | `aquasec/trivy:0.76.1` | Trivy copied into the monitor image; also run directly by host-mode scans | Apache-2.0 | Permissive | Trivy vulnerability and Java databases are downloaded at scan time under Aqua's database terms; internal use is permitted. |

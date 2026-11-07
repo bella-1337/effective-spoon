@@ -809,7 +809,7 @@ services:
         org.opencontainers.image.title: litellm-pgvector
         org.opencontainers.image.description: LiteLLM pgvector vector-store connector built from the pinned upstream commit
         org.opencontainers.image.version: 5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
-        org.opencontainers.image.base.name: python:3.11.18-slim-bookworm
+        org.opencontainers.image.base.name: python:3.11-slim-bookworm
         org.opencontainers.image.source: https://github.com/BerriAI/litellm-pgvector
         org.opencontainers.image.url: https://github.com/BerriAI/litellm-pgvector
         org.opencontainers.image.revision: 5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24

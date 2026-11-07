@@ -1,0 +1,16 @@
+[[runtime]]
+name = "pgvector-python"
+dockerfile = "pgvector/Dockerfile"
+base_image = "python:3.11-slim-bookworm"
+series = "3.11"
+review_on = 2027-04-01
+support_ends = 2027-10-01
+owner = "stack maintainers"
+runbook = "docs/image-security.md#runtime-lifecycle-upgrades"
+dependabot_directory = "/pgvector"
+dependabot_dependency = "python"
+security_notes = [
+  "The immutable digest is reproducible, while Dependabot refreshes the same Python series for patch and rebuilt-image security fixes.",
+  "Trivy and CISA KEV checks detect known vulnerable packages but cannot prove that an end-of-support runtime is safe.",
+  "Changing the Python series is a tested compatibility upgrade and must be completed through the linked runbook before support ends.",
+]

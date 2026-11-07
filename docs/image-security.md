@@ -79,6 +79,49 @@ services (for example the OpenSearch tools image), CI accepts a finding only
 when exceptions cover every service that runs the image. See
 [Local and continuous integration](development-workflow.md#local-and-continuous-integration).
 
+### Runtime lifecycle upgrades
+
+Vulnerability scans and digest updates do not replace runtime lifecycle
+management. A scanner can report no known fixable finding even when an
+interpreter is approaching or has passed upstream security support. The
+machine-readable deadlines and `security_notes` in
+`security/runtime-lifecycle.toml` therefore form part of the upgrade gate.
+Every future runtime entry must record how patches arrive, what its scanners
+cannot guarantee, and how the next series migration is completed.
+
+The pgvector image follows `python:3.11-slim-bookworm` by immutable digest.
+Dependabot may refresh that digest and Python 3.11 patch releases automatically,
+but it deliberately does not change the interpreter series. An automatic
+3.11-to-3.15 change is a compatibility migration, not a patch update. The
+lifecycle policy currently requires the Python-series review by **2027-04-01**,
+six months before the conservative **2027-10-01** security-support boundary.
+
+`doctor`, the game-day preflight, and `scripts/ci/validate.sh` fail when:
+
+- a declared review or support deadline is reached;
+- the Dockerfile and lifecycle policy name different base-image series;
+- the dedicated Dependabot entry no longer defers major/minor migrations; or
+- Dependabot is configured to ignore patch security updates.
+
+Resolve a due review rather than extending its date:
+
+1. Select an upstream-supported Python series compatible with the pinned
+   `litellm-pgvector` commit and its dependencies.
+2. Change the Dockerfile tag and digest, Compose
+   `org.opencontainers.image.base.name`, licence-register row, and lifecycle
+   policy in one change.
+3. Set the next `review_on` early enough to migrate before `support_ends`;
+   confirm both dates against the upstream runtime schedule.
+4. Build `litellm-pgvector`, run `pip check`, and run the hermetic CI and
+   enforcing image scan. Do not waive a fixable Critical or CISA KEV finding
+   merely to retain an old interpreter.
+5. Deploy through the normal pre-upgrade, verification, and rollback procedure.
+
+Use the same policy for future pinned language runtimes. Digest pinning provides
+reproducibility, Dependabot supplies same-series security refreshes, Trivy/KEV
+detect known vulnerable packages, and the dated lifecycle gate prevents an
+ignored series from remaining in service indefinitely.
+
 ### Prometheus, OpenSearch, and Grafana alerts
 
 The Compose configuration enables node-exporter's official textfile collector
