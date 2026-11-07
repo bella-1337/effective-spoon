@@ -524,6 +524,42 @@ updates:
                 ["Licence register is missing or unsafe: docs/third-party-licences.md"],
             )
 
+    def test_version_table_must_match_images(self) -> None:
+        services = {
+            "app": {"image": "example/app:1.0@sha256:" + "b" * 64},
+            "db": {"image": "postgres:16"},
+        }
+        rows = (
+            "| App | `1.0` | `example/app` | `app` (core) |\n"
+            "| PostgreSQL | `16` | `postgres` | `db` (core) |\n"
+            "| Python | `3.11` | `python` | Base |\n"
+            "| Base | `1` | `base` | Base |\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_register_fixture(root, [], "")
+            table = root / contracts.VERSION_TABLE
+            table.write_text(
+                "# Versions\n\n| Component | Version | Image | Used by |\n| --- | --- | --- | --- |\n" + rows,
+                encoding="utf-8",
+            )
+            self.assertEqual(contracts.version_table_failures(services, root), [])
+
+            table.write_text(rows.replace("`1.0`", "`0.9`"), encoding="utf-8")
+            self.assertEqual(
+                contracts.version_table_failures(services, root),
+                [
+                    "Version table has no row for image example/app:1.0",
+                    "Version table lists an image the stack no longer uses: example/app:0.9",
+                ],
+            )
+
+            table.unlink()
+            self.assertEqual(
+                contracts.version_table_failures(services, root),
+                ["Version table is missing or unsafe: docs/component-versions.md"],
+            )
+
 
     def test_own_images_require_consistent_oci_labels(self) -> None:
         labels = {

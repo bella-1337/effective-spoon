@@ -173,7 +173,7 @@ services:
   litellm-prod:
     logging: *default-logging
     profiles: [prod]
-    image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    image: ghcr.io/berriai/litellm:v1.108.2@sha256:d8b4ac356743d647a13bb93f45b941fcd5f5354122cfd205948a1b192790389d
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
@@ -201,6 +201,7 @@ services:
       EMAIL_SUBJECT_KEY_ROTATED:
       DATABASE_URL: postgresql://${PG_USER:-litellm}:${PG_PASSWORD:?Set PG_PASSWORD in .env}@postgres:5432/litellm_prod
       STORE_MODEL_IN_DB: "${LITELLM_STORE_MODEL_IN_DB:-True}"
+      USE_V2_MIGRATION_RESOLVER: "${LITELLM_USE_V2_MIGRATION_RESOLVER:-false}"
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
       D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
@@ -279,7 +280,7 @@ services:
   litellm-dev:
     logging: *default-logging
     profiles: [dev]
-    image: ghcr.io/berriai/litellm:v1.107.0-dev.3@sha256:e7f68da02ed3ec52f0b8d386dbb278a0aa06dbc879f5ddda5a3cf87b2bff194c
+    image: ghcr.io/berriai/litellm:v1.110.0-dev.1@sha256:cca06d5cfdbd4412633d96257b60b84882822418fc72f15296b261e7ddfdfac1
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
@@ -307,6 +308,7 @@ services:
       EMAIL_SUBJECT_KEY_ROTATED:
       DATABASE_URL: postgresql://${PG_USER:-litellm}:${PG_PASSWORD:?Set PG_PASSWORD in .env}@postgres:5432/litellm_dev
       STORE_MODEL_IN_DB: "${LITELLM_STORE_MODEL_IN_DB:-True}"
+      USE_V2_MIGRATION_RESOLVER: "${LITELLM_USE_V2_MIGRATION_RESOLVER:-false}"
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
       D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}

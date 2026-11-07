@@ -166,6 +166,7 @@ nav:
       - Hardware sizing: docs/hardware-sizing.md
       - Remote GPU host: gpu-host/README.md
       - Environment variables: docs/environment-variables.md
+      - Component versions: docs/component-versions.md
   - Architecture:
       - Stack architecture: ARCHITECTURE.md
       - Diagrams: diagrams/README.md

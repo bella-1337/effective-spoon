@@ -10,10 +10,10 @@ development configuration into production.
 | Field | Value |
 | --- | --- |
 | Register tag | `dev-to-prod-register/v1.0.1` |
-| Snapshot date | `2026-10-31` |
-| Repository baseline | `8e9b9a0` |
-| Production LiteLLM image | `v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06` |
-| Development LiteLLM image | `v1.107.0-dev.3@sha256:e7f68da02ed3ec52f0b8d386dbb278a0aa06dbc879f5ddda5a3cf87b2bff194c` |
+| Snapshot date | `2026-11-07` |
+| Repository baseline | `ecf9cf5` |
+| Production LiteLLM image | `v1.108.2@sha256:d8b4ac356743d647a13bb93f45b941fcd5f5354122cfd205948a1b192790389d` |
+| Development LiteLLM image | `v1.110.0-dev.1@sha256:cca06d5cfdbd4412633d96257b60b84882822418fc72f15296b261e7ddfdfac1` (nightly) |
 
 Increment the register tag when the inventory, status model, or promotion
 requirements change:
@@ -71,7 +71,7 @@ and the repository regression checks. Release notes alone are not sufficient.
 | `D2P-001` | LiteLLM candidate image | `dev-only` | `unverified` | image digest |
 | `D2P-002` | Development model entries | mixed | `unverified` | config |
 | `D2P-003` | 60-second request timeout | `dev-only` | not version-gated | config |
-| `D2P-004` | LiteLLM Chat UI | `dev-only` | `unverified` | config |
+| `D2P-004` | LiteLLM Chat UI | `prod-canary` | `v1.108.2` | config |
 | `D2P-005` | Semantic MCP tool filtering | `dev-only` | `unverified` | config |
 | `D2P-006` | Semantic response cache | `dev-only` | `unverified` | request opt-in |
 | `D2P-007` | Qdrant cache service | `dev-only` | not LiteLLM-only | service |
@@ -145,8 +145,13 @@ This difference may remain environment-specific.
 
 ### D2P-004 - LiteLLM Chat UI
 
-Tags: `register-added:v1.0.0`, `state:dev-only`,
-`stable-support:unverified`, `activation:config`.
+Tags: `register-added:v1.0.0`, `state:prod-canary`,
+`stable-support:v1.108.2`, `activation:config`.
+
+Production enables `enable_chat_ui: true` on the `v1.108.2` LTS image, which
+recognizes the setting, and accepts master-key sign-in to the UI
+(`disable_env_credential_login: false`). Steps 2 to 4 below are still open, so
+the capability stays `prod-canary` rather than `prod-enabled`.
 
 Promotion plan:
 

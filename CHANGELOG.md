@@ -8,6 +8,33 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A [component versions](docs/component-versions.md) table lists the version
+  of every image, model, and host tool in one place. `doctor` and
+  `scripts/ci/validate.sh` fail when it misses an image the stack uses or lists
+  one it no longer uses.
+- `LITELLM_USE_V2_MIGRATION_RESOLVER` (default `false`) selects LiteLLM's
+  database migration resolver for both proxies. LiteLLM 1.108.x cannot verify
+  and baseline this stack's fresh Wolfi-backed databases with its default v2
+  resolver, so the stack keeps the documented legacy fallback.
+
+### Changed
+
+- Production enables the LiteLLM Chat UI and accepts master-key sign-in to the
+  UI, matching development. The promotion register records the Chat UI as
+  `prod-canary`.
+- Production LiteLLM moves from `v1.106.6` to the `v1.108.2` LTS release.
+  Development tracks LiteLLM's nightly channel and moves from `v1.107.0-dev.3`
+  to `v1.110.0-dev.1`. Both remain pinned by digest.
+
+### Fixed
+
+- The LiteLLM upgrade compatibility check now waits for the candidate image's
+  startup output to settle before reading it. It previously stopped at the
+  first success line and could miss the policy summary printed after it,
+  wrongly reporting a compatible development image as incompatible.
+
 ## [v0.1.1] - 2026-11-06
 
 ### Added
