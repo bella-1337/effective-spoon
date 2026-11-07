@@ -12,6 +12,8 @@ Loki, MinIO, Traefik, Qdrant, and ClickHouse).
 Compose image, Dockerfile base image, auxiliary deployment image, or pinned
 model revision is missing from this register, or when a listed image is no
 longer used. Digest-only updates do not require an edit; a tag change does.
+The same tag change also updates the
+[component versions](component-versions.md) table.
 
 ## Usage basis
 

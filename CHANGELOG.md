@@ -10,6 +10,10 @@ All notable changes to this stack are recorded here. The format follows
 
 ### Added
 
+- A [component versions](docs/component-versions.md) table lists the version
+  of every image, model, and host tool in one place. `doctor` and
+  `scripts/ci/validate.sh` fail when it misses an image the stack uses or lists
+  one it no longer uses.
 - `LITELLM_USE_V2_MIGRATION_RESOLVER` (default `false`) selects LiteLLM's
   database migration resolver for both proxies. LiteLLM 1.108.x cannot verify
   and baseline this stack's fresh Wolfi-backed databases with its default v2

@@ -172,7 +172,10 @@ monitors, and the workload state.
 
 ## Upgrades
 
-1. Pin or change one image family at a time.
+1. Pin or change one image family at a time. Update its row in
+   [docs/component-versions.md](docs/component-versions.md) and
+   [docs/third-party-licences.md](docs/third-party-licences.md) in the same
+   change.
 2. Read release notes for config-schema, metric-name, and database-migration
    changes.
 3. Back up `pg-data`, `opensearch-data` (snapshot), `prometheus-data`, and,

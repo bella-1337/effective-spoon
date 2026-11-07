@@ -80,6 +80,10 @@ OWN_IMAGE_REQUIRED_LABELS = (
 # Base images such as uv set these; own images must override them explicitly.
 OWN_IMAGE_OVERRIDDEN_LABELS = ("created", "source", "url")
 REGISTER_ROW_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|", re.MULTILINE)
+VERSION_TABLE = Path("docs") / "component-versions.md"
+# Rows read "| Component | `tag` | `repository` | Used by |"; the contract joins
+# repository and tag back into the image reference the stack pins.
+VERSION_ROW_RE = re.compile(r"^\|[^|`]+\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|", re.MULTILINE)
 
 
 def compose_profile_arguments() -> list[str]:
@@ -412,6 +416,7 @@ def rendered_supply_chain_failures(config: Mapping[str, Any]) -> list[str]:
         return ["Compose configuration has no services object"]
     return [
         *licence_register_failures(services),
+        *version_table_failures(services),
         *own_image_label_failures(config),
     ]
 
@@ -659,6 +664,34 @@ def licence_register_failures(
             failures.append(
                 f"Build revision label of {name} does not match its pinned upstream context"
             )
+    return failures
+
+
+def version_table_failures(
+    services: Mapping[str, Any], root: Path = ROOT
+) -> list[str]:
+    """Keep docs/component-versions.md in step with every image the stack uses."""
+    table = root / VERSION_TABLE
+    if not table.is_file() or table.is_symlink():
+        return [f"Version table is missing or unsafe: {VERSION_TABLE}"]
+    listed = {
+        f"{repository}:{tag}"
+        for tag, repository in VERSION_ROW_RE.findall(table.read_text(encoding="utf-8"))
+    }
+    required = {
+        image_without_digest(service["image"])
+        for service in services.values()
+        if isinstance(service, dict) and isinstance(service.get("image"), str)
+    }
+    extra, failures = auxiliary_images(root)
+    required |= extra
+    failures.extend(
+        f"Version table has no row for image {image}" for image in sorted(required - listed)
+    )
+    failures.extend(
+        f"Version table lists an image the stack no longer uses: {image}"
+        for image in sorted(listed - required)
+    )
     return failures
 
 
