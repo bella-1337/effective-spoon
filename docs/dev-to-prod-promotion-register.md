@@ -71,7 +71,7 @@ and the repository regression checks. Release notes alone are not sufficient.
 | `D2P-001` | LiteLLM candidate image | `dev-only` | `unverified` | image digest |
 | `D2P-002` | Development model entries | mixed | `unverified` | config |
 | `D2P-003` | 60-second request timeout | `dev-only` | not version-gated | config |
-| `D2P-004` | LiteLLM Chat UI | `dev-only` | `unverified` | config |
+| `D2P-004` | LiteLLM Chat UI | `prod-canary` | `v1.108.2` | config |
 | `D2P-005` | Semantic MCP tool filtering | `dev-only` | `unverified` | config |
 | `D2P-006` | Semantic response cache | `dev-only` | `unverified` | request opt-in |
 | `D2P-007` | Qdrant cache service | `dev-only` | not LiteLLM-only | service |
@@ -145,8 +145,13 @@ This difference may remain environment-specific.
 
 ### D2P-004 - LiteLLM Chat UI
 
-Tags: `register-added:v1.0.0`, `state:dev-only`,
-`stable-support:unverified`, `activation:config`.
+Tags: `register-added:v1.0.0`, `state:prod-canary`,
+`stable-support:v1.108.2`, `activation:config`.
+
+Production enables `enable_chat_ui: true` on the `v1.108.2` LTS image, which
+recognizes the setting, and accepts master-key sign-in to the UI
+(`disable_env_credential_login: false`). Steps 2 to 4 below are still open, so
+the capability stays `prod-canary` rather than `prod-enabled`.
 
 Promotion plan:
 

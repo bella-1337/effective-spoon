@@ -61,11 +61,14 @@ choose one of these options:
 Review this decision whenever the SearXNG image or its default engine list
 changes.
 
-The beta LiteLLM Chat UI is enabled only for the development profile at
-`https://$LITELLM_DEV_HOST/ui/chat`. Production keeps the Chat UI disabled.
+The beta LiteLLM Chat UI is enabled for both profiles, at
+`https://$LITELLM_DEV_HOST/ui/chat` and `https://$LITELLM_PROD_HOST/ui/chat`.
 Users must sign in and can only select models allowed by their LiteLLM access
-policy. The native `searxng-search` endpoint is available through both gateways;
-it is separate from the Chat UI's MCP tool picker.
+policy. Both proxies also accept the `admin` user with the master key at UI
+sign-in (`disable_env_credential_login: false`); treat the master key as the
+production administrator password. The native `searxng-search` endpoint is
+available through both gateways; it is separate from the Chat UI's MCP tool
+picker.
 
 ## Use Xberg MCP document extraction
 

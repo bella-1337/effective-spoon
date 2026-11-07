@@ -21,6 +21,9 @@ All notable changes to this stack are recorded here. The format follows
 
 ### Changed
 
+- Production enables the LiteLLM Chat UI and accepts master-key sign-in to the
+  UI, matching development. The promotion register records the Chat UI as
+  `prod-canary`.
 - Production LiteLLM moves from `v1.106.6` to the `v1.108.2` LTS release.
   Development tracks LiteLLM's nightly channel and moves from `v1.107.0-dev.3`
   to `v1.110.0-dev.1`. Both remain pinned by digest.
