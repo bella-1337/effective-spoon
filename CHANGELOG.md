@@ -8,6 +8,13 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The LiteLLM upgrade compatibility check now waits for the candidate image's
+  startup output to settle before reading it. It previously stopped at the
+  first success line and could miss the policy summary printed after it,
+  wrongly reporting a compatible development image as incompatible.
+
 ## [v0.1.1] - 2026-11-06
 
 ### Added

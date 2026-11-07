@@ -291,10 +291,13 @@ def docker_run_validation(image: str, config: Path, network: str, extra_environm
     if run(args, check=False).returncode:
         return 125, "candidate validation container could not start"
     output = ""
+    unchanged_polls = 0
     try:
         for _ in range(121):
             logs = run(["docker", "logs", name], capture=True, check=False)
-            output = logs.stdout + logs.stderr
+            current = logs.stdout + logs.stderr
+            unchanged_polls = unchanged_polls + 1 if current == output else 0
+            output = current
             running = run(["docker", "inspect", "-f", "{{.State.Running}}", name], capture=True, check=False).stdout.strip()
             if running != "true":
                 status = run(["docker", "inspect", "-f", "{{.State.ExitCode}}", name], capture=True, check=False).stdout.strip()
@@ -304,7 +307,12 @@ def docker_run_validation(image: str, config: Path, network: str, extra_environm
                 if exit_code != 0 or "LiteLLM: config OK" not in output:
                     return exit_code or 125, output
                 return 0, output
-            if re.search(r"LiteLLM: config OK|LiteLLM: Proxy initialized with Config, Set models:", output):
+            # The proxy prints search-tool and policy summaries after the first
+            # success line, so wait until its startup output has settled.
+            if (
+                re.search(r"LiteLLM: config OK|LiteLLM: Proxy initialized with Config, Set models:", output)
+                and unchanged_polls >= 5
+            ):
                 return 0, output
             time.sleep(1)
         return 124, output
