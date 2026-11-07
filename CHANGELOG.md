@@ -8,6 +8,13 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `LITELLM_USE_V2_MIGRATION_RESOLVER` (default `false`) selects LiteLLM's
+  database migration resolver for both proxies. LiteLLM 1.108.x cannot verify
+  and baseline this stack's fresh Wolfi-backed databases with its default v2
+  resolver, so the stack keeps the documented legacy fallback.
+
 ### Fixed
 
 - The LiteLLM upgrade compatibility check now waits for the candidate image's
