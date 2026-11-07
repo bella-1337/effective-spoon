@@ -10,6 +10,12 @@ For each new stable LiteLLM candidate, use the repository-owned
 separate evidence-based delta. Image upgrades and capability activation are
 separate rollout steps.
 
+Before any image upgrade, run `./scripts/maintenance.py doctor`. This also
+enforces the dated runtime policy in `security/runtime-lifecycle.toml`. When a
+runtime review is due, complete the
+[runtime lifecycle upgrade](image-security.md#runtime-lifecycle-upgrades) in
+the same tested rollout; do not postpone it by changing only the review date.
+
 The single maintenance entry point exposes the routine operational workflows:
 
 ```bash

@@ -7,6 +7,7 @@ import re
 import runpy
 import stat
 import tomllib
+from datetime import date
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -52,6 +53,7 @@ BRAND_CONTAINER_DIR = "/app/branding/"
 UNSAFE_SVG_RE = re.compile(r"<script|\son[a-z]+\s*=|javascript:|<foreignObject", re.IGNORECASE)
 LICENCE_REGISTER = Path("docs") / "third-party-licences.md"
 LICENCE_REGISTER_IMAGE_SECTIONS = ("## Runtime images", "## Build and auxiliary images")
+RUNTIME_LIFECYCLE_POLICY = Path("security") / "runtime-lifecycle.toml"
 LOCAL_BUILD_DOCKERFILES = (
     Path("pgvector") / "Dockerfile",
     Path("opensearch") / "tools" / "Dockerfile",
@@ -419,6 +421,150 @@ def final_base_image(dockerfile: Path) -> str | None:
         return None
     references = DOCKERFILE_FROM_RE.findall(dockerfile.read_text(encoding="utf-8"))
     return image_without_digest(references[-1]) if references else None
+
+
+def runtime_lifecycle_failures(
+    root: Path = ROOT,
+    today: date | None = None,
+) -> list[str]:
+    """Keep supported runtime series on a dated, patch-updatable upgrade path."""
+    failures: list[str] = []
+    policy_path = root / RUNTIME_LIFECYCLE_POLICY
+    if not policy_path.is_file() or policy_path.is_symlink():
+        return [f"Runtime lifecycle policy is missing or unsafe: {RUNTIME_LIFECYCLE_POLICY}"]
+    try:
+        with policy_path.open("rb") as handle:
+            policy = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        return [f"Runtime lifecycle policy is invalid: {error}"]
+
+    runtimes = policy.get("runtime")
+    if not isinstance(runtimes, list) or not runtimes:
+        return ["Runtime lifecycle policy must declare at least one [[runtime]]"]
+
+    dependabot_path = root / ".github" / "dependabot.yml"
+    dependabot_source = (
+        dependabot_path.read_text(encoding="utf-8")
+        if dependabot_path.is_file() and not dependabot_path.is_symlink()
+        else ""
+    )
+    check_date = today or date.today()
+    seen: set[str] = set()
+    for runtime in runtimes:
+        if not isinstance(runtime, dict):
+            failures.append("Runtime lifecycle entries must be TOML tables")
+            continue
+        name = runtime.get("name")
+        if not isinstance(name, str) or not name.strip():
+            failures.append("Runtime lifecycle entry has no name")
+            continue
+        if name in seen:
+            failures.append(f"Runtime lifecycle policy repeats {name}")
+            continue
+        seen.add(name)
+
+        string_fields = (
+            "dockerfile",
+            "base_image",
+            "series",
+            "owner",
+            "runbook",
+            "dependabot_directory",
+            "dependabot_dependency",
+        )
+        missing = [
+            field
+            for field in string_fields
+            if not isinstance(runtime.get(field), str) or not runtime[field].strip()
+        ]
+        if missing:
+            failures.append(f"Runtime lifecycle policy for {name} lacks: {', '.join(missing)}")
+            continue
+        security_notes = runtime.get("security_notes")
+        if (
+            not isinstance(security_notes, list)
+            or len(security_notes) < 3
+            or any(not isinstance(note, str) or not note.strip() for note in security_notes)
+        ):
+            failures.append(
+                f"Runtime lifecycle policy for {name} needs security notes for patch updates, "
+                "scanner limits, and series migration"
+            )
+
+        review_on = runtime.get("review_on")
+        support_ends = runtime.get("support_ends")
+        if not isinstance(review_on, date) or not isinstance(support_ends, date):
+            failures.append(f"Runtime lifecycle policy for {name} needs TOML review/support dates")
+            continue
+        if review_on >= support_ends:
+            failures.append(f"Runtime lifecycle review for {name} must precede support end")
+        elif check_date >= support_ends:
+            failures.append(
+                f"Runtime {name} passed its support end on {support_ends}; "
+                f"complete {runtime['runbook']} immediately"
+            )
+        elif check_date >= review_on:
+            failures.append(
+                f"Runtime {name} upgrade review was due on {review_on}, before support ends "
+                f"on {support_ends}; complete {runtime['runbook']}"
+            )
+
+        dockerfile = root / runtime["dockerfile"]
+        actual_base = final_base_image(dockerfile)
+        if actual_base != runtime["base_image"]:
+            failures.append(
+                f"Runtime lifecycle base image for {name} is {runtime['base_image']}, "
+                f"but {runtime['dockerfile']} uses {actual_base or 'no final FROM image'}"
+            )
+        expected_prefix = f"{runtime['dependabot_dependency']}:{runtime['series']}"
+        if not runtime["base_image"].startswith(expected_prefix):
+            failures.append(
+                f"Runtime lifecycle series for {name} does not match {runtime['base_image']}"
+            )
+
+        blocks = re.split(r"(?=^  - package-ecosystem:)", dependabot_source, flags=re.MULTILINE)
+        matching_blocks = [
+            block
+            for block in blocks
+            if re.search(r"^  - package-ecosystem:\s*docker\s*$", block, re.MULTILINE)
+            and re.search(
+                rf"^\s+directory:\s*{re.escape(runtime['dependabot_directory'])}\s*$",
+                block,
+                re.MULTILINE,
+            )
+        ]
+        if len(matching_blocks) != 1:
+            failures.append(
+                f"Dependabot must have one Docker entry for {runtime['dependabot_directory']} "
+                f"to maintain {name}"
+            )
+            continue
+        block = matching_blocks[0]
+        dependency_rule = re.search(
+            rf"^\s+- dependency-name:\s*{re.escape(runtime['dependabot_dependency'])}\s*$"
+            rf"(?P<body>.*?)(?=^\s+- dependency-name:|\Z)",
+            block,
+            re.MULTILINE | re.DOTALL,
+        )
+        if dependency_rule is None:
+            failures.append(f"Dependabot has no lifecycle rule for {name}")
+            continue
+        update_types = set(
+            re.findall(
+                r"version-update:semver-(major|minor|patch)",
+                dependency_rule.group("body"),
+            )
+        )
+        if not {"major", "minor"}.issubset(update_types):
+            failures.append(
+                f"Dependabot lifecycle rule for {name} must defer major/minor series upgrades"
+            )
+        if "patch" in update_types:
+            failures.append(
+                f"Dependabot lifecycle rule for {name} must allow patch security updates"
+            )
+
+    return failures
 
 
 def own_image_label_failures(config: Mapping[str, Any], root: Path = ROOT) -> list[str]:
@@ -893,6 +1039,7 @@ def litellm_guardrail_failures(root: Path) -> list[str]:
 
 def validate_repository_contracts(root: Path = ROOT) -> list[str]:
     failures: list[str] = []
+    failures.extend(runtime_lifecycle_failures(root))
 
     traefik_dynamic = root / "traefik" / "dynamic.yml"
     if not traefik_dynamic.is_file() or traefik_dynamic.is_symlink():
