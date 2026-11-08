@@ -62,6 +62,9 @@ echo "==> Validating Python syntax and hermetic unit tests"
 python3 -m compileall -q scripts litellm/modules gpu-host
 python3 -m unittest discover -s scripts/tests -v
 
+echo "==> Checking that every diagram was rendered from its current Mermaid source"
+python3 scripts/render-diagrams.py --check
+
 echo "==> Validating JSON, TOML, and immutable workflow dependencies"
 python3 - <<'PY'
 from __future__ import annotations

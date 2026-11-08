@@ -11,5 +11,6 @@ same change. Edit only the `.mmd` files, then run:
 ./scripts/render-diagrams.py
 ```
 
-If the dashmotion skill or Graphviz (`dot`) is unavailable, commit the Mermaid changes alone and
-say that the HTML still needs rendering. Never edit the generated HTML by hand.
+If the dashmotion skill or Graphviz (`dot`) is unavailable, commit the Mermaid
+changes alone and say that the HTML still needs rendering; CI fails until it is
+rendered. Never edit the generated HTML by hand.

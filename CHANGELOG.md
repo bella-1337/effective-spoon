@@ -14,6 +14,8 @@ All notable changes to this stack are recorded here. The format follows
   own engine. Connectors are curved and routed between boxes, so they no longer
   trace the dashed boundary rectangles, and each boundary keeps its members
   together. Rendering now needs Graphviz.
+- CI runs `./scripts/render-diagrams.py --check`, so a pipeline fails when a
+  rendered diagram is older than its Mermaid source.
 - The Mermaid edges alone decide the rows, as in any Mermaid viewer. The
   `%% @tier` directive is removed from the diagram format and from every
   source.

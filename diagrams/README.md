@@ -88,8 +88,9 @@ the result. It needs the
 dashmotion agent skill and [Graphviz](https://graphviz.org/) (`dot`). If the
 skill is not installed in `~/.agents/skills/dashmotion`, set
 `DASHMOTION_SKILL_DIR` to its directory.
-When dashmotion or Graphviz is not available, commit the Mermaid change alone;
-the HTML is regenerated later.
+When dashmotion or Graphviz is not available, commit the Mermaid change alone
+and have someone who has both render it before the change merges; CI fails
+until the HTML matches the source.
 
 Architecture diagrams are laid out by Graphviz `dot` through
 `scripts/diagram_layout.py`. `dot` is the layered engine Mermaid's own layout
@@ -106,8 +107,10 @@ List HTML files that are missing or older than their source (Python only):
 ./scripts/render-diagrams.py --check
 ```
 
-The unit tests in `scripts/tests/test_render_diagrams.py` parse every committed
-`.mmd` file, so CI rejects a source the renderer cannot read.
+CI runs this check in `scripts/ci/validate.sh`, so a pipeline fails while any
+HTML file is older than its source. The unit tests in
+`scripts/tests/test_render_diagrams.py` also parse every committed `.mmd`
+file, so CI rejects a source the renderer cannot read.
 
 ### Mermaid conventions
 
