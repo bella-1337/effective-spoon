@@ -10,9 +10,10 @@ All notable changes to this stack are recorded here. The format follows
 
 ### Added
 
-- Two request-flow diagrams: a chat request in which LiteLLM runs the model's
-  Xberg `extract` tool call, and a chat request whose search tool call the
-  client runs through the native `searxng-search` endpoint.
+- Two request-flow diagrams that start from the user's prompt and show who
+  decides on and runs each tool call: the model's Xberg `extract` call, which
+  LiteLLM runs itself, and the model's search call, which the agent runs
+  through the native `searxng-search` endpoint.
 
 ## [v0.2.1] - 2026-11-08
 
