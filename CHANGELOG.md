@@ -8,6 +8,8 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+## [v0.2.1] - 2026-11-08
+
 ### Changed
 
 - Architecture diagrams are laid out by Graphviz `dot` instead of dashmotion's
@@ -166,7 +168,8 @@ Initial release of the self-hosted LiteLLM gateway stack.
   versioned documentation site built with Zensical and published to GitHub
   Pages or GitLab Pages.
 
-[Unreleased]: https://github.com/bella-1337/effective-spoon/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/bella-1337/effective-spoon/compare/v0.2.1...HEAD
+[v0.2.1]: https://github.com/bella-1337/effective-spoon/compare/v0.2.0...v0.2.1
 [v0.2.0]: https://github.com/bella-1337/effective-spoon/compare/v0.1.1...v0.2.0
 [v0.1.1]: https://github.com/bella-1337/effective-spoon/compare/v0.1.0...v0.1.1
 [v0.1.0]: https://github.com/bella-1337/effective-spoon/releases/tag/v0.1.0
