@@ -6,10 +6,11 @@
 """Render the Mermaid sources in diagrams/ into animated dashmotion HTML.
 
 The Mermaid files are the source of truth. This script converts each flowchart
-into dashmotion's semantic graph and calls dashmotion's layout engine to write
-the HTML beside it. dashmotion has no sequence mode, so sequenceDiagram sources
-are laid out by sequence_diagrams.py in the same visual style. Every result
-must pass dashmotion's structural checker.
+into dashmotion's semantic graph and writes the HTML beside it. Architecture
+diagrams are laid out by Graphviz dot through diagram_layout.py, which hands
+the geometry to dashmotion's renderer. dashmotion has no sequence mode, so
+sequenceDiagram sources are laid out by sequence_diagrams.py in the same visual
+style. Every result must pass dashmotion's structural checker.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import diagram_layout
 import sequence_diagrams
 from maintenance_common import LOG, ROOT, fail, run_main
 
@@ -34,8 +36,9 @@ USAGE = """Usage:
   ./scripts/render-diagrams.py --check             list HTML files that are missing or older than their Mermaid source
   ./scripts/render-diagrams.py --json DIAGRAM.mmd  print the semantic graph without rendering
 
-Rendering needs the dashmotion skill. Set DASHMOTION_SKILL_DIR when it is not
-installed in ~/.agents/skills/dashmotion. --check and --json need only Python.
+Rendering needs the dashmotion skill and Graphviz (dot). Set
+DASHMOTION_SKILL_DIR when dashmotion is not installed in
+~/.agents/skills/dashmotion. --check and --json need only Python.
 """
 
 DIAGRAMS_DIR = ROOT / "diagrams"
@@ -87,7 +90,6 @@ class Diagram:
     nodes: dict[str, Node] = field(default_factory=dict)
     edges: list[dict[str, str]] = field(default_factory=list)
     groups: list[dict[str, str]] = field(default_factory=list)
-    tiers: dict[str, int] = field(default_factory=dict)
     journeys: list[dict[str, Any]] = field(default_factory=list)
     cards: list[dict[str, Any]] = field(default_factory=list)
 
@@ -187,14 +189,6 @@ def _parse_directive(diagram: Diagram, body: str, where: str) -> None:
         diagram.subtitle = value
     elif key == "@footer":
         diagram.footer = value
-    elif key == "@tier":
-        number, _, ids = value.partition(":")
-        if not number.strip().isdigit():
-            raise DiagramError(f"{where}: @tier needs 'N: ID ID ...'")
-        for node_id in ids.split():
-            if node_id in diagram.tiers:
-                raise DiagramError(f"{where}: {node_id} has more than one tier")
-            diagram.tiers[node_id] = int(number)
     elif key == "@journey":
         color, _, ids = value.partition(":")
         path = ids.split()
@@ -297,16 +291,8 @@ def to_graph(diagram: Diagram, name: str) -> dict[str, Any]:
         out_degree[source] += 1
         in_degree[target] += 1
     architecture = diagram.mode == "architecture"
-    if architecture and diagram.groups:
-        top_level = [group for group in diagram.groups if "parent" not in group]
-        missing = sorted(set(diagram.nodes) - set(diagram.tiers))
-        if len(top_level) > 1 and missing:
-            raise DiagramError(f"{name}: multi-group architecture needs @tier for {', '.join(missing)}")
-    unknown = sorted(set(diagram.tiers) - set(diagram.nodes))
-    if unknown:
-        raise DiagramError(f"{name}: @tier names unknown nodes: {', '.join(unknown)}")
-    if not architecture and (diagram.tiers or diagram.cards):
-        raise DiagramError(f"{name}: @tier and @card apply only to architecture diagrams")
+    if not architecture and diagram.cards:
+        raise DiagramError(f"{name}: @card applies only to architecture diagrams")
 
     nodes = []
     for node in diagram.nodes.values():
@@ -320,8 +306,6 @@ def to_graph(diagram: Diagram, name: str) -> dict[str, Any]:
                 item["sublabel"] = sublabel
             types = [cls for cls in node.classes if cls in ARCH_TYPES]
             item["type"] = types[-1] if types else ("database" if node.shape == "database" else "backend")
-            if node.id in diagram.tiers:
-                item["tier"] = diagram.tiers[node.id]
         else:
             item["label"] = f"{label} {sublabel}" if sublabel else label
             terminal = in_degree[node.id] == 0 or out_degree[node.id] == 0
@@ -429,20 +413,15 @@ def render(path: Path, scripts: Path) -> None:
     if html.is_symlink():
         fail(f"refusing to replace symbolic link: {html}")
     with tempfile.TemporaryDirectory(prefix="dashmotion-") as temporary:
-        graph_file = Path(temporary) / "graph.json"
         rendered = Path(temporary) / "diagram.html"
         sequence = graph["mode"] == "sequence"
         if sequence:
             content = sequence_diagrams.render_html(graph)
         else:
-            graph_file.write_text(json.dumps(graph), encoding="utf-8")
-            result = subprocess.run(
-                [sys.executable, str(scripts / "layout.py"), str(graph_file), "--render", str(rendered)],
-                capture_output=True, text=True, check=False,
-            )
-            if result.returncode != 0:
-                fail(f"dashmotion layout failed for {path.name}: {result.stderr.strip()}")
-            content = rendered.read_text(encoding="utf-8")
+            try:
+                content = diagram_layout.render_html(graph, scripts)
+            except diagram_layout.LayoutError as error:
+                fail(f"dashmotion layout failed for {path.name}: {error}")
         if "<head>" not in content:
             fail(f"dashmotion output for {path.name} has no <head> element")
         meta = f'<meta name="{SOURCE_META}" content="sha256:{source_digest(path)}">'

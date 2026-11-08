@@ -9,11 +9,6 @@ flowchart TD
   %% @card cyan | Owners | Each LiteLLM profile has its own database on one PostgreSQL | pgvector runs in a separate PostgreSQL 16 instance | postgres-init creates litellm_dev on a fresh volume
   %% @card violet | Readers | The bridge reads with opensearch_ro; Grafana with grafana_ro | Prompts, responses, and key hashes are never copied out | Exporters expose database health to Prometheus
   %% @card rose | Backups | Custom-format dumps validated by pg_restore | Partial backups never advance the last-success metric | Replicate off-host; a local backup does not survive host loss
-  %% @tier 0: OP
-  %% @tier 1: LP LD CON BK
-  %% @tier 2: PG VP
-  %% @tier 3: BRG EXP GF BD
-  %% @tier 4: OFF
   %% @journey #22d3ee: OP BK BD OFF
   %% @journey #a78bfa: LP PG BRG
 

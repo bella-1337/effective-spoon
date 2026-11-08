@@ -5,9 +5,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
+
+import diagram_layout  # noqa: E402
 
 SPEC = importlib.util.spec_from_file_location("render_diagrams", SCRIPTS / "render-diagrams.py")
 assert SPEC is not None and SPEC.loader is not None
@@ -36,10 +39,6 @@ flowchart TD
   %% @card cyan | Path | one | two
   %% @card violet | Data | three
   %% @card rose | Edges | four
-  %% @tier 0: C
-  %% @tier 1: GW
-  %% @tier 2: DB
-  %% @tier 3: X
   %% @journey #22d3ee: C GW X
   subgraph CL["Clients"]
     C["Browser<br/>user agent"]:::frontend
@@ -118,11 +117,11 @@ class FlowParsingTests(unittest.TestCase):
 
 
 class ArchitectureParsingTests(unittest.TestCase):
-    def test_groups_types_tiers_and_summary(self) -> None:
+    def test_groups_types_and_summary(self) -> None:
         result = graph(ARCH)
         nodes = {node["id"]: node for node in result["nodes"]}
         self.assertEqual(nodes["C"], {"id": "C", "label": "Browser", "sublabel": "user agent",
-                                      "type": "frontend", "tier": 0, "group": "CL"})
+                                      "type": "frontend", "group": "CL"})
         self.assertEqual(nodes["DB"]["type"], "database")
         self.assertEqual(nodes["DB"]["group"], "NET")
         self.assertEqual(nodes["GW"]["type"], "backend")
@@ -143,8 +142,10 @@ class ValidationTests(unittest.TestCase):
     def test_journey_must_follow_edges(self) -> None:
         self.assert_rejected(ARCH.replace("C GW X", "C X"), "journey hop C -> X")
 
-    def test_multi_group_architecture_needs_every_tier(self) -> None:
-        self.assert_rejected(ARCH.replace("  %% @tier 3: X\n", ""), "needs @tier for X")
+    def test_layout_hints_are_not_accepted(self) -> None:
+        # The layout comes from the Mermaid edges alone, as in any Mermaid viewer.
+        self.assert_rejected(ARCH.replace("  %% @mode architecture\n", "  %% @mode architecture\n  %% @tier 0: C\n"),
+                             "unknown directive @tier")
 
     def test_unlabelled_node_is_rejected(self) -> None:
         self.assert_rejected("---\ntitle: t\n---\nflowchart TD\n  A[\"a\"] --> B\n", "without a label: B")
@@ -223,6 +224,33 @@ class FidelityTests(unittest.TestCase):
         self.assertEqual(diagrams.fidelity_problems(sample, content), ["label missing from the diagram: 'Beta'"])
         self.assertEqual(diagrams.fidelity_problems(sample, content.replace('<path d="M1 1"/>', "") + ""),
                          ["label missing from the diagram: 'Beta'", "1 edges in the source but 0 connectors drawn"])
+
+
+class GraphvizLayoutTests(unittest.TestCase):
+    def test_dot_source_has_one_cluster_per_boundary_and_no_fixed_rows(self) -> None:
+        node = lambda node_id, group: SimpleNamespace(id=node_id, group=group, w=144.0, h=72.0)
+        layout = SimpleNamespace(
+            groups=[SimpleNamespace(id="ST", label="Stack", parent=None),
+                    SimpleNamespace(id="NET", label='internal "net"', parent="ST")],
+            nodes=[node("GW", "ST"), node("DB", "NET"), node("X", None)],
+            edges=[SimpleNamespace(src="GW", dst="DB", kind="static", label="denied"),
+                   SimpleNamespace(src="GW", dst="X", kind="sync", label=None)],
+        )
+        source = diagram_layout.to_dot(layout)
+        self.assertIn('subgraph "cluster_ST" {', source)
+        self.assertIn('label="internal \\"net\\""', source)
+        self.assertLess(source.index('"cluster_ST"'), source.index('"cluster_NET"'))
+        self.assertIn('"DB" [width=2.0000, height=1.0000];', source)
+        self.assertIn('"GW" -> "DB" [id=e0, arrowhead=none, label="denied"];', source)
+        self.assertIn('"GW" -> "X" [id=e1];', source)
+        self.assertNotIn("rank=same", source)
+
+    def test_spline_becomes_a_curve_that_stops_short_of_the_head(self) -> None:
+        segs = diagram_layout._edge_segments("e,10,0 10,100 10,80 20,60 10,20", 100.0, 4.0)
+        self.assertEqual(segs[0], ("M", (10.0, 0.0)))
+        self.assertEqual(segs[1][0], "C")
+        self.assertEqual(segs[2], ("L", (10.0, 96.0)))
+        self.assertEqual(diagram_layout._path_data(segs), "M10 0 C10 20 20 40 10 80 V96")
 
 
 class SourceDigestTests(unittest.TestCase):

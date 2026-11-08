@@ -99,8 +99,9 @@ external services stay in their own boundaries outside the stack. Edit only the
 ```
 
 Rendering needs the dashmotion skill (set `DASHMOTION_SKILL_DIR` when it is not
-in `~/.agents/skills/dashmotion`). If it is unavailable, update and commit the
-Mermaid sources only and say that the HTML still needs rendering. Never edit
+in `~/.agents/skills/dashmotion`) and Graphviz (`dot`). If either is
+unavailable, update and commit the Mermaid sources only and say that the HTML
+still needs rendering. Never edit
 the generated HTML by hand. The syntax and directives are documented in
 [diagrams/README.md](diagrams/README.md#updating-diagrams).
 

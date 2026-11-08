@@ -9,13 +9,6 @@ flowchart TD
   %% @card cyan | Request path | Clients and the beta Chat UI use the development hostname | litellm-dev authenticates, applies policy, and runs the Auto Router | D3-mini returns a tier; the completion goes to gpt-4o-mini or gpt-4o
   %% @card violet | Dev-only services | Remote BGE-M3 embeds for the semantic cache, tool filter, and pgvector | Qdrant holds the opt-in semantic cache on tmpfs | litellm-pgvector serves the sme-knowledge store
   %% @card rose | Boundaries | Embeddings never pass through D3-mini; both GPU-host links use TLS from its mkcert CA | Xberg egress is limited by the Squid allowlist | Do not expose the dev profile or its debug logs to untrusted users
-  %% @tier 0: API
-  %% @tier 1: TR
-  %% @tier 2: LD
-  %% @tier 3: QD CON
-  %% @tier 4: PR XB PG VP
-  %% @tier 5: OBS
-  %% @tier 6: D3 BGE OAI
   %% @journey #22d3ee: API TR LD D3
   %% @journey #34d399: LD OAI
   %% @journey #a78bfa: LD CON VP

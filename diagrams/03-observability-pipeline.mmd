@@ -9,12 +9,6 @@ flowchart TD
   %% @card cyan | Ingest paths | Alloy ships container logs over OTLP to Data Prepper | LiteLLM exports content-free spans to Data Prepper Trace Analytics | The bridge mirrors Prometheus series and non-content PostgreSQL rows every minute
   %% @card violet | Stores | OpenSearch: logs, mirrored metrics, alert state, usage copies, audit log | Prometheus stays the metrics source of truth and a PPL direct-query source | LiteLLM PostgreSQL stays the system of record for spend and identity
   %% @card rose | Access and alerts | OpenSearch security roles and tenants restrict each user | One alerting monitor per Grafana rule, plus staleness monitors | Set OPENSEARCH_ALERT_CHANNEL_ID or alerts are visible only in the UI
-  %% @tier 0: OP
-  %% @tier 1: TR LL CT EXP
-  %% @tier 2: OSD AL PM PG
-  %% @tier 3: DP BR
-  %% @tier 4: OS
-  %% @tier 5: NC
   %% @journey #fb923c: CT AL DP OS
   %% @journey #34d399: LL PM BR OS NC
   %% @journey #22d3ee: OP TR OSD OS

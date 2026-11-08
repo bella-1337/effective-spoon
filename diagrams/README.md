@@ -85,10 +85,20 @@ The script converts each Mermaid source into a dashmotion graph, renders the
 HTML beside it, and fails if dashmotion's structural check finds overlaps or
 broken connectors, or if a node, edge, or label from the source is missing from
 the result. It needs the
-dashmotion agent skill. If the skill is not installed in
-`~/.agents/skills/dashmotion`, set `DASHMOTION_SKILL_DIR` to its directory.
-When dashmotion is not available, commit the Mermaid change alone; the HTML is
-regenerated later.
+dashmotion agent skill and [Graphviz](https://graphviz.org/) (`dot`). If the
+skill is not installed in `~/.agents/skills/dashmotion`, set
+`DASHMOTION_SKILL_DIR` to its directory.
+When dashmotion or Graphviz is not available, commit the Mermaid change alone;
+the HTML is regenerated later.
+
+Architecture diagrams are laid out by Graphviz `dot` through
+`scripts/diagram_layout.py`. `dot` is the layered engine Mermaid's own layout
+is modelled on: like Mermaid, it derives the rows from the edges, keeps each
+subgraph together, orders each row to reduce crossings, and routes connectors
+as curves around the nodes, so they never trace the dashed boundary
+rectangles. The `.mmd` file is therefore the complete layout input, and a
+diagram has the same structure here as in any Mermaid viewer. dashmotion still
+sizes the nodes and draws the result.
 
 List HTML files that are missing or older than their source (Python only):
 
@@ -134,12 +144,10 @@ Mermaid ignores:
 | `%% @mode architecture` | Render as an architecture diagram; the default is a flow |
 | `%% @subtitle text` | Line under the title |
 | `%% @card cyan\|violet\|rose \| title \| item \| item` | One summary card; architecture diagrams need exactly three |
-| `%% @tier N: ID ID` | Row of the listed components, `0` at the top; required on every component when there is more than one top-level boundary |
 | `%% @journey #rrggbb: ID ID ID` | An animated request path; every consecutive pair must be an edge |
 
-Each tier should belong to one top-level boundary, and a nested boundary should
-not share a tier with components outside it. Otherwise the boundary boxes
-overlap.
+There is no layout directive: to move a component, change the edges or the
+subgraph it belongs to, as you would for Mermaid.
 
 #### Sequence diagrams
 
