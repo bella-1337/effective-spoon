@@ -178,7 +178,9 @@ publish unchecked.
   supports neither Material nor plugins. Zensical reads the same `mkdocs.yml`
   and theme overrides. It does not run MkDocs plugins or hooks, so the site
   uses none.
-- **Diagrams.** Re-render the diagrams with `./scripts/render-diagrams.py`
-  after changing a Mermaid source, as the
-  [diagram guide](../diagrams/README.md#updating-diagrams) describes; the site
-  publishes the rendered HTML.
+- **Diagrams.** The build renders `diagrams/*.mmd` into animated HTML with
+  `scripts/render-diagrams.py` before Zensical runs, so the HTML is never
+  committed. It needs Graphviz (`dot`): `scripts/ci/docs.sh` installs it in
+  the CI image, and a local `build` or `serve` needs it on the workstation.
+  Releases that committed their HTML are published as tagged. See the
+  [diagram guide](../diagrams/README.md#updating-diagrams).

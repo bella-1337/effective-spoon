@@ -9,12 +9,6 @@ flowchart TD
   %% @card cyan | Clients | Browsers, SDKs, and agents reach the stack only through Traefik over HTTPS | API clients authenticate to LiteLLM with a virtual key or the master key | Operators use OpenSearch Dashboards, plus Grafana or Langfuse when enabled
   %% @card violet | Inside the stack | LiteLLM is the single gateway for models, search, MCP tools, and guardrails | Presidio, SearXNG, Xberg, PostgreSQL, and telemetry stay on internal networks | Every container log, metric, and trace lands in OpenSearch by default
   %% @card rose | Outside the stack | OpenAI serves completions; a separate GPU host runs D3-mini and dev BGE-M3 embeddings behind one TLS proxy trusted through its mkcert CA | SearXNG scrapes public engines — review their terms of use | Xberg reaches only allowlisted sites through the Squid egress proxy
-  %% @tier 0: BR API AG
-  %% @tier 1: TR
-  %% @tier 2: LL OSD OPT
-  %% @tier 3: PR SX XB PG OBS
-  %% @tier 4: SQ
-  %% @tier 5: OAI D3 SE WEB
   %% @journey #22d3ee: API TR LL OAI
   %% @journey #a78bfa: BR TR OSD OBS
   %% @journey #34d399: AG TR LL XB SQ WEB

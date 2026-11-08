@@ -5,11 +5,18 @@
 # ///
 """Render the Mermaid sources in diagrams/ into animated dashmotion HTML.
 
-The Mermaid files are the source of truth. This script converts each flowchart
-into dashmotion's semantic graph and calls dashmotion's layout engine to write
-the HTML beside it. dashmotion has no sequence mode, so sequenceDiagram sources
-are laid out by sequence_diagrams.py in the same visual style. Every result
-must pass dashmotion's structural checker.
+The Mermaid files are the source of truth and the only committed form; the
+HTML is generated beside them, ignored by Git, and rendered by the
+documentation build in CI. This script converts each flowchart into
+dashmotion's semantic graph. Architecture diagrams are laid out by Graphviz dot
+through diagram_layout.py, which hands the geometry to dashmotion's renderer.
+dashmotion has no sequence mode, so sequenceDiagram sources are laid out by
+sequence_diagrams.py in the same visual style. Every result must pass
+dashmotion's structural checker.
+
+dashmotion (MIT, github.com/csthink/dashmotion) is downloaded at a pinned
+commit and verified against the SHA-256 digests below, so every machine renders
+with the same code.
 """
 
 from __future__ import annotations
@@ -22,31 +29,34 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import diagram_layout
 import sequence_diagrams
 from maintenance_common import LOG, ROOT, fail, run_main
 
 USAGE = """Usage:
-  ./scripts/render-diagrams.py [DIAGRAM.mmd ...]   render all (or the named) diagrams
-  ./scripts/render-diagrams.py --check             list HTML files that are missing or older than their Mermaid source
+  ./scripts/render-diagrams.py [DIAGRAM.mmd ...]   render all (or the named) diagrams beside their sources
   ./scripts/render-diagrams.py --json DIAGRAM.mmd  print the semantic graph without rendering
 
-Rendering needs the dashmotion skill. Set DASHMOTION_SKILL_DIR when it is not
-installed in ~/.agents/skills/dashmotion. --check and --json need only Python.
+Rendering needs Graphviz (dot) and downloads the pinned dashmotion scripts once
+into the user cache directory. Offline, set DASHMOTION_SKILL_DIR to a dashmotion
+skill directory instead. --json needs only Python.
 """
 
 DIAGRAMS_DIR = ROOT / "diagrams"
 ARCH_TYPES = {"frontend", "backend", "database", "cloud", "security", "bus", "external"}
 CARD_ACCENTS = {"cyan", "violet", "rose"}
-SOURCE_META = "dashmotion-source"
-SKILL_CANDIDATES = (
-    Path.home() / ".agents/skills/dashmotion",
-    Path.home() / ".copilot/skills/dashmotion",
-    Path.home() / ".claude/skills/dashmotion",
-)
+DASHMOTION_COMMIT = "ae2fe4f28c60caa53da8b15fa3537f4ea576f4ad"  # dashmotion 2.2.4
+DASHMOTION_URL = f"https://raw.githubusercontent.com/csthink/dashmotion/{DASHMOTION_COMMIT}/skills/dashmotion/scripts/"
+DASHMOTION_FILES = {
+    "layout.py": "a2691344d00dae614bd4f1b9a53d980e1e1a59dbb8f68345e46efe51f08b2b24",
+    "check_diagram.py": "1a93bcab4852c79c91279cf59f1ba01a20d0d4c8e62e118dfc0b61677b3d4e8b",
+}
+HTTP_TIMEOUT_SECONDS = 30
 
 # Longest openers first so "([" is not read as "(".
 SHAPES = (
@@ -87,7 +97,6 @@ class Diagram:
     nodes: dict[str, Node] = field(default_factory=dict)
     edges: list[dict[str, str]] = field(default_factory=list)
     groups: list[dict[str, str]] = field(default_factory=list)
-    tiers: dict[str, int] = field(default_factory=dict)
     journeys: list[dict[str, Any]] = field(default_factory=list)
     cards: list[dict[str, Any]] = field(default_factory=list)
 
@@ -187,14 +196,6 @@ def _parse_directive(diagram: Diagram, body: str, where: str) -> None:
         diagram.subtitle = value
     elif key == "@footer":
         diagram.footer = value
-    elif key == "@tier":
-        number, _, ids = value.partition(":")
-        if not number.strip().isdigit():
-            raise DiagramError(f"{where}: @tier needs 'N: ID ID ...'")
-        for node_id in ids.split():
-            if node_id in diagram.tiers:
-                raise DiagramError(f"{where}: {node_id} has more than one tier")
-            diagram.tiers[node_id] = int(number)
     elif key == "@journey":
         color, _, ids = value.partition(":")
         path = ids.split()
@@ -297,16 +298,8 @@ def to_graph(diagram: Diagram, name: str) -> dict[str, Any]:
         out_degree[source] += 1
         in_degree[target] += 1
     architecture = diagram.mode == "architecture"
-    if architecture and diagram.groups:
-        top_level = [group for group in diagram.groups if "parent" not in group]
-        missing = sorted(set(diagram.nodes) - set(diagram.tiers))
-        if len(top_level) > 1 and missing:
-            raise DiagramError(f"{name}: multi-group architecture needs @tier for {', '.join(missing)}")
-    unknown = sorted(set(diagram.tiers) - set(diagram.nodes))
-    if unknown:
-        raise DiagramError(f"{name}: @tier names unknown nodes: {', '.join(unknown)}")
-    if not architecture and (diagram.tiers or diagram.cards):
-        raise DiagramError(f"{name}: @tier and @card apply only to architecture diagrams")
+    if not architecture and diagram.cards:
+        raise DiagramError(f"{name}: @card applies only to architecture diagrams")
 
     nodes = []
     for node in diagram.nodes.values():
@@ -320,8 +313,6 @@ def to_graph(diagram: Diagram, name: str) -> dict[str, Any]:
                 item["sublabel"] = sublabel
             types = [cls for cls in node.classes if cls in ARCH_TYPES]
             item["type"] = types[-1] if types else ("database" if node.shape == "database" else "backend")
-            if node.id in diagram.tiers:
-                item["tier"] = diagram.tiers[node.id]
         else:
             item["label"] = f"{label} {sublabel}" if sublabel else label
             terminal = in_degree[node.id] == 0 or out_degree[node.id] == 0
@@ -358,28 +349,43 @@ def to_graph(diagram: Diagram, name: str) -> dict[str, Any]:
     return graph
 
 
-def source_digest(path: Path) -> str:
+def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def recorded_digest(html: Path) -> str | None:
-    if not html.is_file():
-        return None
-    match = re.search(rf'<meta name="{SOURCE_META}" content="sha256:([0-9a-f]{{64}})">', html.read_text(encoding="utf-8"))
-    return match.group(1) if match else None
+def dashmotion_cache() -> Path:
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "litellm-stack" / "dashmotion" / DASHMOTION_COMMIT
+
+
+def fetch_dashmotion(cache: Path) -> Path:
+    """The pinned dashmotion scripts, downloaded once and verified on every use."""
+    cache.mkdir(parents=True, exist_ok=True)
+    for name, digest in DASHMOTION_FILES.items():
+        target = cache / name
+        if target.is_file() and not target.is_symlink() and _sha256(target) == digest:
+            continue
+        try:
+            with urllib.request.urlopen(DASHMOTION_URL + name, timeout=HTTP_TIMEOUT_SECONDS) as response:
+                body = response.read()
+        except OSError as error:
+            fail(f"could not download dashmotion {name}: {error}. Offline, set DASHMOTION_SKILL_DIR.")
+        if hashlib.sha256(body).hexdigest() != digest:
+            fail(f"dashmotion {name} does not match its pinned SHA-256 digest; refusing to run it")
+        partial = target.with_suffix(".partial")
+        partial.write_bytes(body)
+        os.replace(partial, target)
+    return cache
 
 
 def dashmotion_scripts() -> Path:
     configured = os.environ.get("DASHMOTION_SKILL_DIR")
-    candidates = [Path(configured).expanduser()] if configured else list(SKILL_CANDIDATES)
-    for candidate in candidates:
-        if (candidate / "scripts/layout.py").is_file() and (candidate / "scripts/check_diagram.py").is_file():
-            return candidate / "scripts"
-    fail(
-        "the dashmotion skill was not found; install it or set DASHMOTION_SKILL_DIR. "
-        "The Mermaid sources stay authoritative; re-render when dashmotion is available."
-    )
-    raise AssertionError
+    if configured:
+        scripts = Path(configured).expanduser() / "scripts"
+        if not all((scripts / name).is_file() for name in DASHMOTION_FILES):
+            fail(f"DASHMOTION_SKILL_DIR has no scripts/layout.py and scripts/check_diagram.py: {configured}")
+        return scripts
+    return fetch_dashmotion(dashmotion_cache())
 
 
 def parse_graph(text: str, name: str) -> dict[str, Any]:
@@ -429,24 +435,15 @@ def render(path: Path, scripts: Path) -> None:
     if html.is_symlink():
         fail(f"refusing to replace symbolic link: {html}")
     with tempfile.TemporaryDirectory(prefix="dashmotion-") as temporary:
-        graph_file = Path(temporary) / "graph.json"
         rendered = Path(temporary) / "diagram.html"
         sequence = graph["mode"] == "sequence"
         if sequence:
             content = sequence_diagrams.render_html(graph)
         else:
-            graph_file.write_text(json.dumps(graph), encoding="utf-8")
-            result = subprocess.run(
-                [sys.executable, str(scripts / "layout.py"), str(graph_file), "--render", str(rendered)],
-                capture_output=True, text=True, check=False,
-            )
-            if result.returncode != 0:
-                fail(f"dashmotion layout failed for {path.name}: {result.stderr.strip()}")
-            content = rendered.read_text(encoding="utf-8")
-        if "<head>" not in content:
-            fail(f"dashmotion output for {path.name} has no <head> element")
-        meta = f'<meta name="{SOURCE_META}" content="sha256:{source_digest(path)}">'
-        content = content.replace("<head>", f"<head>\n{meta}", 1)
+            try:
+                content = diagram_layout.render_html(graph, scripts)
+            except diagram_layout.LayoutError as error:
+                fail(f"dashmotion layout failed for {path.name}: {error}")
         content = "\n".join(line.rstrip() for line in content.splitlines()) + "\n"
         rendered.write_text(content, encoding="utf-8")
         check = subprocess.run(
@@ -459,16 +456,7 @@ def render(path: Path, scripts: Path) -> None:
         if problems:
             fail(f"{path.name} does not match its Mermaid source:\n  " + "\n  ".join(problems))
         os.replace(rendered, html)
-    LOG.info(f"rendered {html.relative_to(ROOT)}")
-
-
-def stale_diagrams(paths: list[Path]) -> list[str]:
-    stale = []
-    for path in paths:
-        load(path)
-        if recorded_digest(path.with_suffix(".html")) != source_digest(path):
-            stale.append(str(path.with_suffix(".html").relative_to(ROOT)))
-    return stale
+    LOG.info(f"rendered {html.relative_to(ROOT) if html.is_relative_to(ROOT) else html}")
 
 
 def main() -> None:
@@ -480,14 +468,6 @@ def main() -> None:
         if len(args) != 2:
             fail("--json takes exactly one .mmd file", 2)
         print(json.dumps(load(Path(args[1]).resolve()), indent=2, ensure_ascii=False))
-        return
-    if args == ["--check"]:
-        stale = stale_diagrams(sorted(DIAGRAMS_DIR.glob("*.mmd")))
-        if stale:
-            LOG.info("Re-render with ./scripts/render-diagrams.py; stale or missing:")
-            LOG.info("\n".join(f"  {item}" for item in stale))
-            fail(f"{len(stale)} diagram(s) out of date")
-        LOG.info("All diagrams match their Mermaid sources.")
         return
     if any(arg.startswith("-") for arg in args):
         fail("unknown option; see --help", 2)

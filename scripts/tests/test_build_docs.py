@@ -270,6 +270,42 @@ class RepositoryContractTests(unittest.TestCase):
                 build_docs.check_published(site)
 
 
+class DiagramRenderingTests(unittest.TestCase):
+    def tree(self, root: Path, *, html: bool) -> Path:
+        (root / "diagrams").mkdir()
+        (root / "scripts").mkdir()
+        (root / "scripts" / "render-diagrams.py").write_text("", encoding="utf-8")
+        (root / "diagrams" / "01-sample.mmd").write_text("flowchart TD\n", encoding="utf-8")
+        if html:
+            (root / "diagrams" / "01-sample.html").write_text("<svg/>", encoding="utf-8")
+        return root
+
+    def test_renders_with_the_renderer_of_the_same_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = self.tree(Path(temporary), html=False)
+            with mock.patch.object(build_docs.subprocess, "run", return_value=mock.Mock(returncode=0)) as run:
+                build_docs.render_diagrams(source)
+            run.assert_called_once_with(
+                [sys.executable, str(source / "scripts" / "render-diagrams.py")], cwd=source, check=False
+            )
+
+    def test_release_with_committed_html_is_published_as_tagged(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = self.tree(Path(temporary), html=True)
+            with mock.patch.object(build_docs.subprocess, "run", return_value=mock.Mock(returncode=0)) as run:
+                build_docs.render_diagrams(source)
+                run.assert_not_called()
+                build_docs.render_diagrams(source, always=True)
+                run.assert_called_once()
+
+    def test_failed_rendering_fails_the_build(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = self.tree(Path(temporary), html=False)
+            with mock.patch.object(build_docs.subprocess, "run", return_value=mock.Mock(returncode=1)):
+                with self.assertRaisesRegex(maintenance_common.ScriptError, "could not render"):
+                    build_docs.render_diagrams(source)
+
+
 class EditLinkTests(unittest.TestCase):
     def test_dev_and_local_builds_edit_on_the_default_branch(self) -> None:
         github = build_docs.Context("https://github.com/example/stack", "github", "main")

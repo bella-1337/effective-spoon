@@ -9,12 +9,6 @@ flowchart TD
   %% @card cyan | Semantic cache | Opt-in per request with cache.use-cache | Hit when cosine similarity is at least 0.92, scoped per end user | Qdrant runs on tmpfs, so recreating it deletes every entry
   %% @card violet | Knowledge store | sme-knowledge lives in vector-postgres (1,024-dim HNSW) | Search goes through BerriAI's litellm-pgvector connector | Opt-in Xberg auto-indexing anonymizes chunks with Presidio first
   %% @card rose | Scope | Qdrant and the connector run only in the dev profile; only litellm-dev calls BGE-M3, over TLS | Production lists no vector store and no semantic cache | Promote capabilities through the dev-to-prod register
-  %% @tier 0: CU
-  %% @tier 1: TR
-  %% @tier 2: LD
-  %% @tier 3: QD CON
-  %% @tier 4: PR VP
-  %% @tier 5: BGE OAI
   %% @journey #22d3ee: CU TR LD QD
   %% @journey #a78bfa: LD CON VP
   %% @journey #34d399: LD OAI

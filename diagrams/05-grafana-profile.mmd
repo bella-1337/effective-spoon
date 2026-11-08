@@ -9,13 +9,6 @@ flowchart TD
   %% @card cyan | Queries | Grafana reads Loki, Prometheus, and PostgreSQL through grafana_ro | grafana-db-init creates and updates the least-privilege role | Dashboards come from the pinned fetch-dashboards script
   %% @card violet | Logs | alloy-loki ships the same container streams to Loki | It discovers containers through the POST-disabled socket proxy | Only the current Compose project is collected
   %% @card rose | Limits | Grafana OSS cannot restrict data sources per user | Sign-up and anonymous access stay disabled | Configure a contact point or alerts cannot notify anyone
-  %% @tier 0: OP
-  %% @tier 1: TR
-  %% @tier 2: GF
-  %% @tier 3: AK
-  %% @tier 4: LK
-  %% @tier 5: PM PG ADP
-  %% @tier 6: CP
   %% @journey #22d3ee: OP TR GF PM
   %% @journey #fb923c: AK LK
 

@@ -114,3 +114,4 @@ Deployed separately with [`gpu-host/`](../gpu-host/README.md).
 | Python | `3.11` or newer | `scripts/ci/validate.sh` and the maintenance scripts |
 | uv | See [Maintenance runtime](maintenance-runtime.md) | Maintenance scripts with pinned dependencies |
 | mkcert | Any current release | Local TLS certificates only |
+| Graphviz | Any current release with `dot -Tjson` | Rendering `diagrams/*.mmd` locally; CI installs it for the documentation build |

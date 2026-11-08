@@ -9,12 +9,6 @@ flowchart TD
   %% @card cyan | Trace path | LiteLLM adds langfuse_otel only when the profile runs | A trusted hook replaces user and session IDs with HMAC pseudonyms | Prompt and response content is never exported
   %% @card violet | Datastores | PostgreSQL for state, ClickHouse for traces, Redis for queues | MinIO stores events and media behind its own Traefik host | All Langfuse values live in .env.optional
   %% @card rose | Access limits | Public sign-up is disabled; one initial administrator | trace_user_id is not an authorization boundary | Keep the shared project restricted to administrators and operators
-  %% @tier 0: OP API
-  %% @tier 1: TR
-  %% @tier 2: LL
-  %% @tier 3: LW
-  %% @tier 4: LWK
-  %% @tier 5: LPG CH RD MI
   %% @journey #22d3ee: API TR LL LW RD
   %% @journey #a78bfa: OP TR LW LPG
 

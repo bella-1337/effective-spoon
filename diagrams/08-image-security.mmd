@@ -9,14 +9,6 @@ flowchart TD
   %% @card cyan | Scan scope | Every running service, using the platform-specific digest | Registry images are scanned remotely without the Docker socket | Local or mutable images are reported unknown, not clean
   %% @card violet | Evidence | Private Trivy JSON and KEV evidence (0700 / 0600) | One aggregate textfile with no CVE IDs or secrets | SBOMs and licence evidence are generated after each scan
   %% @card rose | Policy | Scheduled mode fails only on operational errors | --enforce also fails on an unexcepted KEV or fixable Critical | Exceptions are time-limited and alert before expiry
-  %% @tier 0: OP
-  %% @tier 1: MON
-  %% @tier 2: SDP TV
-  %% @tier 3: DOCK RPT TXT
-  %% @tier 4: NE
-  %% @tier 5: PM
-  %% @tier 6: ALR
-  %% @tier 7: REG TDB KEV NC
   %% @journey #22d3ee: OP MON TV REG
   %% @journey #fb7185: MON TXT NE PM ALR NC
 

@@ -9,12 +9,6 @@ flowchart TD
   %% @card cyan | Request path | Clients call /mcp-rest/tools/call on LiteLLM, never Xberg directly | Only extract, detect_mime_type, get_version, and list_formats are exposed | Explicit injection phrases in tool results are redacted before return
   %% @card violet | Sandbox | Xberg has no route to the internal network or the Internet | Local paths and file:// URIs are disabled; only uploads and allowlisted URLs | In dev, extraction results can feed opt-in pgvector auto-indexing
   %% @card rose | Egress control | Squid allows HTTPS CONNECT to allowlisted hosts only and denies private ranges | xberg-dns answers NXDOMAIN for every unlisted name, so lookups cannot exfiltrate data | Keep the proxy, DNS, and Xberg allowlists aligned; grant MCP access only to trusted keys
-  %% @tier 0: AG
-  %% @tier 1: TR
-  %% @tier 2: LL
-  %% @tier 3: XB
-  %% @tier 4: DNS SQ
-  %% @tier 5: PDNS ALW BLK
   %% @journey #22d3ee: AG TR LL XB SQ ALW
   %% @journey #fb7185: XB DNS PDNS
 

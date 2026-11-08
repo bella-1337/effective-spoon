@@ -119,8 +119,9 @@ jobs:
           if [ "$MODE" = "publish" ]; then
             set -- "$MODE" "$SITE_URL"
           fi
+          # Starts as root to install Graphviz, then builds as the runner user.
           docker run --rm \
-            --user "$(id -u):$(id -g)" \
+            --env DOCS_RUN_AS="$(id -u):$(id -g)" \
             --volume "$PWD:/repo" \
             --workdir /repo \
             --env HOME=/tmp \

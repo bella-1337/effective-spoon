@@ -9,12 +9,6 @@ flowchart TD
   %% @card cyan | Request path | The client calls model coding-router through Traefik | LiteLLM authenticates, applies budgets and guardrails, then hands off to the Auto Router | The response returns in the normal OpenAI format
   %% @card violet | Decision | Only the classification request goes to D3-mini | SIMPLE and MEDIUM map to gpt-4o-mini; COMPLEX and REASONING to gpt-4o | A timeout after 15 seconds falls back to gpt-4o
   %% @card rose | Telemetry | Classifier and completion calls are both traced | Spans and metrics carry no prompt content | Validate tier accuracy on representative prompts before relying on savings
-  %% @tier 0: CLI
-  %% @tier 1: TR
-  %% @tier 2: LL
-  %% @tier 3: AR
-  %% @tier 4: OBS
-  %% @tier 5: D3 OAI
   %% @journey #22d3ee: CLI TR LL AR D3
   %% @journey #34d399: AR OAI
 

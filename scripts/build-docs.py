@@ -6,7 +6,7 @@
 """Build, preview, and assemble the versioned documentation site.
 
 The pages are the repository's own Markdown files, published by Zensical
-from mkdocs.yml. The toolchain is installed from the hash-locked
+from mkdocs.yml, plus the diagrams rendered from diagrams/*.mmd. The toolchain is installed from the hash-locked
 docs-site/requirements.txt of each version into a cached uv virtual
 environment, so an old release is rebuilt with the toolchain it was released
 with.
@@ -315,6 +315,24 @@ def check_published(site: Path) -> None:
         )
 
 
+def render_diagrams(source: Path, *, always: bool = False) -> None:
+    """Render the tree's Mermaid diagrams with the renderer of the same tree.
+
+    The HTML is not committed, so the site renders it. Releases from before
+    that change committed their HTML and are published as they were tagged.
+    """
+    diagrams = source / "diagrams"
+    renderer = source / "scripts" / "render-diagrams.py"
+    sources = sorted(diagrams.glob("*.mmd")) if diagrams.is_dir() else []
+    if not sources or not renderer.is_file():
+        return
+    if not always and all(path.with_suffix(".html").is_file() for path in sources):
+        return
+    LOG.info(f"Rendering {len(sources)} diagrams in {source}.")
+    if subprocess.run([sys.executable, str(renderer)], cwd=source, check=False).returncode:
+        fail(f"could not render the diagrams in {source}")
+
+
 def build_into(python: Path, source: Path, output: Path, env: dict[str, str]) -> None:
     """Build source in strict mode and move its site directory to output."""
     site = source / SITE_DIR
@@ -430,6 +448,7 @@ def build_site(args: argparse.Namespace) -> None:
             source = Path(work) / "src"
             source.mkdir()
             export_tree(version.commit, source)
+            render_diagrams(source)
             python = ensure_toolchain(source / REQUIREMENTS)
             site_url = f"{args.site_url.rstrip('/')}/{version.name}/" if args.site_url else ""
             env = docs_environment(
@@ -462,6 +481,7 @@ def build_working_tree(args: argparse.Namespace) -> None:
         source_ref=context.default_branch,
         commit=commit,
     )
+    render_diagrams(ROOT, always=True)
     zensical(python, ["build", "--strict", "--clean"], config=CONFIG, env=env)
     check_published(ROOT / SITE_DIR)
     LOG.info(f"PASS: built the working tree into {ROOT / SITE_DIR}")
@@ -477,6 +497,8 @@ def serve(args: argparse.Namespace) -> None:
         source_ref=context.default_branch,
         commit="",
     )
+    # Rendered once at start; re-run ./scripts/render-diagrams.py after editing a .mmd.
+    render_diagrams(ROOT, always=True)
     zensical(python, ["serve", "--dev-addr", args.dev_addr], config=CONFIG, env=env)
 
 
