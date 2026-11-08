@@ -28,7 +28,7 @@ sequenceDiagram
   and
     CI->>CI: dev container build
   and
-    CI->>CI: versioned documentation site build
+    CI->>CI: diagrams rendered from .mmd, then versioned documentation site build
   end
   alt a check fails
     CI--xDEV: change blocked

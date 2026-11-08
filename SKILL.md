@@ -90,19 +90,19 @@ Do not probe `/` for Presidio: the health endpoint is `/health`.
 Every change that adds, removes, renames, or reconnects a service, network,
 profile, data store, external dependency, or flow step must update the
 affected Mermaid sources in `diagrams/*.mmd` in the same change. Clients and
-external services stay in their own boundaries outside the stack. Edit only the
-`.mmd` files, then regenerate the animated HTML with one command:
+external services stay in their own boundaries outside the stack. Commit only
+the `.mmd` files: the animated HTML is generated, ignored by Git, and rendered
+by the documentation build in CI, which fails when a source does not render.
+Render locally to check and preview a change:
 
 ```sh
 ./scripts/render-diagrams.py
-./scripts/render-diagrams.py --check
 ```
 
-Rendering needs the dashmotion skill (set `DASHMOTION_SKILL_DIR` when it is not
-in `~/.agents/skills/dashmotion`) and Graphviz (`dot`). If either is
-unavailable, update and commit the Mermaid sources only and say that the HTML
-still needs rendering; CI runs `--check` and fails until it is rendered. Never
-edit the generated HTML by hand. The syntax and directives are documented in
+Rendering needs Graphviz (`dot`) and downloads the pinned dashmotion renderer
+once (set `DASHMOTION_SKILL_DIR` to a local copy when offline). If Graphviz is
+unavailable, commit the Mermaid sources and say that they were not rendered
+locally; CI renders them. The syntax and directives are documented in
 [diagrams/README.md](diagrams/README.md#updating-diagrams).
 
 ### 4. Validate static configuration

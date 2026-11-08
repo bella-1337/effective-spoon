@@ -26,8 +26,9 @@ See `docs/development-workflow.md`.
    configuration, OpenSearch and Grafana assets, environment examples, and
    the guides under `docs/`.
 3. When a service, network, profile, data store, external dependency, or flow
-   step changes, edit the Mermaid sources in `diagrams/*.mmd` and run
-   `./scripts/render-diagrams.py`. Never edit the generated HTML by hand.
+   step changes, edit the Mermaid sources in `diagrams/*.mmd` and check that
+   they render with `./scripts/render-diagrams.py`. Commit only the `.mmd`
+   files; CI renders the HTML for the documentation site.
 4. When you add, move, or remove a Markdown file, update `nav:` in
    `mkdocs.yml`.
 5. Add the change under `[Unreleased]` in `CHANGELOG.md`.

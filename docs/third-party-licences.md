@@ -143,6 +143,14 @@ emoji, whose CC BY 4.0 licence would require attribution.
 | `pyyaml` | 6.0.3 | MIT | None. |
 | `tomli` | 2.5.0 | MIT | None. |
 
+The build also renders the diagrams with these tools, which are likewise
+build-time only. The published site contains their output, not their code.
+
+| Tool | Version | Licence | Notes |
+| --- | --- | --- | --- |
+| dashmotion `layout.py` and `check_diagram.py` | 2.2.4, commit `ae2fe4f` | MIT | Downloaded by `scripts/render-diagrams.py` and checked against pinned SHA-256 digests; not redistributed. |
+| Graphviz (`dot`) | Debian bookworm package in CI | EPL-1.0 | Installed by `scripts/ci/docs.sh` in the CI image; a workstation uses its own. |
+
 The CI jobs build the site in `ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm`
 (uv: MIT OR Apache-2.0; Python: PSF-2.0; Debian packages under their own
 licences), a CI tool image like the linters, not part of the stack.

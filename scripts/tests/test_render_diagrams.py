@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
 import diagram_layout  # noqa: E402
+from maintenance_common import ScriptError  # noqa: E402
 
 SPEC = importlib.util.spec_from_file_location("render_diagrams", SCRIPTS / "render-diagrams.py")
 assert SPEC is not None and SPEC.loader is not None
@@ -253,18 +257,54 @@ class GraphvizLayoutTests(unittest.TestCase):
         self.assertEqual(diagram_layout._path_data(segs), "M10 0 C10 20 20 40 10 80 V96")
 
 
-class SourceDigestTests(unittest.TestCase):
-    def test_check_reports_missing_and_stale_html(self) -> None:
-        with tempfile.TemporaryDirectory(dir=diagrams.ROOT) as temporary:
-            source = Path(temporary) / "sample.mmd"
-            source.write_text(FLOW, encoding="utf-8")
-            html = source.with_suffix(".html")
-            self.assertEqual(len(diagrams.stale_diagrams([source])), 1)
-            html.write_text(f'<meta name="dashmotion-source" content="sha256:{diagrams.source_digest(source)}">',
-                            encoding="utf-8")
-            self.assertEqual(diagrams.stale_diagrams([source]), [])
-            source.write_text(FLOW + "  G --> A\n", encoding="utf-8")
-            self.assertEqual(len(diagrams.stale_diagrams([source])), 1)
+class DashmotionDownloadTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.bodies = {name: f"# {name}\n".encode() for name in diagrams.DASHMOTION_FILES}
+        digests = {name: diagrams.hashlib.sha256(body).hexdigest() for name, body in self.bodies.items()}
+        patcher = mock.patch.dict(diagrams.DASHMOTION_FILES, digests)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def serve(self, bodies: dict[str, bytes]) -> mock.MagicMock:
+        def urlopen(url: str, timeout: float) -> io.BytesIO:
+            self.assertTrue(url.startswith(diagrams.DASHMOTION_URL))
+            return io.BytesIO(bodies[url.removeprefix(diagrams.DASHMOTION_URL)])
+        return mock.patch.object(diagrams.urllib.request, "urlopen", side_effect=urlopen)
+
+    def test_downloads_once_and_reuses_verified_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, self.serve(self.bodies) as urlopen:
+            cache = Path(temporary) / "dashmotion"
+            self.assertEqual(diagrams.fetch_dashmotion(cache), cache)
+            self.assertEqual((cache / "layout.py").read_bytes(), self.bodies["layout.py"])
+            self.assertEqual(urlopen.call_count, 2)
+            diagrams.fetch_dashmotion(cache)
+            self.assertEqual(urlopen.call_count, 2)
+            (cache / "layout.py").write_text("tampered\n", encoding="utf-8")
+            diagrams.fetch_dashmotion(cache)
+            self.assertEqual(urlopen.call_count, 3)
+            self.assertEqual((cache / "layout.py").read_bytes(), self.bodies["layout.py"])
+
+    def test_refuses_a_download_that_does_not_match_its_digest(self) -> None:
+        tampered = {**self.bodies, "check_diagram.py": b"import os\n"}
+        with tempfile.TemporaryDirectory() as temporary, self.serve(tampered):
+            cache = Path(temporary) / "dashmotion"
+            with self.assertRaisesRegex(ScriptError, "does not match its pinned SHA-256"):
+                diagrams.fetch_dashmotion(cache)
+            self.assertFalse((cache / "check_diagram.py").exists())
+
+    def test_pinned_commit_and_digests_are_well_formed(self) -> None:
+        self.assertRegex(diagrams.DASHMOTION_COMMIT, r"^[0-9a-f]{40}$")
+        self.assertIn(diagrams.DASHMOTION_COMMIT, diagrams.DASHMOTION_URL)
+
+
+class GeneratedHtmlTests(unittest.TestCase):
+    def test_rendered_html_is_ignored_and_not_committed(self) -> None:
+        tracked = subprocess.run(["git", "-C", str(diagrams.ROOT), "ls-files", "diagrams/*.html"],
+                                 capture_output=True, text=True, check=False)
+        if tracked.returncode:
+            self.skipTest("Git metadata is unavailable")
+        self.assertEqual(tracked.stdout.strip(), "")
+        self.assertIn("/diagrams/*.html", (diagrams.ROOT / ".gitignore").read_text(encoding="utf-8").splitlines())
 
 
 class RepositoryDiagramTests(unittest.TestCase):

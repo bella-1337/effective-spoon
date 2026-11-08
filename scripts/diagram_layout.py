@@ -24,6 +24,7 @@ import math
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -52,7 +53,12 @@ def load_dashmotion(scripts: Path) -> ModuleType:
     if spec is None or spec.loader is None:
         raise LayoutError(f"cannot load {scripts / 'layout.py'}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Leave no bytecode cache in the dashmotion directory, which may be shared.
+    previous, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
     return module
 
 
@@ -187,8 +193,11 @@ def apply_dot(layout: Any, result: dict[str, Any], dm: ModuleType) -> None:
             layout.group_by_id[name[8:]].box = (x1, height - y2, x2 - x1, y2 - y1)
     by_index = {}
     for edge in result.get("edges", []):
-        if str(edge.get("id", "")).startswith("e"):
-            by_index[int(edge["id"][1:])] = edge
+        key = str(edge.get("id", ""))
+        # Edges are emitted in source order, so dot's _gvid is the fallback index.
+        index = int(key[1:]) if key.startswith("e") and key[1:].isdigit() else edge.get("_gvid")
+        if isinstance(index, int):
+            by_index[index] = edge
     for index, edge in enumerate(layout.edges):
         drawn = by_index.get(index)
         if drawn is None or "pos" not in drawn:

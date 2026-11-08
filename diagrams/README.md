@@ -2,18 +2,20 @@
 
 [← Back to the README](../README.md#documentation)
 
-Animated diagrams of the stack's components and flows. Every diagram has two
-files with the same name:
+Animated diagrams of the stack's components and flows. Each diagram is one
+Mermaid source, `NN-name.mmd`, committed in this directory. **The source is
+the only form in the repository and the file you edit.**
 
-- `NN-name.mmd` — the Mermaid source. **This is the file you edit.**
-- `NN-name.html` — the animated [dashmotion](#updating-diagrams) rendering,
-  generated from the source by `./scripts/render-diagrams.py`. Do not edit it
-  by hand.
+The animated [dashmotion](#updating-diagrams) rendering, `NN-name.html`, is
+generated from the source and never committed. CI renders it when it builds
+the [documentation site](../docs/documentation-site.md), so the links in the
+tables below open the animations on the site. In a checkout,
+`./scripts/render-diagrams.py` writes them beside the sources, where Git
+ignores them.
 
 The HTML files are self-contained, with inline SVG and no external assets.
-GitHub shows their source rather than rendering them, so open them locally in a
-browser. Use the ⏯ button to pause the animation. Animation is turned off when
-the operating system requests reduced motion.
+Use the ⏯ button to pause the animation. Animation is turned off when the
+operating system requests reduced motion.
 
 ## Conventions
 
@@ -73,24 +75,30 @@ loops, and parallel work (`par`/`and`). A dot replays the messages in order.
 
 Keep the diagrams in step with the stack. Whenever a change adds, removes,
 renames, or reconnects a service, network, profile, data store, external
-dependency, or flow step, update every affected `.mmd` file in the same change.
-Then regenerate the HTML:
+dependency, or flow step, update every affected `.mmd` file in the same change
+and commit only the `.mmd` files. To preview the result, render it locally:
 
 ```sh
 ./scripts/render-diagrams.py                         # all diagrams
 ./scripts/render-diagrams.py diagrams/03-observability-pipeline.mmd
+./scripts/build-docs.py serve                        # or preview them in the site
 ```
 
 The script converts each Mermaid source into a dashmotion graph, renders the
 HTML beside it, and fails if dashmotion's structural check finds overlaps or
 broken connectors, or if a node, edge, or label from the source is missing from
-the result. It needs the
-dashmotion agent skill and [Graphviz](https://graphviz.org/) (`dot`). If the
-skill is not installed in `~/.agents/skills/dashmotion`, set
-`DASHMOTION_SKILL_DIR` to its directory.
-When dashmotion or Graphviz is not available, commit the Mermaid change alone
-and have someone who has both render it before the change merges; CI fails
-until the HTML matches the source.
+the result. It needs [Graphviz](https://graphviz.org/) (`dot`). The dashmotion
+renderer (MIT, [csthink/dashmotion](https://github.com/csthink/dashmotion)) is
+downloaded once into `~/.cache/litellm-stack/` at the commit pinned in
+`scripts/render-diagrams.py` and checked against its SHA-256 digests, so every
+machine renders with the same code. Offline, set `DASHMOTION_SKILL_DIR` to a
+dashmotion skill directory instead.
+
+The documentation build in CI (`scripts/ci/docs.sh`, on every pull request,
+merge request, and default-branch pipeline) renders every diagram the same
+way, so a source that does not render, or fails the structural check, fails the
+pipeline. Release versions of the site are rendered from their own tag with
+that tag's renderer.
 
 Architecture diagrams are laid out by Graphviz `dot` through
 `scripts/diagram_layout.py`. `dot` is the layered engine Mermaid's own layout
@@ -101,16 +109,9 @@ rectangles. The `.mmd` file is therefore the complete layout input, and a
 diagram has the same structure here as in any Mermaid viewer. dashmotion still
 sizes the nodes and draws the result.
 
-List HTML files that are missing or older than their source (Python only):
-
-```sh
-./scripts/render-diagrams.py --check
-```
-
-CI runs this check in `scripts/ci/validate.sh`, so a pipeline fails while any
-HTML file is older than its source. The unit tests in
-`scripts/tests/test_render_diagrams.py` also parse every committed `.mmd`
-file, so CI rejects a source the renderer cannot read.
+The unit tests in `scripts/tests/test_render_diagrams.py` also parse every
+committed `.mmd` file, so the validation job rejects a source the renderer
+cannot read without needing Graphviz.
 
 ### Mermaid conventions
 

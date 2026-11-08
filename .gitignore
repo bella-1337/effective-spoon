@@ -47,6 +47,9 @@ dist/
 # gitlab-ci-local state
 .gitlab-ci-local/
 
+# Diagrams rendered from diagrams/*.mmd by scripts/render-diagrams.py
+/diagrams/*.html
+
 # Documentation site build output and toolchain cache
 /site/
 /public/

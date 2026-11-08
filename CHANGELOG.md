@@ -14,8 +14,12 @@ All notable changes to this stack are recorded here. The format follows
   own engine. Connectors are curved and routed between boxes, so they no longer
   trace the dashed boundary rectangles, and each boundary keeps its members
   together. Rendering now needs Graphviz.
-- CI runs `./scripts/render-diagrams.py --check`, so a pipeline fails when a
-  rendered diagram is older than its Mermaid source.
+- The rendered diagram HTML is no longer committed. The Mermaid sources are the
+  only form in the repository; the documentation build in CI renders them,
+  installing Graphviz in its image, and fails when one does not render.
+  `./scripts/render-diagrams.py` downloads the dashmotion renderer at a pinned
+  commit and checks its SHA-256 digests, so the dashmotion skill is no longer
+  needed. The `--check` option is removed.
 - The Mermaid edges alone decide the rows, as in any Mermaid viewer. The
   `%% @tier` directive is removed from the diagram format and from every
   source.
