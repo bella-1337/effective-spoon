@@ -1,15 +1,17 @@
 ---
-title: Chat request with an Xberg tool call
+title: Prompt that triggers an Xberg tool call
 ---
 sequenceDiagram
   %% Source for 24-xberg-tool-call-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
-  %% @subtitle With server_url litellm_proxy and require_approval never, LiteLLM runs the model's Xberg extract call, screens the result, and asks the model again in the same request
+  %% @subtitle The user only writes a prompt; the chat app offers the xberg tools, the model decides to call extract, and LiteLLM runs the call and asks the model again in the same request
+  %% @type frontend: APP
   %% @type cloud: TR
   %% @type security: PR EG
   %% @type external: OAI WEB
   %% @type database: OBS
-  actor C as Client / agent
+  actor U as User
+  participant APP as Chat app or agent<br/>Chat UI · IDE · SDK
   participant TR as Traefik<br/>TLS + edge limits
   participant LL as LiteLLM proxy<br/>auth · MCP gateway
   participant PR as Presidio<br/>PII masking
@@ -19,40 +21,42 @@ sequenceDiagram
   participant WEB as Allowlisted website<br/>e.g. docs.xberg.io
   participant OBS as Telemetry<br/>spend · metrics · spans
 
-  C->>TR: POST /v1/chat/completions with an mcp tool
+  U->>APP: prompt: summarise https://docs.xberg.io/…
+  Note over APP: the app, not the user, adds the xberg MCP tools (server_url litellm_proxy, require_approval never)
+  APP->>TR: POST /v1/chat/completions: prompt + mcp tool
   TR->>LL: route by host
-  alt key invalid or model not allowed
-    LL--xC: 401 / 403 through Traefik
-  else authorized
-    LL->>PR: pre_call: mask PII in the messages
-    PR-->>LL: masked messages
-    LL->>XB: MCP tools/list
-    XB-->>LL: tool definitions
-    Note over LL: keep the servers the key or team may use and the four allowed_tools; in dev, BGE-M3 keeps the top 3 tools
-    LL->>OAI: call the model with the tools
-    alt model answers without a tool
-      OAI-->>LL: completion
-    else model calls extract
-      OAI-->>LL: tool call: extract(uri)
-      LL->>XB: MCP tools/call extract
-      XB->>XB: check the URL against the SSRF allowlist
-      XB->>EG: resolve the host, HTTPS CONNECT :443
-      alt host unlisted, private, or plain HTTP
-        EG--xXB: NXDOMAIN or 403 denied
-        XB--xLL: tool error, sent to the model as the result
-      else host allowlisted
-        EG->>WEB: TLS tunnel to the host
-        WEB-->>XB: document through the tunnel
-        XB-->>LL: extracted text
-        LL->>LL: post_mcp_call: mask injection phrases
-        Note over LL: dev: a trusted caller's extraction is also indexed in the background (Xberg auto-indexing)
-      end
-      LL->>OAI: follow-up call with the tool result
-      OAI-->>LL: final completion
+  Note over LL: authenticate the key; the key or team must be granted xberg
+  LL->>PR: pre_call: mask PII in the prompt
+  PR-->>LL: masked prompt
+  LL->>XB: MCP tools/list
+  XB-->>LL: tool definitions
+  Note over LL: keep the four allowed_tools; in dev, BGE-M3 keeps the 3 that best match the prompt
+  LL->>OAI: prompt + tool definitions
+  Note over OAI: the model decides whether a tool is needed and writes its arguments from the prompt
+  alt model answers directly
+    OAI-->>LL: completion, no tool call
+  else model requests the tool
+    OAI-->>LL: tool_call: xberg-extract(uri)
+    Note over LL: LiteLLM executes the call itself; the app never sees the tool_call
+    LL->>XB: MCP tools/call extract
+    XB->>XB: check the URL against the SSRF allowlist
+    XB->>EG: resolve the host, HTTPS CONNECT :443
+    alt host unlisted, private, or plain HTTP
+      EG--xXB: NXDOMAIN or 403 denied
+      XB--xLL: tool error, sent to the model as the result
+    else host allowlisted
+      EG->>WEB: TLS tunnel to the host
+      WEB-->>XB: document through the tunnel
+      XB-->>LL: extracted text
+      LL->>LL: post_mcp_call: mask injection phrases
+      Note over LL: dev: a trusted caller's extraction is also indexed in the background (Xberg auto-indexing)
     end
-    LL->>PR: post_call: mask PII in the output
-    PR-->>LL: masked output
-    LL-)OBS: spend logs, metrics, content-free spans for model and tool calls
-    LL-->>TR: response with MCP tool metadata
-    TR-->>C: response
+    LL->>OAI: follow-up: prompt + tool call + tool result
+    OAI-->>LL: final answer
   end
+  LL->>PR: post_call: mask PII in the answer
+  PR-->>LL: masked answer
+  LL-)OBS: spend logs, metrics, content-free spans for model and tool calls
+  LL-->>TR: response with MCP tool metadata
+  TR-->>APP: response
+  APP-->>U: answer

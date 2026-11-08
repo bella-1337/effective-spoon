@@ -1,15 +1,17 @@
 ---
-title: Chat request with a search tool call
+title: Prompt that triggers a search tool call
 ---
 sequenceDiagram
   %% Source for 25-search-tool-call-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
-  %% @subtitle Web search interception is off, so LiteLLM returns the model's search call and the client runs the native searxng-search tool itself
+  %% @subtitle The user only writes a prompt; the model decides to search, and because web search interception is off, the agent runs searxng-search and asks the model again
+  %% @type frontend: APP
   %% @type cloud: TR
   %% @type security: PR
   %% @type external: OAI ENG
   %% @type database: OBS
-  actor C as Client / agent
+  actor U as User
+  participant APP as Agent or chat app<br/>owns the tool loop
   participant TR as Traefik<br/>TLS + edge limits
   participant LL as LiteLLM proxy<br/>auth · policy · search tools
   participant PR as Presidio<br/>PII masking
@@ -18,23 +20,24 @@ sequenceDiagram
   participant ENG as Search engines<br/>SearXNG defaults
   participant OBS as Telemetry<br/>spend · metrics · spans
 
-  Note over C,LL: 1. the model asks for a search
-  C->>TR: POST /v1/chat/completions with a search function tool
+  U->>APP: prompt: what changed in the latest LiteLLM release?
+  Note over APP: the app, not the user, defines a web_search function tool
+  APP->>TR: POST /v1/chat/completions: prompt + tool
   TR->>LL: route by host
-  LL->>PR: pre_call: mask PII in the messages
-  PR-->>LL: masked messages
-  LL->>OAI: call the model with the tool
-  OAI-->>LL: tool call: search(query)
+  LL->>PR: pre_call: mask PII in the prompt
+  PR-->>LL: masked prompt
+  LL->>OAI: prompt + tool definition
+  Note over OAI: the model decides it needs a search and writes the query from the prompt
+  OAI-->>LL: tool_call: web_search(query)
   LL->>PR: post_call: mask PII in the output
   PR-->>LL: masked output
   LL-)OBS: spend log, metrics, content-free span
-  LL-->>C: tool_calls through Traefik
-
-  Note over C,LL: 2. the client runs the search tool
-  C->>TR: POST /v1/search/searxng-search
+  LL-->>APP: tool_calls through Traefik
+  Note over APP,LL: LiteLLM does not run the search for the model; the app executes the tool call
+  APP->>TR: POST /v1/search/searxng-search {query}
   TR->>LL: route by host
   alt key invalid or search tool not permitted
-    LL--xC: 401 / 403 through Traefik
+    LL--xAPP: 401 / 403 through Traefik
   else authorized
     Note over LL: Presidio does not mask search queries
     LL->>SX: GET /search?q=…&format=json
@@ -42,18 +45,17 @@ sequenceDiagram
     ENG-->>SX: result pages
     SX-->>LL: JSON results
     LL-)OBS: spend log, metrics, span
-    LL-->>C: results through Traefik
+    LL-->>APP: results through Traefik
   end
-
-  Note over C,LL: 3. the model answers from the results
-  C->>TR: POST /v1/chat/completions with the tool result
+  APP->>TR: POST /v1/chat/completions: prompt + tool call + results
   TR->>LL: route by host
   LL->>PR: pre_call: mask PII, including the results
   PR-->>LL: masked messages
   LL->>OAI: call the model
-  OAI-->>LL: completion
-  LL->>PR: post_call: mask PII in the output
-  PR-->>LL: masked output
+  OAI-->>LL: final answer
+  LL->>PR: post_call: mask PII in the answer
+  PR-->>LL: masked answer
   LL-)OBS: spend log, metrics, content-free span
   LL-->>TR: response
-  TR-->>C: final answer
+  TR-->>APP: response
+  APP-->>U: answer with sources
