@@ -1,0 +1,59 @@
+---
+title: Chat request with a search tool call
+---
+sequenceDiagram
+  %% Source for 25-search-tool-call-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @subtitle Web search interception is off, so LiteLLM returns the model's search call and the client runs the native searxng-search tool itself
+  %% @type cloud: TR
+  %% @type security: PR
+  %% @type external: OAI ENG
+  %% @type database: OBS
+  actor C as Client / agent
+  participant TR as Traefik<br/>TLS + edge limits
+  participant LL as LiteLLM proxy<br/>auth · policy · search tools
+  participant PR as Presidio<br/>PII masking
+  participant OAI as OpenAI<br/>provider model
+  participant SX as SearXNG<br/>internal network only
+  participant ENG as Search engines<br/>SearXNG defaults
+  participant OBS as Telemetry<br/>spend · metrics · spans
+
+  Note over C,LL: 1. the model asks for a search
+  C->>TR: POST /v1/chat/completions with a search function tool
+  TR->>LL: route by host
+  LL->>PR: pre_call: mask PII in the messages
+  PR-->>LL: masked messages
+  LL->>OAI: call the model with the tool
+  OAI-->>LL: tool call: search(query)
+  LL->>PR: post_call: mask PII in the output
+  PR-->>LL: masked output
+  LL-)OBS: spend log, metrics, content-free span
+  LL-->>C: tool_calls through Traefik
+
+  Note over C,LL: 2. the client runs the search tool
+  C->>TR: POST /v1/search/searxng-search
+  TR->>LL: route by host
+  alt key invalid or search tool not permitted
+    LL--xC: 401 / 403 through Traefik
+  else authorized
+    Note over LL: Presidio does not mask search queries
+    LL->>SX: GET /search?q=…&format=json
+    SX->>ENG: query each enabled engine
+    ENG-->>SX: result pages
+    SX-->>LL: JSON results
+    LL-)OBS: spend log, metrics, span
+    LL-->>C: results through Traefik
+  end
+
+  Note over C,LL: 3. the model answers from the results
+  C->>TR: POST /v1/chat/completions with the tool result
+  TR->>LL: route by host
+  LL->>PR: pre_call: mask PII, including the results
+  PR-->>LL: masked messages
+  LL->>OAI: call the model
+  OAI-->>LL: completion
+  LL->>PR: post_call: mask PII in the output
+  PR-->>LL: masked output
+  LL-)OBS: spend log, metrics, content-free span
+  LL-->>TR: response
+  TR-->>C: final answer
