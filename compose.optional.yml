@@ -355,7 +355,7 @@ services:
   langfuse-minio:
     logging: *default-logging
     profiles: [langfuse]
-    image: cgr.dev/chainguard/minio:latest@sha256:c47b1779bfd12cdf5a4fcd3bd50671b8d66465fdae45271babc2fb467958b712
+    image: cgr.dev/chainguard/minio:latest@sha256:616286de6ef3a1892876b126e745e152d8e03add6357203f8a1f854bdd1dce76
     entrypoint: sh
     command: -c 'mkdir -p /data/langfuse && exec minio server --address ":9000" --console-address ":9001" /data'
     environment:
