@@ -89,7 +89,8 @@ case "$auth" in
 esac
 printf 'Content-Type: application/json\n' >> "$headers"
 if [ "$method" = POST ]; then set -- --data-binary @-; else set --; fi
-exec curl --silent --show-error --max-time 30 --request "$method" \
+# No exec: the EXIT trap must still remove the credential header file.
+curl --silent --show-error --max-time 30 --request "$method" \
   --header @"$headers" --write-out '\n%{http_code}' "$@" "http://127.0.0.1:4318$path"
 """.strip()
 
