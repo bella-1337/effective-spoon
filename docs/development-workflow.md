@@ -53,6 +53,7 @@ workflow of the same name:
 | `devcontainer.yml` | `devcontainer.yml` | Development container build |
 | `release.yml` | `release.yml` | Release publication |
 | `docs.yml` | `docs.yml` | Documentation site build and Pages publication |
+| `scorecard.yml` | None (GitHub only) | OpenSSF Scorecard |
 
 The root `.gitlab-ci.yml` only includes these files and defines the pipeline
 rules, stages, and defaults. `.gitlab/ci/images.yml` holds every digest-pinned
@@ -67,7 +68,9 @@ The checks:
 | Hermetic validation | `./scripts/ci/validate.sh` | Every pull or merge request, default-branch push, and tag |
 | Shell lint (ShellCheck, every `*.sh`) | `scripts/ci/static-checks.sh shell` | Same |
 | Dockerfile lint (Hadolint, `.hadolint.yaml`) | `scripts/ci/static-checks.sh dockerfiles` | Same |
+| Python lint (Ruff, `ruff.toml`) | `scripts/ci/static-checks.sh python` | Same |
 | GitHub workflow lint (Actionlint) | `actionlint` | Same |
+| Workflow and Dependabot security audit (zizmor, `.github/zizmor.yml`) | `scripts/ci/static-checks.sh workflows` | Same |
 | Secret scan of the full Git history (Gitleaks, `.gitleaks.toml`) | `scripts/ci/static-checks.sh secrets` | Same |
 | Build the four local images (including the optional `litellm-lens`) and verify their OCI labels | `python3 scripts/ci/images.py build` | Changes to image inputs, nightly, manual runs, and tags |
 | Image vulnerability gate (Trivy, CISA KEV, `security/exceptions.toml`) | `python3 scripts/ci/images.py scan` | Same as the build |
@@ -89,6 +92,25 @@ python3 scripts/ci/images.py build
 python3 scripts/ci/images.py scan --report-only
 ```
 
+Ruff checks syntax errors, Pyflakes, and flake8-bugbear rules only: likely
+defects, not formatting. zizmor audits the workflows and `dependabot.yml` for
+template injection, credential persistence, over-broad permissions, unpinned
+actions, and missing Dependabot cooldowns. On GitHub it receives the read-only
+job token and also runs its online audits, such as impostor-commit detection
+for the pinned action SHAs; GitLab runs it offline. Silence a finding inline
+with `# zizmor: ignore[<audit>]` and a reason, or in `.github/zizmor.yml`.
+
+GitHub also scans the repository itself, outside these workflows:
+
+- **CodeQL** default setup (a repository setting, no workflow file) analyses
+  the Python code and the GitHub Actions workflows on every pull request and
+  push to `master`.
+- **OpenSSF Scorecard** (`scorecard.yml`) rates the repository weekly and on
+  every push to `master`, uploads its findings to code scanning, and publishes
+  the score behind the README badge.
+
+Both report under **Security > Code scanning**. Neither is a required check.
+
 When Gitleaks reports a committed secret, rotate the credential first. Then
 allowlist the finding's fingerprint in a `.gitleaksignore` file; rewriting
 history alone does not revoke a leaked credential.
@@ -97,6 +119,10 @@ The development container job builds `.devcontainer/` with the Dev Containers
 CLI. It proves the pinned base image, the copied `uv`, and the locked
 `docker-outside-of-docker` feature still resolve. It is not part of the
 release gate because the release bundle does not contain the container.
+
+GitHub disables a public repository's scheduled workflows after 60 days
+without repository activity. If the nightly supply-chain scan or the weekly
+development container build stops, re-enable it under **Actions**.
 
 Checks that require external services are intentionally deferred for now:
 
@@ -122,7 +148,9 @@ environment when the required services and credentials are available.
   image, which needs GitLab 18.0 or newer.
 - Keep the project's CI/CD configuration file setting at its default,
   `.gitlab-ci.yml`; that file includes the jobs under `.gitlab/ci/`.
-- Dependabot (`.github/dependabot.yml`) updates pins only on GitHub. On a
+- Dependabot (`.github/dependabot.yml`) updates pins only on GitHub, and
+  ruleset, CodeQL, Scorecard, and immutable-release protection exist only
+  there. On a
   GitLab-only installation, update digests manually or configure Renovate.
 - The Docker-in-Docker jobs wait at most 120 seconds for the daemon
   (`scripts/ci/wait-for-docker.sh`) and then fail with the daemon's error, so a
@@ -154,17 +182,43 @@ job's private network. It also ignores `workflow:rules` and does not create
 GitLab releases. The `act` runner image has no `gh`, so the GitHub publish step
 fails locally after the bundle is built.
 
+## Dependency updates
+
+Dependabot (`.github/dependabot.yml`) opens weekly pull requests for the
+GitHub Actions SHAs, the Dockerfile base images, the pinned Python
+requirements, the development container feature, and the image pins in
+`docker-compose.yml`, `compose.optional.yml`, and `gpu-host/compose.yml`.
+Every entry waits seven days after an upstream release before proposing it.
+
+For the Compose files:
+
+- LiteLLM and the locally built `litellm-*` images are ignored. LiteLLM moves
+  through the [upgrade and rollback procedure](upgrades-and-rollback.md).
+- Major versions are ignored: a new PostgreSQL, OpenSearch, ClickHouse, Redis,
+  or Grafana major needs a planned migration.
+- OpenSearch with OpenSearch Dashboards, the two Langfuse images, and the two
+  Presidio images each move in one pull request, because each pair must run
+  the same version.
+- A digest-only update passes CI unchanged. A pull request that moves a tag
+  fails validation until you update its row in the
+  [component versions](component-versions.md) table and the
+  [third-party licence register](third-party-licences.md) on the same branch;
+  review the upstream release notes and licence while you do.
+
 ## Continuous delivery
 
 Pull requests and pushes to `master` run the reusable CI workflow. Pushing a
-semantic-version tag such as `v1.2.3`, or manually selecting an existing tag in
-the Release workflow, reruns CI and the enforcing supply-chain checks. The
-publish job then builds the bundle with `scripts/ci/release-bundle.sh` and
-creates a GitHub release containing the source bundle and `SHA256SUMS`. In a
-public repository it also records a build-provenance attestation for the
-bundle. The `release` GitHub environment can be configured with required
-reviewers before granting the publish job approval. Existing releases are never
-replaced.
+semantic-version tag such as `v1.2.3`, or running the Release workflow manually
+on an existing tag (`gh workflow run release.yml --ref v1.2.3`, or the tag
+under **Use workflow from**), reruns CI and the enforcing supply-chain checks
+on the tagged commit; a manual run on a branch fails at once. The publish job
+then builds the bundle with `scripts/ci/release-bundle.sh` and creates a GitHub
+release containing the source bundle and `SHA256SUMS`. In a public repository
+it also records a build-provenance attestation for the bundle. The `release` GitHub environment admits only `v*.*.*` tags and can
+also require a reviewer before the publish job runs. Releases are immutable:
+GitHub locks the tag and the uploaded assets once a release is published and
+records a release attestation, and the `release-tags` ruleset stops anyone
+moving or deleting a `v*` tag. Existing releases are never replaced.
 
 In GitLab, a semantic-version tag pipeline runs every check, then offers the
 manual `publish-release` job in the `release` environment. Protect that
@@ -240,3 +294,112 @@ Suggested custom property values, to map onto the organisation's schema:
 | Data classification | Internal (no secrets are committed; see the security policy) |
 | Deployment | Self-hosted on-prem, Docker Compose |
 | Compliance scope | EU technical controls (`docs/eu-technical-controls.md`) |
+
+### Security and delivery settings
+
+Apply these once, and again after changing a file under `.github/rulesets/`.
+Every command is idempotent.
+
+```sh
+REPO=bella-1337/effective-spoon
+
+# Labels that dependabot.yml and the release-note categories use. Dependabot
+# silently skips a label that does not exist.
+gh label create dependencies --repo "$REPO" --force --color 0366d6 --description "Dependency updates"
+gh label create ci           --repo "$REPO" --force --color 5319e7 --description "CI/CD workflows"
+gh label create containers   --repo "$REPO" --force --color 1d76db --description "Container images"
+gh label create python       --repo "$REPO" --force --color 2b67c6 --description "Python dependencies"
+gh label create devcontainer --repo "$REPO" --force --color c5def5 --description "Development container"
+gh label create security     --repo "$REPO" --force --color b60205 --description "Security fixes and hardening"
+
+# Branch and tag rulesets, kept as code in .github/rulesets/. A ruleset with
+# the same name is updated in place.
+for file in .github/rulesets/*.json; do
+  name=$(jq -r .name "$file")
+  id=$(gh api "repos/$REPO/rulesets" --jq ".[] | select(.name == \"$name\") | .id")
+  if [ -n "$id" ]; then
+    gh api -X PUT "repos/$REPO/rulesets/$id" --input "$file" >/dev/null
+  else
+    gh api -X POST "repos/$REPO/rulesets" --input "$file" >/dev/null
+  fi
+done
+
+# Immutable releases: lock each published release's tag and assets.
+gh api -X PUT "repos/$REPO/immutable-releases"
+
+# The release environment admits only semantic-version tags. This PUT replaces
+# the environment's protection rules; add "reviewers" to require an approval.
+gh api -X PUT "repos/$REPO/environments/release" --input - <<'JSON'
+{"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
+JSON
+gh api "repos/$REPO/environments/release/deployment-branch-policies" \
+  --jq '.branch_policies[] | select(.type == "tag" and .name == "v*.*.*")' \
+  | grep -q . \
+  || gh api -X POST "repos/$REPO/environments/release/deployment-branch-policies" \
+       -f name='v*.*.*' -f type=tag
+
+# Actions: read-only default token, no pull-request approvals by Actions,
+# full-length SHA pins enforced, and approval before any outside
+# contributor's fork pull request runs a workflow.
+gh api -X PUT "repos/$REPO/actions/permissions/workflow" \
+  -f default_workflow_permissions=read -F can_approve_pull_request_reviews=false
+gh api "repos/$REPO/actions/permissions" \
+  | jq '{enabled, allowed_actions, sha_pinning_required: true}' \
+  | gh api -X PUT "repos/$REPO/actions/permissions" --input -
+gh api -X PUT "repos/$REPO/actions/permissions/fork-pr-contributor-approval" \
+  -f approval_policy=all_external_contributors
+
+# Secret scanning with push protection, Dependabot alerts and security
+# updates, and CodeQL default setup (Python and GitHub Actions).
+gh api -X PATCH "repos/$REPO" --input - <<'JSON'
+{"security_and_analysis": {
+  "secret_scanning": {"status": "enabled"},
+  "secret_scanning_push_protection": {"status": "enabled"}
+}}
+JSON
+gh api -X PUT "repos/$REPO/vulnerability-alerts"
+gh api -X PUT "repos/$REPO/automated-security-fixes"
+gh api -X PATCH "repos/$REPO/code-scanning/default-setup" \
+  -f state=configured -f query_suite=default
+```
+
+Check the result:
+
+```sh
+gh api "repos/$REPO/rulesets" --jq '.[] | [.name, .target, .enforcement] | @tsv'
+gh api "repos/$REPO/immutable-releases"
+gh api "repos/$REPO/actions/permissions" --jq .sha_pinning_required
+gh api "repos/$REPO/code-scanning/default-setup" --jq '[.state, .languages]'
+gh api "repos/$REPO" --jq .security_and_analysis
+```
+
+The `master` ruleset requires a pull request and the `validate`, `lint`,
+`secrets` (CI), and `build` (Documentation) checks from the GitHub Actions app.
+These four run on every pull request; the path-filtered supply-chain and
+development container checks are not required, so a pull request that does not
+trigger them can still merge. It needs no approving review, so a sole
+maintainer can merge their own pull request once the checks pass. When you
+rename a required job, update `.github/rulesets/master.json` in the same change
+and reapply it, or every pull request waits for a check that never reports.
+Immutable releases apply only to releases published after the setting is on.
+
+## Planned improvements
+
+These CI/CD additions are proposed but not yet implemented:
+
+- **Compose smoke test.** Start the `prod` profile on a public GitHub-hosted
+  runner (4 vCPU, 16 GB; the core and `prod` profile idles at about 7 GiB) with
+  `docker compose --profile prod up --wait`, then probe the LiteLLM liveness
+  endpoint, the Prometheus targets, and the OpenSearch status. Run it on
+  changes to Compose or service configuration, on Dependabot Compose pull
+  requests, and nightly. This closes most of the deferred "full Compose
+  startup" check above.
+- **Release SBOM attestation.** Move the release job to `actions/attest`, which
+  records both the build provenance and an SBOM of the bundle
+  (`sbom-path`), replacing `actions/attest-build-provenance`;
+  `actions/attest-sbom` is being deprecated.
+- **Dependency review.** Run `actions/dependency-review-action` on pull
+  requests to block a newly introduced vulnerable or disallowed-licence pip
+  package or action. It does not cover container images.
+- **Link check.** Check the published documentation site's links weekly with
+  lychee.

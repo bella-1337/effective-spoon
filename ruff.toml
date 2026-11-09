@@ -1,0 +1,14 @@
+# Ruff lint policy for every Python file in the repository.
+# CI runs it through `scripts/ci/static-checks.sh python`; see
+# docs/development-workflow.md#local-and-continuous-integration.
+target-version = "py311"
+extend-exclude = [".docs-cache", ".gitlab-ci-local"]
+
+[lint]
+# Syntax errors, Pyflakes, and flake8-bugbear: likely defects, not style.
+select = ["E9", "F", "B"]
+ignore = [
+  # zip() pairs sequences that are equal-length by construction here;
+  # strict=True would only add a new runtime failure mode.
+  "B905",
+]

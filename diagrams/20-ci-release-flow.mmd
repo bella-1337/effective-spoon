@@ -4,7 +4,7 @@ title: CI and release
 sequenceDiagram
   %% Source for 20-ci-release-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
-  %% @subtitle Identical GitHub Actions and GitLab CI pipelines, the documentation site, and where a human still deploys
+  %% @subtitle Identical GitHub Actions and GitLab CI pipelines, GitHub code scanning, the documentation site, and where a human still deploys
   %% @type cloud: CI
   %% @type security: REL
   %% @type external: PAGES
@@ -18,7 +18,7 @@ sequenceDiagram
   par checks
     CI->>CI: scripts/ci/validate.sh
   and
-    CI->>CI: ShellCheck, Hadolint, and Actionlint
+    CI->>CI: ShellCheck, Hadolint, Ruff, Actionlint, and zizmor
   and
     CI->>CI: Gitleaks history scan
   and
@@ -30,12 +30,15 @@ sequenceDiagram
   and
     CI->>CI: diagrams rendered from .mmd, then versioned documentation site build
   end
+  opt GitHub only
+    CI->>CI: CodeQL and OpenSSF Scorecard report to code scanning
+  end
   alt a check fails
     CI--xDEV: change blocked
   else all checks pass
     alt semantic-version tag
-      CI->>REL: release approval
-      REL->>REL: publish source bundle and SHA256SUMS
+      CI->>REL: release environment admits v*.*.* tags only
+      REL->>REL: publish immutable source bundle, SHA256SUMS, and attestation
       REL-)OP: operator deploys on-prem
     else no tag
       CI-->>DEV: ready to merge

@@ -28,6 +28,22 @@ All notable changes to this stack are recorded here. The format follows
   without rotating existing ones, checks Lens and each gateway's connection, and
   runs an end-to-end trace smoke test. The upgrade regression suite gains a
   `lens` check.
+- Ruff (`ruff.toml`: syntax, Pyflakes, and bugbear rules) and zizmor
+  (`.github/zizmor.yml`: workflow and Dependabot security audit) run in CI on
+  GitHub Actions and GitLab CI through `scripts/ci/static-checks.sh`.
+- An OpenSSF Scorecard workflow reports to code scanning and publishes the
+  score behind a new README badge.
+- Dependabot updates the image pins in `docker-compose.yml`,
+  `compose.optional.yml`, and `gpu-host/compose.yml`, except LiteLLM and major
+  versions, and grouping images that must match. Every Dependabot entry waits
+  seven days after an upstream release.
+- The `master` branch and `v*` release-tag rulesets are kept as code in
+  `.github/rulesets/`. The repository-settings guide applies them together
+  with immutable releases, a tag-only `release` environment, SHA-pinned
+  actions, fork pull request approval, secret push protection, CodeQL default
+  setup, and the labels Dependabot uses.
+- A "Planned improvements" list in the development workflow guide: a Compose
+  smoke test, a release SBOM attestation, dependency review, and a link check.
 
 ### Changed
 
@@ -38,6 +54,15 @@ All notable changes to this stack are recorded here. The format follows
 - The maintenance contracts accept build contexts fetched from Git only when
   they pin a full commit that the image's revision label and the licence
   register record.
+- A manual Release run must be started on the release tag itself; the
+  `release_tag` input is removed, and a run on a branch fails before any
+  check.
+
+### Fixed
+
+- The OpenSearch bridge binds each cycle's evaluation time to its metric and
+  usage tasks explicitly instead of through closures over the loop variable.
+- Unused imports in three maintenance scripts.
 
 ## [v0.2.1] - 2026-11-08
 

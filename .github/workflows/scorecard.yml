@@ -1,0 +1,47 @@
+name: Scorecard
+
+# Rates the repository against the OpenSSF Scorecard checks (branch and tag
+# protection, pinned dependencies, token permissions, dangerous workflow
+# patterns, and more). It uploads the findings to code scanning and publishes
+# the score behind the README badge. GitHub-only: GitLab has no equivalent.
+# The Scorecard API rejects published results from a workflow with top-level
+# env or defaults, workflow-level write permissions, or steps other than the
+# approved actions, so keep this file to these three steps.
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: "17 5 * * 1"
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analysis:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # Upload the SARIF results to code scanning.
+      security-events: write
+      # Sign the published results so the Scorecard API accepts them.
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload the results to code scanning
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: results.sarif

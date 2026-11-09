@@ -25,7 +25,6 @@ import truststore
 
 from maintenance_common import (
     LOG,
-    ROOT,
     SCRIPTS_DIR,
     ScriptError,
     capture,

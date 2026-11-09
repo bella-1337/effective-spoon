@@ -164,7 +164,7 @@ def _parse_statement(diagram: Diagram, line: str, group: str | None, where: str)
             i += 1
         if i == len(line):
             return
-        for op, kind in EDGE_OPS:
+        for op, kind in EDGE_OPS:  # noqa: B007 - `kind` is read after the loop breaks
             if line.startswith(op, i):
                 i += len(op)
                 break

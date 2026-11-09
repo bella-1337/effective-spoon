@@ -1,0 +1,8 @@
+# zizmor policy for the GitHub Actions workflows and Dependabot configuration.
+# CI runs it through `scripts/ci/static-checks.sh workflows`.
+rules:
+  # The suggested `uses: $/...` self-repository syntax is rejected by
+  # actionlint 1.7.12, which also gates the workflows. Revisit when actionlint
+  # accepts it (rhysd/actionlint#732).
+  self-repository:
+    disable: true
