@@ -296,7 +296,7 @@ services:
   langfuse-clickhouse:
     logging: *default-logging
     profiles: [langfuse]
-    image: clickhouse/clickhouse-server:26.3.62.3@sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a
+    image: clickhouse/clickhouse-server:26.10.3.7@sha256:739e099abd1157390960a59e4532d21781d8fde57e6e4151cb920ea02c30b1ce
     user: "101:101"
     environment:
       CLICKHOUSE_DB: default
@@ -323,7 +323,7 @@ services:
   langfuse-clickhouse-observability-setup:
     logging: *default-logging
     profiles: [langfuse]
-    image: clickhouse/clickhouse-server:26.3.62.3@sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a
+    image: clickhouse/clickhouse-server:26.10.3.7@sha256:739e099abd1157390960a59e4532d21781d8fde57e6e4151cb920ea02c30b1ce
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
@@ -531,7 +531,7 @@ services:
   lens-clickhouse:
     logging: *default-logging
     profiles: [lens]
-    image: clickhouse/clickhouse-server:26.9.6.6@sha256:eb4870e7ca7ed70c259eebfcfbee6cf797017f6b5436c2926bbbfe3d4d28486e
+    image: clickhouse/clickhouse-server:26.10.3.7@sha256:739e099abd1157390960a59e4532d21781d8fde57e6e4151cb920ea02c30b1ce
     user: "101:101"
     environment:
       CLICKHOUSE_DB: lens
