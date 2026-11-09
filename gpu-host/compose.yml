@@ -23,7 +23,7 @@ services:
   d3-mini:
     <<: *hardening
     logging: *logging
-    image: ghcr.io/vllm-project/semantic-router/vllm-sr-cuda:latest@sha256:2fbea0e18f86d0d94c5bf4084019bbd0acbc9dc20919367baba8befd8e27fd63
+    image: ghcr.io/vllm-project/semantic-router/vllm-sr-cuda:latest@sha256:eabdb816267cc9a1e02eac3fd25c4519f139bc048a9dc01975ddb70865cae4f3
     command: ["/config/config.yaml"]
     environment:
       VLLM_SR_GATEWAY: standalone
