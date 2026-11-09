@@ -67,6 +67,15 @@ jobs:
             hadolint/hadolint:v2.15.1-alpine@sha256:a1d49ae1a4e83c1dbad26b8c1ad7588c8bd1e04f4866b34ad3cac50335198552 \
             scripts/ci/static-checks.sh dockerfiles
 
+      - name: Lint Python
+        run: |
+          docker run --rm \
+            --volume "$PWD:/repo:ro" \
+            --workdir /repo \
+            --entrypoint sh \
+            ghcr.io/astral-sh/ruff:0.17.4-alpine@sha256:7a717be3a7cfbef698a9b99e1555add93ec6b195242fe273997683e49b051f51 \
+            scripts/ci/static-checks.sh python
+
       - name: Lint GitHub Actions workflows
         run: |
           docker run --rm \
@@ -74,6 +83,19 @@ jobs:
             --workdir /repo \
             rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 \
             -color
+
+      - name: Audit GitHub Actions workflows and Dependabot configuration
+        env:
+          # Read-only job token: enables zizmor's online audits.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm \
+            --volume "$PWD:/repo:ro" \
+            --workdir /repo \
+            --env GH_TOKEN \
+            --entrypoint sh \
+            ghcr.io/zizmorcore/zizmor:1.32.0@sha256:3014cc8f68f663935f69b3c3e0e41f5ce102b268d97db13db0f62208747f860d \
+            scripts/ci/static-checks.sh workflows
 
   secrets:
     runs-on: ubuntu-24.04

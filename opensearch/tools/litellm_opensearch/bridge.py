@@ -6,6 +6,7 @@ import os
 import signal
 import time
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -125,8 +126,8 @@ def run() -> int:
         now = datetime.fromtimestamp(int(time.time()) // interval * interval, tz=timezone.utc)
         healthy = True
         for label, task in (
-            ("metrics", lambda: evaluate_metrics(opensearch, prometheus, catalog, rules, now)),
-            ("usage", lambda: sync.run_events(now)),
+            ("metrics", partial(evaluate_metrics, opensearch, prometheus, catalog, rules, now)),
+            ("usage", partial(sync.run_events, now)),
         ):
             try:
                 task()

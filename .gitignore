@@ -28,6 +28,7 @@ security-state/*
 # Python runtime artifacts
 __pycache__/
 *.py[cod]
+.ruff_cache/
 
 # OS and editor state
 .DS_Store

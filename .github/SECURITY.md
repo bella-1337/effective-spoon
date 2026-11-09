@@ -44,3 +44,14 @@ history, Trivy and CISA KEV checks of every locally built image, and a
 dependency scan. A release with an unexcepted KEV or fixable Critical finding
 is not published. Exceptions live in `security/exceptions.toml`, are scoped to
 one service and package, and expire.
+
+Releases are published only from a `vMAJOR.MINOR.PATCH` tag, through the
+`release` environment that admits nothing else. Each release carries a
+build-provenance attestation of its bundle and is immutable: GitHub locks the
+tag and assets once it is published, and a tag ruleset stops `v*` tags from
+being moved or deleted. Verify a downloaded bundle with:
+
+```sh
+sha256sum --check SHA256SUMS
+gh attestation verify litellm-stack-vX.Y.Z.tar.gz --repo bella-1337/effective-spoon
+```

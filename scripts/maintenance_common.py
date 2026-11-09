@@ -780,12 +780,12 @@ def run_main(main: Callable[[], None]) -> None:
                 main()
             except ScriptError as error:
                 emit_error(str(error))
-                raise SystemExit(error.exit_code)
+                raise SystemExit(error.exit_code) from None
             except KeyboardInterrupt:
-                raise SystemExit(130)
+                raise SystemExit(130) from None
             except Exception as error:  # noqa: BLE001 - keep crash tracebacks in the log file
                 LOG.exception(f"ERROR: unexpected {type(error).__name__}: {error}")
-                raise SystemExit(1)
+                raise SystemExit(1) from error
     finally:
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)

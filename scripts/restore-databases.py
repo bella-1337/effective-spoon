@@ -14,7 +14,6 @@ from pathlib import Path
 
 from maintenance_common import (
     LOG,
-    ROOT,
     compose,
     compose_capture,
     compose_from_file,

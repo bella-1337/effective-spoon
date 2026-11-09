@@ -23,7 +23,7 @@ find_repository_files() {
 }
 
 usage() {
-  echo "usage: $0 shell|dockerfiles|secrets|dependencies" >&2
+  echo "usage: $0 shell|dockerfiles|python|workflows|secrets|dependencies" >&2
   exit 2
 }
 
@@ -38,6 +38,18 @@ case "$1" in
     echo "==> Hadolint: every Dockerfile in the repository"
     find_repository_files -name Dockerfile -o -name '*.Dockerfile' \
       | xargs hadolint --config .hadolint.yaml
+    ;;
+  python)
+    echo "==> Ruff: every Python file in the repository (ruff.toml)"
+    # Ruff finds the files itself and honours .gitignore without Git; the
+    # checkout is mounted read-only, so skip the cache.
+    ruff check --no-cache --output-format concise .
+    ;;
+  workflows)
+    echo "==> zizmor: GitHub Actions workflows and Dependabot configuration"
+    # Without GH_TOKEN, zizmor skips its online audits (impostor commits,
+    # known-vulnerable actions); GitHub Actions passes the job token.
+    zizmor --no-progress --config .github/zizmor.yml .
     ;;
   secrets)
     echo "==> Gitleaks: full Git history"

@@ -6,6 +6,7 @@
 [![Documentation](https://github.com/bella-1337/effective-spoon/actions/workflows/docs.yml/badge.svg)](https://github.com/bella-1337/effective-spoon/actions/workflows/docs.yml)
 [![Release](https://github.com/bella-1337/effective-spoon/actions/workflows/release.yml/badge.svg)](https://github.com/bella-1337/effective-spoon/actions/workflows/release.yml)
 [![Dev container](https://github.com/bella-1337/effective-spoon/actions/workflows/devcontainer.yml/badge.svg)](https://github.com/bella-1337/effective-spoon/actions/workflows/devcontainer.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/bella-1337/effective-spoon/badge)](https://scorecard.dev/viewer/?uri=github.com/bella-1337/effective-spoon)
 [![Latest release](https://img.shields.io/github/v/release/bella-1337/effective-spoon?sort=semver)](https://github.com/bella-1337/effective-spoon/releases/latest)
 [![Docs site](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://bella-1337.github.io/effective-spoon/)
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-brightgreen?logo=dependabot)](https://github.com/bella-1337/effective-spoon/blob/master/.github/dependabot.yml)

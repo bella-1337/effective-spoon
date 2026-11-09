@@ -1,15 +1,13 @@
 name: Release
 
+# A manual run must select the release tag itself under "Use workflow from"
+# (`gh workflow run release.yml --ref v1.2.3`), so the checks run on the
+# commit that is published. The `release` environment admits only v*.*.* tags.
 on:
   push:
     tags:
       - "v*.*.*"
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: Existing semantic-version tag to publish
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -19,10 +17,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  release-tag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Refuse a run that is not on a semantic-version tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" != "tag" ] || ! printf '%s\n' "$REF_NAME" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::Run the Release workflow on a vMAJOR.MINOR.PATCH tag, not $REF_TYPE $REF_NAME."
+            exit 1
+          fi
+
   validate:
+    needs: release-tag
     uses: ./.github/workflows/validate.yml
 
   supply-chain:
+    needs: release-tag
     uses: ./.github/workflows/supply-chain.yml
     with:
       enforce: true
@@ -37,7 +51,7 @@ jobs:
       id-token: write
       attestations: write
     env:
-      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+      RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - name: Check out repository and tags
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

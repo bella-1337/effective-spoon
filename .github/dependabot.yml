@@ -1,22 +1,57 @@
 version: 2
+# Every entry waits seven days before proposing a new release, so a
+# compromised or quickly withdrawn upstream version is not picked up at once.
+# Security updates ignore the cooldown. The labels must exist in the
+# repository (Dependabot skips missing ones); see
+# docs/development-workflow.md#repository-settings.
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     labels:
       - dependencies
       - ci
 
-  - package-ecosystem: docker
-    directory: /
+  # Image pins in docker-compose.yml, compose.optional.yml, and the remote
+  # GPU host's compose.yml. The plain `docker` ecosystem reads only
+  # Dockerfiles, so Compose files need their own entry.
+  - package-ecosystem: docker-compose
+    directories:
+      - /
+      - /gpu-host
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
     labels:
       - dependencies
       - containers
+    ignore:
+      # LiteLLM follows the LTS (prod) and nightly (dev) channels through
+      # docs/upgrades-and-rollback.md, and the litellm-* images are built
+      # locally, so there is nothing upstream to compare them with.
+      - dependency-name: "*litellm*"
+      # A major version of a stateful or pinned-format service (PostgreSQL,
+      # OpenSearch, ClickHouse, Redis, Grafana) needs a planned migration.
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+    groups:
+      # Components that must run the same version move together.
+      opensearch:
+        patterns:
+          - "opensearchproject/opensearch*"
+      langfuse:
+        patterns:
+          - "*langfuse*"
+      presidio:
+        patterns:
+          - "*presidio*"
 
   - package-ecosystem: docker
     directories:
@@ -25,6 +60,8 @@ updates:
       - /security
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     labels:
       - dependencies
@@ -34,6 +71,8 @@ updates:
     directory: /pgvector
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     labels:
       - dependencies
@@ -50,6 +89,8 @@ updates:
     directory: /opensearch/tools
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     labels:
       - dependencies
@@ -59,6 +100,8 @@ updates:
     directory: /docs-site
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     labels:
       - dependencies
@@ -68,6 +111,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     labels:
       - dependencies

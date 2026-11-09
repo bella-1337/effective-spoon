@@ -44,8 +44,10 @@ python3 scripts/ci/images.py build # when a Dockerfile or image input changed
 python3 scripts/ci/images.py scan --report-only
 ```
 
-CI runs the same checks, plus ShellCheck, Hadolint, Actionlint, Gitleaks, and
-the dependency scan, on GitHub Actions and GitLab CI.
+CI runs the same checks, plus ShellCheck, Hadolint, Ruff, Actionlint, zizmor,
+Gitleaks, and the dependency scan, on GitHub Actions and GitLab CI. On GitHub,
+`master` accepts changes only through a pull request whose required checks
+pass, and CodeQL and OpenSSF Scorecard report to code scanning.
 
 ## Pull requests
 

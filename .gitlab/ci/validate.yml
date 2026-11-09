@@ -33,6 +33,16 @@ lint-dockerfiles:
   script:
     - sh scripts/ci/static-checks.sh dockerfiles
 
+lint-python:
+  stage: validate
+  image:
+    name: ${RUFF_IMAGE}
+    entrypoint: [""]
+  needs: []
+  timeout: 10m
+  script:
+    - sh scripts/ci/static-checks.sh python
+
 lint-github-workflows:
   stage: validate
   image:
@@ -45,6 +55,20 @@ lint-github-workflows:
         - .github/workflows/*.yml
   script:
     - actionlint -color
+
+# Offline here: without a GitHub token zizmor skips its online audits.
+audit-github-workflows:
+  stage: validate
+  image:
+    name: ${ZIZMOR_IMAGE}
+    entrypoint: [""]
+  needs: []
+  timeout: 10m
+  rules:
+    - exists:
+        - .github/workflows/*.yml
+  script:
+    - sh scripts/ci/static-checks.sh workflows
 
 secret-scan:
   stage: validate
