@@ -83,7 +83,8 @@ volumes:
 services:
   # Services are grouped along the request path: edge, LiteLLM, guardrails and
   # tools, data stores, the dev model plane, then observability. Optional
-  # Grafana, Langfuse, and image-security services live in compose.optional.yml.
+  # Grafana, Langfuse, Lens, and image-security services live in
+  # compose.optional.yml.
 
   # ---------------------------------------------------------------------------
   # Edge: TLS termination and routing
@@ -177,8 +178,8 @@ services:
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
-        python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml
-        exec /app/docker/prod_entrypoint.sh --config=/app/runtime-config.yaml --port=4000
+        exec python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml \
+          -- /app/docker/prod_entrypoint.sh --config=/app/runtime-config.yaml --port=4000
     volumes:
       - ./litellm/config.prod.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
@@ -224,6 +225,12 @@ services:
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:-}
       LANGFUSE_HOST: http://langfuse-web:3000
+      # Optional LiteLLM Lens connection (lens profile). The runtime-config
+      # launcher removes these when the lens service is not running.
+      LITELLM_LENS_URL: http://lens:4318
+      LITELLM_LENS_PUBLIC_URL: https://${LENS_HOST:-}
+      LITELLM_LENS_SERVICE_TOKEN: ${LITELLM_LENS_SERVICE_TOKEN:-}
+      LENS_GATEWAY_SECRET: ${LENS_GATEWAY_SECRET:-}
       PROXY_BASE_URL: https://${LITELLM_PROD_HOST:?Set LITELLM_PROD_HOST in .env}
       FORWARDED_ALLOW_IPS: "${LITELLM_FORWARDED_ALLOW_IPS:-*}"
     depends_on:
@@ -234,6 +241,9 @@ services:
       presidio-anonymizer:
         condition: service_healthy
       langfuse-web:
+        condition: service_healthy
+        required: false
+      lens:
         condition: service_healthy
         required: false
     cap_drop: [NET_RAW]
@@ -284,8 +294,8 @@ services:
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
-        python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml
-        exec /app/docker/prod_entrypoint.sh --config=/app/runtime-config.yaml --port=4000
+        exec python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml \
+          -- /app/docker/prod_entrypoint.sh --config=/app/runtime-config.yaml --port=4000
     volumes:
       - ./litellm/config.dev.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
@@ -331,6 +341,12 @@ services:
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_USER_ID_SALT: ${LANGFUSE_USER_ID_SALT:-}
       LANGFUSE_HOST: http://langfuse-web:3000
+      # Optional LiteLLM Lens connection (lens profile). The runtime-config
+      # launcher removes these when the lens service is not running.
+      LITELLM_LENS_URL: http://lens:4318
+      LITELLM_LENS_PUBLIC_URL: https://${LENS_HOST:-}
+      LITELLM_LENS_SERVICE_TOKEN: ${LITELLM_LENS_SERVICE_TOKEN:-}
+      LENS_GATEWAY_SECRET: ${LENS_GATEWAY_SECRET:-}
       PG_VECTOR_API_BASE: http://litellm-pgvector:8000
       PG_VECTOR_API_KEY: ${PG_VECTOR_API_KEY:?Set PG_VECTOR_API_KEY in .env}
       VECTOR_DATABASE_URL: postgresql://vector:${PG_VECTOR_PASSWORD:?Set PG_VECTOR_PASSWORD in .env}@vector-postgres:5432/vector_store
@@ -359,6 +375,9 @@ services:
       qdrant:
         condition: service_healthy
       langfuse-web:
+        condition: service_healthy
+        required: false
+      lens:
         condition: service_healthy
         required: false
     cap_drop: [NET_RAW]

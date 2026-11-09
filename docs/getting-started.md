@@ -15,8 +15,8 @@ chmod 600 .env
 ```
 
 Optional services live in `compose.optional.yml` and remain gated by Compose
-profiles. Only when enabling Grafana, Langfuse, or the image-security monitor,
-create their separate environment file:
+profiles. Only when enabling Grafana, Langfuse, LiteLLM Lens, or the
+image-security monitor, create their separate environment file:
 
 ```sh
 cp .env.optional.example .env.optional
@@ -108,12 +108,13 @@ mkcert \
   -cert-file traefik/certs/litellm-stack.pem \
   -key-file traefik/certs/litellm-stack-key.pem \
   "$LITELLM_PROD_HOST" "$LITELLM_DEV_HOST" "$OPENSEARCH_DASHBOARDS_HOST" \
-  "$LANGFUSE_WEB_HOST" "$LANGFUSE_S3_HOST" "$GRAFANA_HOST"
+  "$LANGFUSE_WEB_HOST" "$LANGFUSE_S3_HOST" "$GRAFANA_HOST" "$LENS_HOST"
 ```
 
 The names come from `.env` and `.env.optional`, so the certificate always
 matches the configured routes. `GRAFANA_HOST` is needed only for the optional
-`grafana` profile, and the two Langfuse names only for the `langfuse` profile.
+`grafana` profile, the two Langfuse names only for the `langfuse` profile, and
+`LENS_HOST` only for the `lens` profile.
 
 `mkcert` creates a locally trusted CA and a private key. Its certificates are
 for local/private use only: browsers on other devices will not trust them
@@ -144,9 +145,9 @@ configured names and append it:
 
 ```sh
 eval "$(python3 scripts/maintenance.py stack-env)"
-printf '127.0.0.1 %s %s %s %s %s %s\n' \
+printf '127.0.0.1 %s %s %s %s %s %s %s\n' \
   "$LITELLM_PROD_HOST" "$LITELLM_DEV_HOST" "$OPENSEARCH_DASHBOARDS_HOST" \
-  "$LANGFUSE_WEB_HOST" "$LANGFUSE_S3_HOST" "$GRAFANA_HOST" \
+  "$LANGFUSE_WEB_HOST" "$LANGFUSE_S3_HOST" "$GRAFANA_HOST" "$LENS_HOST" \
   | sudo tee -a /etc/hosts
 ```
 
@@ -214,6 +215,7 @@ docker compose --profile dev config --quiet
 docker compose --profile prod --profile demo config --quiet
 docker compose --env-file .env --env-file .env.optional --profile prod --profile grafana config --quiet
 docker compose --env-file .env --env-file .env.optional --profile prod --profile langfuse config --quiet
+docker compose --env-file .env --env-file .env.optional --profile prod --profile lens config --quiet
 docker compose --env-file .env --env-file .env.optional --profile security config --quiet
 ```
 
@@ -275,6 +277,25 @@ datastore starts. When the profile is absent, LiteLLM removes the Langfuse
 callback and attribution hook from its generated runtime config; OpenSearch
 tracing remains enabled.
 
+LiteLLM Lens is optional as well. Enable it when you want AI agents to review
+your own agents' traces, group recurring failures, and turn runs into datasets,
+inside the LiteLLM dashboard. Lens has no published image yet, so the first
+start builds it from a pinned upstream commit, which takes several minutes:
+
+```sh
+./scripts/lens.py secrets
+docker compose --env-file .env --env-file .env.optional \
+  --profile prod --profile lens up -d --build --wait
+./scripts/lens.py status
+```
+
+`scripts/lens.py secrets` fills the two gateway connection secrets in `.env`
+and the Lens administrator token and ClickHouse password in `.env.optional`,
+without rotating existing values. Start Lens together with the gateways, or
+recreate the gateways after Lens is healthy: a gateway that started without
+Lens keeps it disabled. See [LiteLLM Lens](lens.md) for agent tracing keys,
+analysis models, data protection, backups, and upgrades.
+
 Synthetic production dashboard data is opt-in. To seed it explicitly, activate
 the `demo` profile together with production:
 
@@ -284,8 +305,8 @@ docker compose --profile prod --profile demo up -d
 
 The production and development proxies use separate databases and config files,
 while PostgreSQL, Traefik, OpenSearch, Prometheus, SearXNG, Presidio, and
-exporters are shared. Langfuse is shared only when its optional profile is
-enabled.
+exporters are shared. Langfuse and Lens are shared only when their optional
+profiles are enabled.
 
 ## 8. Verify the stack
 
@@ -308,6 +329,8 @@ curl --silent --output /dev/null --write-out '%{http_code}\n' \
 # Optional langfuse profile only:
 curl --fail --show-error --silent \
   "https://$LANGFUSE_WEB_HOST/api/public/health?failIfDatabaseUnavailable=true"
+# Optional lens profile only:
+curl --fail --show-error --silent "https://$LENS_HOST/health/ready"
 # SearXNG is internal-only; Traefik must not route it (expect 404).
 curl --silent --output /dev/null --write-out '%{http_code}\n' \
   -H "Host: search.$STACK_DOMAIN" "https://$LITELLM_PROD_HOST/"
@@ -362,5 +385,5 @@ docker compose --profile prod down
 ```
 
 Use `docker compose down --volumes` only when you intentionally want to delete
-PostgreSQL, OpenSearch, Grafana, and Prometheus data, including the private
-OpenSearch CA. That operation is destructive.
+PostgreSQL, OpenSearch, Grafana, Langfuse, Lens, and Prometheus data, including
+the private OpenSearch CA. That operation is destructive.

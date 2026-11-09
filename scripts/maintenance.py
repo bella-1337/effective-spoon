@@ -95,6 +95,10 @@ Commands:
       Run the validated rollback workflow. All confirmation, state, backup,
       drift, and service-selection options are delegated unchanged.
 
+  lens secrets|status|smoke [OPTIONS]
+      Operate the optional LiteLLM Lens profile: generate missing secrets,
+      check Lens and the gateway connection, or send and read back one trace.
+
   help
       Show this help text.
 """
@@ -106,7 +110,7 @@ SCRIPTS = (
     "verify-litellm-upgrade.py", "rollback-litellm-upgrade.py",
     "monitor-image-vulnerabilities.py", "generate-image-sbom.py",
     "install-image-security-schedule.py",
-    "run-image-security-scheduler.py",
+    "run-image-security-scheduler.py", "lens.py",
 )
 
 
@@ -257,6 +261,8 @@ def main() -> None:
         invoke("verify-litellm-upgrade.py", args)
     elif command == "rollback":
         invoke("rollback-litellm-upgrade.py", args)
+    elif command == "lens":
+        invoke("lens.py", args)
     else:
         usage_error(f"unknown command: {command}")
 

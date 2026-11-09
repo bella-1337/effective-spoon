@@ -14,6 +14,30 @@ All notable changes to this stack are recorded here. The format follows
   decides on and runs each tool call: the model's Xberg `extract` call, which
   LiteLLM runs itself, and the model's search call, which the agent runs
   through the native `searxng-search` endpoint.
+- Optional `lens` profile with [LiteLLM Lens](docs/lens.md): AI review of agent
+  traces, findings, and datasets, embedded in both LiteLLM dashboards. Lens is
+  built from the pinned `BerriAI/lens` release-candidate commit
+  `b2ac5f8a289c3f77f02b81d67ca1ee075bfead6d` (`v1.108.0-rc.1`) and stores its
+  data in its own ClickHouse on the internal `lens-storage` network. A
+  preflight job rejects missing or reused secrets, Traefik routes `LENS_HOST`,
+  Prometheus probes its readiness, and the **LiteLLM Lens is not ready** alert
+  covers a running but unready Lens. The build uses a newer Wolfi runtime base
+  than the pinned commit, whose base fails the image release gate with a
+  fixable Critical `ca-certificates-bundle` CVE.
+- `scripts/lens.py` (also `maintenance.py lens`) generates missing Lens secrets
+  without rotating existing ones, checks Lens and each gateway's connection, and
+  runs an end-to-end trace smoke test. The upgrade regression suite gains a
+  `lens` check.
+
+### Changed
+
+- Both LiteLLM gateways start through `prepare_runtime_config.py` as a launcher.
+  It enables the Lens connection only while the `lens` service runs, removes the
+  `LITELLM_LENS_*` variables from the gateway process otherwise, and refuses to
+  start a gateway whose Lens secrets are missing or invalid while Lens runs.
+- The maintenance contracts accept build contexts fetched from Git only when
+  they pin a full commit that the image's revision label and the licence
+  register record.
 
 ## [v0.2.1] - 2026-11-08
 

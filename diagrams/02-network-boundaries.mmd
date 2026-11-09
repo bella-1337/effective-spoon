@@ -22,6 +22,7 @@ flowchart TD
       LL["LiteLLM prod / dev<br/>also on internal + xberg-sandbox"]:::backend
       OSD["OpenSearch Dashboards<br/>also on internal"]:::frontend
       WEBUI["Grafana · Langfuse web<br/>optional profiles"]:::frontend
+      LENS["Lens (optional)<br/>also on internal + lens-storage"]:::backend
     end
     subgraph INT["internal network — service-to-service"]
       PR["Presidio<br/>analyzer · anonymizer"]:::security
@@ -29,6 +30,9 @@ flowchart TD
       DB[("PostgreSQL · pgvector<br/>no host ports")]:::database
       OS[("OpenSearch · Data Prepper<br/>private-CA TLS")]:::database
       PM["Prometheus · exporters<br/>scrapes every job"]:::backend
+    end
+    subgraph LSN["lens-storage — internal, Lens only"]
+      LCH[("Lens ClickHouse<br/>no route from any other service")]:::database
     end
     subgraph SBX["xberg-sandbox — internal-only MCP"]
       XB["Xberg MCP<br/>no Internet, no internal route"]:::backend
@@ -53,6 +57,9 @@ flowchart TD
   TR ==> LL
   TR --> OSD
   TR --> WEBUI
+  TR --> LENS
+  LL -->|"http://lens:4318"| LENS
+  LENS --> LCH
   LL --> PR
   LL --> SX
   LL --> DB

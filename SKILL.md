@@ -1,6 +1,6 @@
 ---
 name: litellm-stack-maintenance
-description: Maintain, troubleshoot, validate, and safely upgrade this Docker Compose LiteLLM, OpenSearch, Prometheus, Grafana Alloy, and optional Grafana/Loki stack.
+description: Maintain, troubleshoot, validate, and safely upgrade this Docker Compose LiteLLM, OpenSearch, Prometheus, Grafana Alloy, and optional Grafana/Loki, Langfuse, and LiteLLM Lens stack.
 ---
 
 # LiteLLM Stack Maintenance
@@ -21,7 +21,11 @@ configuration, observability, TLS, runtime profiles, or dependency images.
 5. Keep OpenSearch as the default observability platform and Grafana, Loki,
    and `alloy-loki` inside the optional `grafana` profile. Never disable
    OpenSearch TLS, certificate verification, or the security plugin.
-6. Do not remove services, exporters, databases, datasources, or volumes just
+6. Keep LiteLLM Lens inside the optional `lens` profile, its ClickHouse alone on
+   the internal `lens-storage` network, and both gateways starting through
+   `prepare_runtime_config.py`, which enables the Lens connection only while
+   Lens runs. Never give a gateway a hard dependency on Lens.
+7. Do not remove services, exporters, databases, datasources, or volumes just
    because they have no recent activity. Trace their consumers first.
 
 ## Change Workflow
@@ -111,8 +115,8 @@ Run:
 
 ```sh
 docker compose --env-file .env --env-file .env.optional \
-  --profile prod --profile dev --profile grafana --profile langfuse --profile security \
-  config --quiet
+  --profile prod --profile dev --profile grafana --profile langfuse --profile lens \
+  --profile security config --quiet
 python3 -m unittest discover -s scripts/tests
 jq empty grafana/dashboards/litellm-stack/litellm-stack.json
 jq empty grafana/dashboards/litellm-cost/litellm-cost.json
@@ -180,8 +184,8 @@ monitors, and the workload state.
 2. Read release notes for config-schema, metric-name, and database-migration
    changes.
 3. Back up `pg-data`, `opensearch-data` (snapshot), `prometheus-data`, and,
-   with the Grafana profile, `grafana-data` and `loki-data` before a
-   destructive upgrade. Upgrade OpenSearch and OpenSearch Dashboards together
+   with the Grafana profile, `grafana-data` and `loki-data`, and with the Lens
+   profile, `lens-clickhouse-data`, before a destructive upgrade. Upgrade OpenSearch and OpenSearch Dashboards together
    to the same version.
 4. Upgrade in this order when dependencies require it:
    PostgreSQL compatibility, LiteLLM, Prometheus/Alloy/Data Prepper,

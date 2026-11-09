@@ -16,7 +16,8 @@ proxies behind Traefik, with PostgreSQL, Presidio, SearXNG, Xberg MCP,
 development vLLM model servers, Prometheus, host/container exporters, and
 OpenSearch with OpenSearch Dashboards as the default multi-user observability
 platform for logs, metrics, LiteLLM usage, tracing, alerting, and audit trails.
-Grafana/Loki and Langfuse remain available through optional profiles.
+Grafana/Loki, Langfuse, and LiteLLM Lens (AI review of agent traces inside the
+LiteLLM dashboard) remain available through optional profiles.
 
 The `prod` and `dev` names below describe LiteLLM runtime profiles. The on-prem
 deployment expects a certificate delivery process to place the configured TLS
@@ -104,6 +105,7 @@ see [Documentation site](docs/documentation-site.md).
 | [Documentation site](docs/documentation-site.md) | Local preview, versions and the dev switch, GitHub Pages and GitLab Pages publishing |
 | [Corporate branding and virtual-key management](docs/branding-and-key-management.md) | Admin UI branding, Enterprise virtual-key rotation, key email notifications |
 | [Observability](docs/observability.md) | OpenSearch users, roles, tenants, alerting and recovery; optional Langfuse and Grafana profiles; demonstration data and telemetry stores |
+| [LiteLLM Lens](docs/lens.md) | Optional `lens` profile: AI review of agent traces in the LiteLLM dashboard, secrets, gateway connection, analysis models, data protection, backup, and upgrades |
 | [Search, document extraction, and caching](docs/search-extraction-and-caching.md) | SearXNG search and engine terms of use, Xberg MCP document extraction, development semantic response cache |
 | [Presidio PII masking and guardrails](docs/presidio-guardrails.md) | Presidio masking and changing, adding, disabling, and verifying LiteLLM guardrails |
 | [Edge and abuse protection](docs/edge-and-abuse-protection.md) | TLS policy, HSTS, per-client rate limits, per-key defaults, Xberg sandbox egress and DNS, prompt-injection screening, and residual risks |

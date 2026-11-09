@@ -69,7 +69,7 @@ The checks:
 | Dockerfile lint (Hadolint, `.hadolint.yaml`) | `scripts/ci/static-checks.sh dockerfiles` | Same |
 | GitHub workflow lint (Actionlint) | `actionlint` | Same |
 | Secret scan of the full Git history (Gitleaks, `.gitleaks.toml`) | `scripts/ci/static-checks.sh secrets` | Same |
-| Build the three local images and verify their OCI labels | `python3 scripts/ci/images.py build` | Changes to image inputs, nightly, manual runs, and tags |
+| Build the four local images (including the optional `litellm-lens`) and verify their OCI labels | `python3 scripts/ci/images.py build` | Changes to image inputs, nightly, manual runs, and tags |
 | Image vulnerability gate (Trivy, CISA KEV, `security/exceptions.toml`) | `python3 scripts/ci/images.py scan` | Same as the build |
 | Python dependency scan (Trivy, fixable High and Critical) | `scripts/ci/static-checks.sh dependencies` | Same as the build |
 | Development container build | `npx @devcontainers/cli build` | Changes to `.devcontainer/`, weekly or nightly, and manual runs |

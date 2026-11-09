@@ -37,8 +37,14 @@ class GameDayPreflightTests(unittest.TestCase):
                             "condition": "service_healthy",
                             "required": False,
                         },
+                        "lens": {"condition": "service_healthy", "required": False},
                     },
+                    "command": [
+                        "exec python /app/modules/prepare_runtime_config.py "
+                        "/app/config.yaml /app/runtime-config.yaml -- /app/docker/prod_entrypoint.sh"
+                    ],
                     "environment": {
+                        "LITELLM_LENS_URL": "http://lens:4318",
                         "UI_LOGO_PATH": "/app/branding/logo.png",
                         "UI_LOGO_PATH_DARK": "/app/branding/logo-dark.png",
                         "LITELLM_FAVICON_URL": "/app/branding/favicon.png",
@@ -88,6 +94,20 @@ class GameDayPreflightTests(unittest.TestCase):
                     "profiles": ["langfuse"],
                     "depends_on": {"langfuse-preflight": {}},
                     "environment": {"AUTH_DISABLE_SIGNUP": "true"},
+                },
+                "lens-preflight": {"profiles": ["lens"]},
+                "lens-clickhouse": {
+                    "profiles": ["lens"],
+                    "depends_on": {"lens-preflight": {}},
+                    "networks": {"lens-storage": {}},
+                },
+                "lens": {
+                    "profiles": ["lens"],
+                    "depends_on": {"lens-preflight": {}, "lens-clickhouse": {}},
+                    "networks": {"edge": {}, "internal": {}, "lens-storage": {}},
+                    "read_only": True,
+                    "cap_drop": ["ALL"],
+                    "environment": {"LENS_PUBLIC_URL": "https://lens.example.test"},
                 },
                 "image-security-docker-proxy": {"profiles": ["security"]},
                 "image-security-monitor": {"profiles": ["security"]},
@@ -200,6 +220,59 @@ class GameDayPreflightTests(unittest.TestCase):
             self.assertIn(
                 "langfuse-web must disable public self-registration", failures
             )
+
+    def test_lens_services_must_stay_optional_and_profiled(self) -> None:
+        config = self.valid_config()
+        config["services"]["lens"]["profiles"] = []
+        del config["services"]["lens-preflight"]
+        config["services"]["lens-clickhouse"]["depends_on"] = {}
+        config["services"]["litellm-prod"]["depends_on"]["lens"] = {
+            "condition": "service_healthy"
+        }
+
+        failures = self.module.validate_compose_contracts(config)
+
+        self.assertIn("Optional Lens service must stay in the lens profile: lens", failures)
+        self.assertIn("Optional Lens service is missing: lens-preflight", failures)
+        self.assertIn("lens-clickhouse must depend on lens-preflight", failures)
+        self.assertTrue(any("auxiliary services: lens" in f for f in failures), failures)
+        self.assertIn(
+            "litellm-prod must treat healthy Lens as an optional dependency", failures
+        )
+
+    def test_gateway_must_launch_through_lens_gate_on_private_network(self) -> None:
+        config = self.valid_config()
+        production = config["services"]["litellm-prod"]
+        production["command"] = ["exec /app/docker/prod_entrypoint.sh"]
+        production["environment"]["LITELLM_LENS_URL"] = "https://lens.example.test"
+
+        failures = self.module.validate_compose_contracts(config)
+
+        self.assertIn("litellm-prod must reach Lens on the private Compose network", failures)
+        self.assertIn(
+            "litellm-prod must start through prepare_runtime_config.py so Lens stays optional",
+            failures,
+        )
+
+    def test_lens_store_and_service_must_stay_private_and_hardened(self) -> None:
+        exposures = (
+            ("lens-clickhouse", "networks", {"internal": {}, "lens-storage": {}}, "lens-storage network only"),
+            ("lens-clickhouse", "ports", [{"target": 8123, "published": "8123"}], "must not be published"),
+            ("lens-clickhouse", "labels", ["traefik.enable=true"], "must not be published"),
+            ("lens", "ports", [{"target": 4318, "published": "4318"}], "must not publish host ports"),
+            ("lens", "read_only", False, "read-only root filesystem"),
+            ("lens", "cap_drop", ["NET_RAW"], "drop all Linux capabilities"),
+            ("lens", "environment", {"LENS_PUBLIC_URL": "http://lens.example.test"}, "must use HTTPS"),
+            ("searxng", "networks", {"internal": {}, "lens-storage": {}}, "Only Lens and its ClickHouse"),
+        )
+        for service, key, value, message in exposures:
+            with self.subTest(service=service, key=key):
+                config = self.valid_config()
+                config["services"][service][key] = value
+
+                failures = self.module.validate_compose_contracts(config)
+
+                self.assertTrue(any(message in f for f in failures), failures)
 
     def test_loki_healthcheck_must_not_need_a_shell_or_http_client(self) -> None:
         for test in (

@@ -32,7 +32,8 @@ image-scan:
     - .supply-chain-rules
   stage: supply-chain
   needs: []
-  timeout: 45m
+  # The optional litellm-lens image compiles Lens from its pinned source commit.
+  timeout: 90m
   before_script:
     - apk add --no-cache python3
     - sh scripts/ci/wait-for-docker.sh

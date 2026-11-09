@@ -83,6 +83,10 @@ networks:
   alloy-monitor:
     internal: true
   security-monitor: {}
+  # Lens and its ClickHouse store only; nothing else, including Prometheus,
+  # can reach the trace database.
+  lens-storage:
+    internal: true
 
 volumes:
   grafana-data: {}
@@ -93,6 +97,7 @@ volumes:
   langfuse-clickhouse-logs: {}
   langfuse-minio-data: {}
   langfuse-redis-data: {}
+  lens-clickhouse-data: {}
 
 services:
   # ---------------------------------------------------------------------------
@@ -483,6 +488,156 @@ services:
       - traefik.http.routers.langfuse.entrypoints=websecure
       - traefik.http.routers.langfuse.tls=true
       - traefik.http.services.langfuse.loadbalancer.server.port=3000
+
+  # ---------------------------------------------------------------------------
+  # lens profile: LiteLLM Lens agent-trace analysis with its ClickHouse store
+  # ---------------------------------------------------------------------------
+
+  lens-preflight:
+    logging: *default-logging
+    profiles: [lens]
+    image: postgres:17.11@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        require_secret() {
+          length=$$(printf '%s' "$$2" | wc -c)
+          [ "$$length" -ge 32 ] && [ "$$length" -le 512 ] || { echo "Set $$1 in $$3 to 32-512 characters, for example with 'openssl rand -hex 32', to use the lens profile" >&2; exit 64; }
+        }
+        require_secret LENS_ADMIN_TOKEN "$$LENS_ADMIN_TOKEN" .env.optional
+        require_secret LENS_CLICKHOUSE_PASSWORD "$$LENS_CLICKHOUSE_PASSWORD" .env.optional
+        require_secret LITELLM_LENS_SERVICE_TOKEN "$$LITELLM_LENS_SERVICE_TOKEN" .env
+        require_secret LENS_GATEWAY_SECRET "$$LENS_GATEWAY_SECRET" .env
+        [ "$$LENS_ADMIN_TOKEN" != "$$LITELLM_LENS_SERVICE_TOKEN" ] && [ "$$LENS_ADMIN_TOKEN" != "$$LENS_GATEWAY_SECRET" ] && [ "$$LITELLM_LENS_SERVICE_TOKEN" != "$$LENS_GATEWAY_SECRET" ] || { echo "Use different values for LENS_ADMIN_TOKEN, LITELLM_LENS_SERVICE_TOKEN, and LENS_GATEWAY_SECRET" >&2; exit 64; }
+        if [ -n "$$LENS_GATEWAY_API_BASE$$LENS_GATEWAY_API_KEY" ]; then
+          [ -n "$$LENS_GATEWAY_API_BASE" ] && [ -n "$$LENS_GATEWAY_API_KEY" ] || { echo "Set both LENS_GATEWAY_API_BASE and LENS_GATEWAY_API_KEY in .env.optional, or neither" >&2; exit 64; }
+        fi
+    environment:
+      LENS_ADMIN_TOKEN: ${LENS_ADMIN_TOKEN:-}
+      LENS_CLICKHOUSE_PASSWORD: ${LENS_CLICKHOUSE_PASSWORD:-}
+      LITELLM_LENS_SERVICE_TOKEN: ${LITELLM_LENS_SERVICE_TOKEN:-}
+      LENS_GATEWAY_SECRET: ${LENS_GATEWAY_SECRET:-}
+      LENS_GATEWAY_API_BASE: ${LENS_GATEWAY_API_BASE:-}
+      LENS_GATEWAY_API_KEY: ${LENS_GATEWAY_API_KEY:-}
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  lens-clickhouse:
+    logging: *default-logging
+    profiles: [lens]
+    image: clickhouse/clickhouse-server:26.9.6.6@sha256:eb4870e7ca7ed70c259eebfcfbee6cf797017f6b5436c2926bbbfe3d4d28486e
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: lens
+      CLICKHOUSE_USER: lens
+      CLICKHOUSE_PASSWORD: ${LENS_CLICKHOUSE_PASSWORD:-}
+      # Lens creates its own bounded read-only users for ad-hoc SQL.
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - ./lens/clickhouse/config.d/keeper.xml:/etc/clickhouse-server/config.d/lens-keeper.xml:ro
+      - ./lens/clickhouse/config.d/logging.xml:/etc/clickhouse-server/config.d/lens-logging.xml:ro
+      - lens-clickhouse-data:/var/lib/clickhouse
+    networks: [lens-storage]
+    depends_on:
+      lens-preflight:
+        condition: service_completed_successfully
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    deploy: *resources-database
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user lens --password \"$$CLICKHOUSE_PASSWORD\" --query 'SELECT 1' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  lens:
+    logging: *default-logging
+    profiles: [lens]
+    # Lens publishes no release image yet, so the stack builds the pinned
+    # release-candidate commit with the upstream runtime Dockerfile.
+    image: litellm-lens:1.108.0-rc.1
+    build:
+      context: https://github.com/BerriAI/lens.git#b2ac5f8a289c3f77f02b81d67ca1ee075bfead6d
+      dockerfile: deploy/runtime/Dockerfile
+      target: runtime
+      args:
+        LENS_VERSION: 1.108.0-rc.1
+        # The pinned commit's runtime base digest ships a ca-certificates-bundle
+        # with a fixable Critical CVE, and its runtime stage does not upgrade
+        # base packages. Use a newer Wolfi digest until the Lens pin moves past
+        # upstream's fix (apk add --upgrade).
+        LENS_RUNTIME_IMAGE: cgr.dev/chainguard/wolfi-base@sha256:24f549a7fcace88e69b9557941168c74645688ecc4acf7fb6d734a6b74e9019d
+      labels:
+        <<: *own-image-labels
+        org.opencontainers.image.title: litellm-lens
+        org.opencontainers.image.description: LiteLLM Lens agent-trace analysis service built from the pinned upstream release-candidate commit
+        org.opencontainers.image.version: 1.108.0-rc.1
+        org.opencontainers.image.base.name: cgr.dev/chainguard/wolfi-base
+        org.opencontainers.image.source: https://github.com/BerriAI/lens
+        org.opencontainers.image.url: https://github.com/BerriAI/lens
+        org.opencontainers.image.revision: b2ac5f8a289c3f77f02b81d67ca1ee075bfead6d
+        org.opencontainers.image.licenses: MIT
+        # The Wolfi base would otherwise name Chainguard as the author.
+        org.opencontainers.image.authors: BerriAI
+    environment:
+      LENS_MODE: standalone
+      LENS_ADMIN_TOKEN: ${LENS_ADMIN_TOKEN:-}
+      LENS_PUBLIC_URL: https://${LENS_HOST:?Set LENS_HOST in .env.optional}
+      CLICKHOUSE_HOST: lens-clickhouse
+      CLICKHOUSE_USER: lens
+      CLICKHOUSE_PASSWORD: ${LENS_CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_DATABASE: lens
+      AGENT_TRACING_RETENTION_DAYS: "${LENS_TRACE_RETENTION_DAYS:-14}"
+      # Gateway connection: LiteLLM authenticates to Lens with the service
+      # token and signs each dashboard user's identity with the gateway secret.
+      LITELLM_LENS_SERVICE_TOKEN: ${LITELLM_LENS_SERVICE_TOKEN:-}
+      LENS_GATEWAY_SECRET: ${LENS_GATEWAY_SECRET:-}
+      # Optional analysis models through a LiteLLM gateway. Calls to that
+      # origin carry a signed Lens identity so the gateway keeps their message
+      # content out of its logs and out of Lens.
+      LENS_GATEWAY_API_BASE: ${LENS_GATEWAY_API_BASE:-}
+      LENS_GATEWAY_API_KEY: ${LENS_GATEWAY_API_KEY:-}
+      LENS_GATEWAY_URL: ${LENS_GATEWAY_API_BASE:-}
+    depends_on:
+      lens-preflight:
+        condition: service_completed_successfully
+      lens-clickhouse:
+        condition: service_healthy
+    networks: [edge, internal, lens-storage]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=${LENS_TMP_SIZE:-1g}
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "${LENS_CPU_LIMIT:-2}"
+          memory: ${LENS_MEMORY_LIMIT:-2g}
+          pids: ${LENS_PIDS_LIMIT:-128}
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://127.0.0.1:4318/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.lens.rule=Host(`${LENS_HOST:?Set LENS_HOST in .env.optional}`)
+      - traefik.http.routers.lens.entrypoints=websecure
+      - traefik.http.routers.lens.tls=true
+      - traefik.http.services.lens.loadbalancer.server.port=4318
 
   # ---------------------------------------------------------------------------
   # security profile: scheduled image scanning

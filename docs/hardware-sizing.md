@@ -3,7 +3,7 @@
 [← Back to the README](../README.md#documentation).
 
 Rough planning figures for two environments, each running every optional
-profile (`grafana`, `langfuse`, `security`). They assume:
+profile (`grafana`, `langfuse`, `lens`, `security`). They assume:
 
 - about 100,000 production requests a day with 30–60 in flight at peak;
 - prompts are not stored in spend logs, and completions run at OpenAI;
@@ -37,8 +37,9 @@ Planning peaks, not idle use. The core and prod profile idles at about 7 GiB.
 | LiteLLM prod | 4 workers × (1 vCPU, 4 GB) | 16 GB | 4 |
 | `grafana` | Grafana, Loki, alloy-loki | 3 GB | 1.5 |
 | `langfuse` | Web, worker, PostgreSQL, ClickHouse, Redis, MinIO | 11 GB | 4 |
+| `lens` | Lens (2 GB limit), ClickHouse | 6 GB | 3 |
 | `security` | Image scanner (bursty) | 2.5 GB | 2 |
-| **Total** | | **~60 GB** | **~27** |
+| **Total** | | **~65 GB** | **~30** |
 
 Add about 4 GB for the OS and Docker and at least 25 GB of page cache for
 OpenSearch, PostgreSQL, and ClickHouse. That makes 96 GB the minimum. At
@@ -49,6 +50,7 @@ OpenSearch, PostgreSQL, and ClickHouse. That makes 96 GB the minimum. At
 | OpenSearch (single node; stay under the 85% watermark) | Logs 7 d, metrics and traces 15 d, audit 90 d, usage 180 d | 150–200 GB |
 | PostgreSQL spend logs | 180 d | 50–100 GB |
 | Langfuse ClickHouse and MinIO | Unbounded by default | 200–400 GB |
+| Lens ClickHouse | `LENS_TRACE_RETENTION_DAYS` (14 d) of agent traces with full content | 20–100 GB, depending on agent trace volume |
 | Prometheus and Loki | 10 GB cap, 7 d | 30 GB |
 | Images, build cache, container logs | — | 100 GB |
 | Local backup staging, if `BACKUP_DIR` is on the host | 30 d | 100 GB |
@@ -103,7 +105,8 @@ the default resource limits.
 | LiteLLM prod and dev, 1 worker each | 8 GB | 2 |
 | Qdrant (2 GB limit plus 1 GB `tmpfs`) and litellm-pgvector | 3.5 GB | 1.5 |
 | `grafana`, `langfuse`, `security` | 11.5 GB | 5 |
-| **Total** | **~40 GB** | **~18** |
+| `lens` with the default limits | 4 GB | 2 |
+| **Total** | **~44 GB** | **~20** |
 
 BGE-M3 runs on the remote GPU host, so the dev host needs no GPU.
 

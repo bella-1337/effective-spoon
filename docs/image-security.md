@@ -74,7 +74,7 @@ applied, and Grafana warns seven days before the earliest active exception
 expires.
 
 The CI image gate (`scripts/ci/images.py scan`) reads the same file for the
-three images this repository builds. Because one image can serve several
+four images this repository builds. Because one image can serve several
 services (for example the OpenSearch tools image), CI accepts a finding only
 when exceptions cover every service that runs the image. See
 [Local and continuous integration](development-workflow.md#local-and-continuous-integration).
@@ -309,8 +309,9 @@ platform are reflected exactly:
 ```
 
 - Registry images are resolved to their platform-specific digest and read
-  remotely. The three locally built images (`litellm-pgvector`,
-  `litellm-opensearch-tools`, `litellm-image-security-monitor`) are exported
+  remotely. The four locally built images (`litellm-pgvector`,
+  `litellm-opensearch-tools`, `litellm-image-security-monitor`, and the
+  optional `litellm-lens`) are exported
   with `docker image save` to a temporary archive below
   `security-state/trivy-cache/sbom-input/` and keyed by their local image ID.
   The archive is deleted after the scan. Reserve free disk space of about the
@@ -354,19 +355,19 @@ pinned to immutable revisions (BGE-M3 in `gpu-host/compose.yml` and
 
 ## Labels of locally built images
 
-The three images this repository builds carry the standard OCI image labels,
+The four images this repository builds carry the standard OCI image labels,
 set in the Compose `build.labels` of `litellm-opensearch-tools`,
-`litellm-pgvector`, and `litellm-image-security-monitor`:
+`litellm-pgvector`, `litellm-image-security-monitor`, and `lens`:
 
 | Label | Value |
 |---|---|
 | `org.opencontainers.image.vendor` | `STACK_DOMAIN`, identifying the organisation that builds and operates the image |
 | `org.opencontainers.image.title`, `.description` | Image name and purpose |
 | `org.opencontainers.image.version` | The Compose image tag |
-| `org.opencontainers.image.revision` | `STACK_REPOSITORY_REVISION`, or the upstream commit for `litellm-pgvector` |
-| `org.opencontainers.image.licenses` | `MIT` for every image, including the upstream `litellm-pgvector` code |
-| `org.opencontainers.image.base.name` | The final `FROM` image of the Dockerfile, without digest |
-| `org.opencontainers.image.source`, `.url` | `STACK_REPOSITORY_URL` (empty when unset), or the upstream repository for `litellm-pgvector` |
+| `org.opencontainers.image.revision` | `STACK_REPOSITORY_REVISION`, or the upstream commit for `litellm-pgvector` and `litellm-lens` |
+| `org.opencontainers.image.licenses` | `MIT` for every image, including the upstream `litellm-pgvector` and Lens code |
+| `org.opencontainers.image.base.name` | The final `FROM` image of the Dockerfile, without digest; for `litellm-lens`, the Wolfi base of the upstream Dockerfile |
+| `org.opencontainers.image.source`, `.url` | `STACK_REPOSITORY_URL` (empty when unset), or the upstream repository for `litellm-pgvector` and `litellm-lens` |
 | `org.opencontainers.image.created` | Always empty; see below |
 
 Build with the repository commit recorded:
@@ -381,7 +382,10 @@ docker image inspect --format '{{json .Config.Labels}}' litellm-opensearch-tools
 `doctor`, the game-day preflight, and `scripts/ci/validate.sh` fail when a
 label is missing or when the vendor, version, or base-name label drifts from
 `STACK_DOMAIN`, the image tag, or the Dockerfile, so a base-image tag update
-must change the label and the register row in the same commit.
+must change the label and the register row in the same commit. `litellm-lens`
+is built from a Git build context, so its Dockerfile is not in this repository:
+the contracts require that context to pin a full commit and the revision label
+and licence register to name that same commit.
 
 Base images also carry OCI labels; the `uv` base, for example, sets `source`,
 `url`, and `created` for uv itself. Docker would otherwise copy those into the

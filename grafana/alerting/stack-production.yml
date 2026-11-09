@@ -187,3 +187,30 @@ groups:
         labels:
           severity: warning
           source: litellm-stack
+
+      - uid: lens-not-ready
+        title: LiteLLM Lens is not ready
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: probe_success{job="lens"} == bool 0
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        # The optional lens profile has no probe target while it is stopped.
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "LiteLLM Lens readiness probe is failing"
+          description: "The running Lens service has not answered /health/ready for five minutes, so agent traces, investigations, and the gateway's Lens page are unavailable. Check lens-clickhouse health and the lens logs."
+        labels:
+          severity: warning
+          source: litellm-stack

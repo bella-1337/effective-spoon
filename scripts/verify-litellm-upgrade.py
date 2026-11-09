@@ -42,11 +42,12 @@ from maintenance_common import (
     service_is_running,
 )
 from maintenance_contracts import traefik_dynamic_config_failures
+from lens import check_status as check_lens_status
 
 ALL_CHECKS = (
     "compose-config", "compose-health", "network-exposure", "prod-auth", "dev-auth", "isolation",
     "dev-vllm-embedding", "coding-routing", "pgvector", "presidio", "searxng", "xberg-mcp",
-    "langfuse", "observability", "opensearch", "opensearch-logs", "logs",
+    "langfuse", "lens", "observability", "opensearch", "opensearch-logs", "logs",
 )
 USAGE = """Usage: scripts/verify-litellm-upgrade.py [--only CHECK[,CHECK...]] [--skip CHECK[,CHECK...]] [--list]
 
@@ -59,9 +60,12 @@ already-running Compose stack. Start the desired profile(s) first:
 Checks (run in this order unless filtered):
   compose-config compose-health network-exposure prod-auth dev-auth isolation
   dev-vllm-embedding coding-routing pgvector presidio searxng xberg-mcp
-  langfuse observability opensearch opensearch-logs logs
+  langfuse lens observability opensearch opensearch-logs logs
 
 The `langfuse` check applies only when the optional Langfuse profile is running.
+The `lens` check verifies Lens health and each gateway's Lens connection when
+the optional lens profile is running, and otherwise that the gateways run
+without a Lens connection.
 The `logs` check and the Grafana parts of `observability` apply only when the
 optional Grafana profile is running.
 
@@ -304,6 +308,8 @@ WHERE vector_store_id = 'sme-knowledge'
         if states.get("langfuse-web") == "running":
             shared += ["langfuse-postgres", "langfuse-clickhouse", "langfuse-minio",
                        "langfuse-redis", "langfuse-worker", "langfuse-web"]
+        if states.get("lens") == "running":
+            shared += ["lens-clickhouse", "lens"]
         for service in shared:
             if states.get(service) != "running":
                 self.fail_(f"shared service '{service}' is not running (state: {states.get(service, 'missing')})")
@@ -313,7 +319,7 @@ WHERE vector_store_id = 'sme-knowledge'
                 self.fail_(f"unhealthy service(s): {item.get('Service')}")
                 bad = True
         for job in ("postgres-init", "pgvector-migrate", "opensearch-certs", "opensearch-setup",
-                    "opensearch-dashboards-setup"):
+                    "opensearch-dashboards-setup", "lens-preflight"):
             for item in containers:
                 if item.get("Service") == job and str(item.get("ExitCode", "")) not in {"", "0"}:
                     self.fail_(f"one-off job '{job}' exited with code {item.get('ExitCode')}")
@@ -839,6 +845,22 @@ WHERE vector_store_id = 'sme-knowledge'
                 bad = True
         return int(bad)
 
+    def check_lens(self) -> int:
+        lens_running = service_is_running("lens")
+        if not (lens_running or self.prod_running or self.dev_running):
+            return self.skip("lens: neither Lens nor a LiteLLM gateway is running")
+        bad = False
+        if lens_running:
+            status, _ = self.request(f"https://{public_host('LENS_HOST')}/health/ready")
+            if status == 200:
+                self.pass_("lens: public readiness endpoint returned HTTP 200 through Traefik")
+            else:
+                self.fail_(f"lens: public readiness endpoint returned HTTP {status} (expected 200)")
+                bad = True
+        if not check_lens_status():
+            bad = True
+        return int(bad)
+
     def check_observability(self) -> int:
         bad = False
         headers: dict[str, str] | None = None
@@ -941,7 +963,11 @@ SELECT
             elif any(target.get("health") != "up" for target in matching):
                 self.fail_(f"observability: Prometheus job '{job}' has {sum(target.get('health') != 'up' for target in matching)} unhealthy target(s)")
                 bad = True
-        for job, running in (("litellm-prod", self.prod_running), ("litellm-dev", self.dev_running)):
+        for job, running in (
+            ("litellm-prod", self.prod_running),
+            ("litellm-dev", self.dev_running),
+            ("lens", service_is_running("lens")),
+        ):
             if not running:
                 continue
             matching = [target for target in active if isinstance(target, dict) and target.get("labels", {}).get("job") == job]

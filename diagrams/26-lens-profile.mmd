@@ -1,0 +1,50 @@
+---
+title: Optional LiteLLM Lens profile
+---
+flowchart TD
+  %% Source for 26-lens-profile.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @mode architecture
+  %% @subtitle AI review of agent traces, embedded in the LiteLLM dashboard and built from a pinned Lens commit
+  %% @card cyan | Trace path | Agents upload OTLP traces to LENS_HOST/v1/traces with a tracing key | Gateways export content-free spend records for cost matching | Lens keeps traces for LENS_TRACE_RETENTION_DAYS
+  %% @card violet | Isolation | ClickHouse and its Keeper sit alone with Lens on lens-storage | Gateways enable Lens only while the lens service resolves | lens-preflight rejects missing or reused secrets
+  %% @card rose | Access | Gateway admins open Lens in the dashboard with their session | The standalone UI needs LENS_ADMIN_TOKEN | Analysis models run only through a dedicated gateway key
+  %% @journey #22d3ee: AG TR LN CH
+  %% @journey #a78bfa: OP TR LL LN
+
+  subgraph CL["Clients — outside the stack"]
+    AG["Agent / coding agent<br/>OTLP exporter + tracing key"]:::frontend
+    OP["Gateway administrator<br/>LiteLLM dashboard · Lens"]:::frontend
+  end
+  subgraph ST["LiteLLM stack — Docker Compose host"]
+    TR["Traefik<br/>LENS_HOST · LITELLM_*_HOST"]:::cloud
+    LL["LiteLLM prod / dev<br/>Lens adapter · spend export"]:::backend
+    subgraph LP["lens profile — compose.optional.yml"]
+      PF["lens-preflight<br/>secret checks · no network"]:::security
+      LN["lens<br/>UI · API · OTLP ingest · investigations"]:::backend
+      subgraph LS["lens-storage network — internal"]
+        CH[("lens-clickhouse<br/>traces · findings · datasets · Keeper")]:::database
+      end
+    end
+  end
+  subgraph EX["External services — outside the stack"]
+    PROV["Model providers<br/>analysis models via the gateway"]:::external
+  end
+
+  AG ==>|"HTTPS /v1/traces"| TR
+  OP ==>|"HTTPS"| TR
+  TR ==> LN
+  TR ==> LL
+  LL ==>|"lens:4318 · signed user"| LN
+  LL -.->|"spend · no content"| LN
+  LN ==> CH
+  LN -->|"analysis (optional)"| LL
+  LL --> PROV
+  PF -.->|"must succeed first"| LN
+
+  classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
+  classDef cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+  classDef database fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+  classDef external fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
+  classDef frontend fill:#083344,stroke:#22d3ee,color:#e2e8f0
+  classDef security fill:#881337,stroke:#fb7185,color:#e2e8f0

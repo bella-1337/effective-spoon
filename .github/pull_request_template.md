@@ -4,7 +4,7 @@
 
 ## Operational impact
 
-<!-- Affected profiles (prod, dev, grafana, langfuse, security), services,
+<!-- Affected profiles (prod, dev, grafana, langfuse, lens, security), services,
      data stores, and whether a deployment needs a restart, migration, or
      backup first. Write "None" if the change is documentation only. -->
 

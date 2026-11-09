@@ -610,6 +610,7 @@ PUBLIC_HOST_VARIABLES = (
     "GRAFANA_HOST",
     "LANGFUSE_WEB_HOST",
     "LANGFUSE_S3_HOST",
+    "LENS_HOST",
 )
 HOSTNAME_RE = re.compile(
     r"(?=.{1,253}\Z)(?:(?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)+(?!-)[A-Za-z0-9-]{1,63}(?<!-)"
