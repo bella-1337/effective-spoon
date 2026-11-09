@@ -114,7 +114,7 @@ services:
   tls:
     <<: *hardening
     logging: *logging
-    image: docker.io/nginxinc/nginx-unprivileged:1.29.5-alpine@sha256:42a7d7f2ee23e9f5a1dcdf3647ba5c585bbd18f79e79cd817e70e8cd61c55779
+    image: docker.io/nginxinc/nginx-unprivileged:1.31.7-alpine@sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e
     ports:
       - "${D3_BIND_ADDRESS:-0.0.0.0}:${D3_PUBLIC_PORT:-8443}:8443"
       - "${BGE_M3_BIND_ADDRESS:-0.0.0.0}:${BGE_M3_PUBLIC_PORT:-9443}:9443"
