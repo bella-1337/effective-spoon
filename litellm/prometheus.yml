@@ -38,6 +38,25 @@ scrape_configs:
         port: 9363
         refresh_interval: 30s
 
+  # Optional lens profile: the readiness probe exists only while the lens
+  # service resolves, so a stack without the profile has no failing target.
+  - job_name: lens
+    metrics_path: /probe
+    params: { module: [http_2xx] }
+    dns_sd_configs:
+      - names: ["lens"]
+        type: A
+        port: 4318
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+        replacement: http://${1}/health/ready
+      - target_label: instance
+        replacement: http://lens:4318/health/ready
+      - target_label: __address__
+        replacement: blackbox:9115
+
   - job_name: blackbox-http
     metrics_path: /probe
     params: { module: [http_2xx] }

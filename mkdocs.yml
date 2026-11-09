@@ -175,6 +175,7 @@ nav:
       - Presidio guardrails: docs/presidio-guardrails.md
   - Operations:
       - Observability: docs/observability.md
+      - LiteLLM Lens: docs/lens.md
       - Maintenance runtime: docs/maintenance-runtime.md
       - Backup and restore: docs/backup-and-restore.md
       - Upgrades and rollback: docs/upgrades-and-rollback.md

@@ -25,7 +25,7 @@ register before any of these assumptions changes.
 - It is used only internally by the organisation. No paid or unpaid service is
   offered to external customers or other third parties.
 - Container images are run unmodified as published. Only configuration files
-  are mounted. The three local images are built from pinned upstream sources and
+  are mounted. The four local images are built from pinned upstream sources and
   are not distributed outside the organisation.
 - No software or image from this stack is redistributed. A release bundle
   contains only this repository's own files.
@@ -46,14 +46,16 @@ Licence categories: **permissive** (MIT, Apache-2.0, BSD, PostgreSQL, PSF),
 | `ghcr.io/berriai/litellm:v1.108.2` | `litellm-prod` (prod) | MIT; `enterprise/` code under the BerriAI commercial licence | Permissive, with commercial add-ons | No key is configured. SSO beyond 5 users, audit logs, key rotation, team/key policy attachment, secret managers, IP allow-lists, organisations, and `DOCS_*`/`EMAIL_*` branding need a LiteLLM Enterprise licence. `store_audit_logs: true` writes nothing without a licence. |
 | `ghcr.io/berriai/litellm:v1.110.0-dev.1` | `litellm-dev` (dev; nightly) | Same as above | Permissive, with commercial add-ons | Same as above. |
 | `litellm-pgvector:5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24` | `litellm-pgvector` (dev) | MIT (`BerriAI/litellm-pgvector`), built on the Python base below | Permissive | Local build from upstream commit `5bd8f3ab`; the image carries OCI source, revision, and licence labels. |
+| `litellm-lens:1.108.0-rc.1` | `lens` (lens) | MIT (`BerriAI/lens`; no `enterprise/` directory exists at the pinned commit), built on `cgr.dev/chainguard/wolfi-base` with Node.js (MIT) and Python 3.13 (PSF-2.0); bundled npm packages and Rust crates under their own licences | Permissive | Local build of upstream release-candidate commit `b2ac5f8a289c3f77f02b81d67ca1ee075bfead6d` (tag `v1.108.0-rc.1`) with the upstream `deploy/runtime/Dockerfile`, because Lens publishes no image yet; the image carries OCI source, revision, and licence labels. Investigations send selected trace content to the configured analysis model; see [LiteLLM Lens](lens.md#data-protection). |
 | `litellm-opensearch-tools:0.1.0` | `opensearch-certs`, `opensearch-setup`, `opensearch-dashboards-setup`, `opensearch-bridge` (core) | Repository code under MIT; packages listed under [repository Python dependencies](#repository-python-dependencies) | Mixed; see below | Local build. Includes psycopg (LGPL-3.0); internal use only. |
 | `litellm-image-security-monitor:0.1.0` | `image-security-monitor` (security) | Repository code under MIT plus Trivy (Apache-2.0), Docker CLI and buildx (Apache-2.0), uv (MIT OR Apache-2.0) | Permissive | Local build. |
 | `docker.langfuse.com/langfuse/langfuse:4.72.0` | `langfuse-web` (langfuse) | MIT; `ee/` code under the Langfuse Enterprise licence | Permissive, with commercial add-ons | Enterprise features (project-level retention, SCIM, organisation APIs, fine-grained project access) need a licence key and are not used. |
 | `docker.langfuse.com/langfuse/langfuse-worker:4.72.0` | `langfuse-worker` (langfuse) | Same as above | Permissive, with commercial add-ons | Same as above. |
 | `clickhouse/clickhouse-server:26.3.62.3` | `langfuse-clickhouse`, `langfuse-clickhouse-observability-setup` (langfuse) | Apache-2.0 | Permissive | None. |
+| `clickhouse/clickhouse-server:26.9.6.6` | `lens-clickhouse` (lens) | Apache-2.0 | Permissive | The version Lens pins at its release-candidate commit; kept separate from the Langfuse ClickHouse so each upgrades with its own application. |
 | `cgr.dev/chainguard/minio:latest` | `langfuse-minio` (langfuse) | MinIO: AGPL-3.0; image distributed under Chainguard's free-tier terms | Strong copyleft | Unmodified internal use creates no AGPL obligation. Chainguard's free tier offers only the `latest` tag without support; pin by digest (done) and review the terms if a paid Chainguard or MinIO subscription is introduced. |
 | `redis:7.4.12` | `langfuse-redis` (langfuse) | RSALv2 or SSPLv1 (dual) | Source-available | Internal use is permitted. Offering Redis itself as a service to third parties is not. Valkey (BSD-3-Clause) is a drop-in alternative if legal policy rejects source-available licences. |
-| `postgres:17.11` | `grafana-db-init` (grafana); `langfuse-postgres`, `langfuse-preflight` (langfuse) | PostgreSQL Licence | Permissive | None. |
+| `postgres:17.11` | `grafana-db-init` (grafana); `langfuse-postgres`, `langfuse-preflight` (langfuse); `lens-preflight` (lens) | PostgreSQL Licence | Permissive | None. |
 | `postgres:16.15-alpine3.24` | `postgres`, `postgres-init`, `pgvector-access-init`, `pgvector-migrate` (core); `litellm-demo-data-dev` (dev); `litellm-demo-data-prod` (demo) | PostgreSQL Licence | Permissive | None. |
 | `pgvector/pgvector:0.8.7-pg16` | `vector-postgres` (core) | PostgreSQL Licence | Permissive | None. |
 | `opensearchproject/opensearch:3.9.0` | `opensearch` (core) | Apache-2.0 | Permissive | The security plugin is included under Apache-2.0; no commercial licence exists or is needed. |
@@ -90,6 +92,7 @@ stack is built, scanned, or extended.
 | `aquasec/trivy:0.76.1` | Trivy copied into the monitor image; also run directly by host-mode scans | Apache-2.0 | Permissive | Trivy vulnerability and Java databases are downloaded at scan time under Aqua's database terms; internal use is permitted. |
 | `ghcr.io/huggingface/text-embeddings-inference:cuda-1.9.4` | `gpu-host/compose.yml` (`bge-m3`, remote GPU host) | Text Embeddings Inference: Apache-2.0; bundles NVIDIA CUDA runtime libraries under the NVIDIA CUDA EULA | Permissive, with proprietary redistributable runtime | Using the bundled CUDA libraries is permitted without a fee. Re-review before redistributing the image. |
 | `ghcr.io/vllm-project/semantic-router/vllm-sr-cuda:latest` | `gpu-host/compose.yml` (`d3-mini`, remote GPU host) | Apache-2.0; bundles NVIDIA CUDA runtime libraries under the NVIDIA CUDA EULA | Permissive, with proprietary redistributable runtime | Same CUDA note as Text Embeddings Inference. Pinned by digest despite the `latest` tag. |
+| `cgr.dev/chainguard/wolfi-base` and `node:24` (build digests pinned upstream; runtime base digest overridden in `compose.optional.yml`) | Build and runtime bases of the upstream Lens `deploy/runtime/Dockerfile` at the pinned commit | Wolfi packages and Node.js under their own licences (Apache-2.0, MIT, and others) | Permissive bases, mixed OS packages | None for internal use. Not listed as rows the contracts check, because the Dockerfile is fetched from the pinned Lens commit rather than kept in this repository. |
 | `docker.io/nginxinc/nginx-unprivileged:1.29.5-alpine` | `gpu-host/compose.yml` (`d3-tls`, D3 TLS terminator) | nginx: BSD-2-Clause; Alpine packages under their own licences | Permissive | None. |
 
 ## Models
@@ -163,9 +166,10 @@ required for compliant operation.
 | Service | Terms | Required action |
 | --- | --- | --- |
 | OpenAI API (`gpt-4o`, `gpt-4o-mini`) | OpenAI commercial API terms | An organisation API agreement and a data processing agreement for personal data. |
+| Lens analysis models (optional) | The terms of the provider behind the configured LiteLLM gateway model | Only when `LENS_GATEWAY_API_KEY` is set: investigations send selected trace content to that model. Cover it with the same agreements as gateway traffic. |
 | Search engines queried by SearXNG | Each engine's terms of service | Restrict engines, use contracted APIs, or formally accept the risk. See [Search-engine terms of use](search-extraction-and-caching.md#search-engine-terms-of-use). |
 | Hugging Face Hub | Hugging Face terms of service and each model's licence | Download only the pinned revisions listed under [models](#models). |
-| Docker Hub, GHCR, MCR, Chainguard, Langfuse registry | Each registry's terms of service | Anonymous pulls are rate-limited on Docker Hub; authenticate pulls if limits are reached. |
+| Docker Hub, GHCR, MCR, Chainguard, Langfuse registry, GitHub (Lens source) | Each registry's terms of service | Anonymous pulls are rate-limited on Docker Hub; authenticate pulls if limits are reached. |
 
 ## Review procedure
 

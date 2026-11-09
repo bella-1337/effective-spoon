@@ -39,6 +39,7 @@ units such as `30s`, `15m`, or `15d`.
 | `GRAFANA_HOST` | Optional: `grafana.${STACK_DOMAIN}` | DNS hostname or `${STACK_DOMAIN}` reference | Used only by the optional `grafana` profile: public Traefik hostname and Grafana root URL. Changing it can invalidate generated links and browser sessions. |
 | `LANGFUSE_WEB_HOST` | Optional: `langfuse.${STACK_DOMAIN}` | DNS hostname or `${STACK_DOMAIN}` reference | Used only by the optional `langfuse` profile: public Traefik hostname for Langfuse web/API routing and `NEXTAUTH_URL`. |
 | `LANGFUSE_S3_HOST` | Optional: `langfuse-s3.${STACK_DOMAIN}` | DNS hostname or `${STACK_DOMAIN}` reference | Used only by the optional `langfuse` profile for signed media upload URLs. It must resolve to this stack and be covered by the TLS certificate. |
+| `LENS_HOST` | Optional: `lens.${STACK_DOMAIN}` | DNS hostname or `${STACK_DOMAIN}` reference | Used only by the optional `lens` profile: public Traefik hostname of LiteLLM Lens (`LENS_PUBLIC_URL`) and the trace upload address the gateways show to agent exporters (`LITELLM_LENS_PUBLIC_URL`). It must be covered by the TLS certificate and reachable by the agents that send traces. Changing it invalidates Lens browser sessions and the address in existing agent configurations. |
 
 Public hostnames have no hard-coded fallback in the Compose files or scripts.
 Keep the `${STACK_DOMAIN}` reference to follow the naming convention, or replace
@@ -134,6 +135,10 @@ validating placeholder values.
 | `LANGFUSE_USER_ID_SALT` | Secret; 32+ random bytes; `.env`, required for `langfuse` profile | HMAC salt used by core LiteLLM attribution and as a migration fallback for the OpenSearch bridge. Keep stable to preserve longitudinal attribution; rotation changes all derived identifiers. |
 | `LANGFUSE_INIT_USER_EMAIL` | Sensitive; email address; `langfuse` profile only | Bootstrap Langfuse administrator email. Used during first initialization; later changes do not rename an existing account. |
 | `LANGFUSE_INIT_USER_NAME` | Sensitive; display name; `langfuse` profile only | Bootstrap Langfuse administrator display name. Used during first initialization. |
+| `LITELLM_LENS_SERVICE_TOKEN` | Secret; 32-512 characters; `.env`, required for `lens` profile | Authenticates the LiteLLM gateways' internal requests and spend export to Lens. Both gateways and Lens read it, so it lives in the core environment. Must differ from `LENS_GATEWAY_SECRET` and `LENS_ADMIN_TOKEN`. Rotate on Lens and both gateways together; until all three are recreated, the gateways cannot reach Lens. |
+| `LENS_GATEWAY_SECRET` | Secret; 32-512 characters; `.env`, required for `lens` profile | HMAC key with which the gateways sign each dashboard user's identity for Lens, and with which Lens signs its own analysis calls to the gateway. Anyone holding it can act as any gateway user in Lens. Rotate on Lens and both gateways together; rotation ends embedded Lens sessions. |
+| `LENS_ADMIN_TOKEN` | Secret; 32-512 characters; `lens` profile only | Administrator sign-in for the standalone Lens UI at `https://$LENS_HOST/ui/` and the Lens API. It grants access to every trace. Rotation signs out standalone sessions; agent tracing keys are unaffected. |
+| `LENS_CLICKHOUSE_PASSWORD` | Secret; 32-512 characters; `lens` profile only | Password of the `lens` user in the Lens ClickHouse store. ClickHouse stores it in its volume at first start, so rotate it inside ClickHouse (`ALTER USER lens IDENTIFIED BY ...`) and then recreate `lens-clickhouse` and `lens` with the new value. |
 | `LANGFUSE_INIT_USER_PASSWORD` | Secret; strong random password; `langfuse` profile only | Bootstrap Langfuse administrator password. Keep it in the secrets manager for the life of the deployment. Langfuse only uses it to create a missing user and never resets an existing user's password. Public sign-up is disabled and no SMTP is configured, so this stored credential is the recovery path. If you change the password in Langfuse, store the new password in the secrets manager immediately. |
 
 Recommended generation commands:
@@ -148,6 +153,9 @@ openssl rand -hex 32
 # Pre-provisioned Langfuse project keys
 printf 'pk-lf-%s\n' "$(openssl rand -hex 16)"
 printf 'sk-lf-%s\n' "$(openssl rand -hex 16)"
+
+# Every empty LiteLLM Lens secret, written into .env and .env.optional
+./scripts/lens.py secrets
 ```
 
 ## LiteLLM and observability
@@ -193,7 +201,7 @@ lists the [prod host values](hardware-sizing.md#resource-limits).
 | `RESOURCE_SMALL_MEMORY_LIMIT` | `1g`; Docker size | Memory cap for the small tier. Raise with `PRESIDIO_ANONYMIZER_WORKERS` (about 80 MiB each). |
 | `RESOURCE_MEDIUM_CPU_LIMIT` | `2`; positive decimal CPUs | Prometheus, Alloy, OpenSearch Dashboards, Loki, `alloy-loki`, and Langfuse web and worker. Also caps Data Prepper CPU. |
 | `RESOURCE_MEDIUM_MEMORY_LIMIT` | `2g`; Docker size | Memory cap for the medium tier. Prometheus memory grows with active series; Alloy idles at about 0.5 GiB. |
-| `RESOURCE_DATABASE_CPU_LIMIT` | `2`; positive decimal CPUs | PostgreSQL, vector-postgres, Langfuse PostgreSQL, and ClickHouse. Also caps OpenSearch CPU. |
+| `RESOURCE_DATABASE_CPU_LIMIT` | `2`; positive decimal CPUs | PostgreSQL, vector-postgres, Langfuse PostgreSQL and ClickHouse, and Lens ClickHouse. Also caps OpenSearch CPU. |
 | `RESOURCE_DATABASE_MEMORY_LIMIT` | `4g`; Docker size | Memory cap for each database in the tier. ClickHouse sizes its own memory and caches from this cap. Larger values let the databases keep more data in cache. |
 | `LITELLM_CPU_LIMIT` | `2`; positive decimal CPUs | Cap for each LiteLLM proxy (`litellm-prod` and `litellm-dev`). LiteLLM recommends 1 CPU per worker; the proxy runs one worker. |
 | `LITELLM_MEMORY_LIMIT` | `4g`; Docker size | Memory cap for each LiteLLM proxy. LiteLLM recommends at least 4 GiB per worker: the Prisma query engine keeps its largest-ever allocation, and the 2026-11 probe grew the proxy to 2.6 GiB with four large unauthenticated bodies. |
@@ -266,6 +274,20 @@ an existing password. Use that behavior for both cases below:
 Never edit password hashes in `langfuse-postgres` directly. Never set
 `AUTH_DISABLE_SIGNUP=false` to onboard users: the repository contract rejects it,
 and it would let anyone who can reach the hostname create an account.
+
+## Optional LiteLLM Lens profile behavior and sizing
+
+| Variable | Default / format | Description and guidance |
+| --- | --- | --- |
+| `LENS_TRACE_RETENTION_DAYS` | `14`; positive integer days | Days Lens keeps agent traces (`AGENT_TRACING_RETENTION_DAYS`). Traces contain the full inputs, outputs, and tool calls that agents send; keep the value no longer than your data-protection policy allows. |
+| `LENS_GATEWAY_API_BASE` | Empty; URL without `/v1`, for example `http://litellm-prod:4000` | Optional LiteLLM gateway for Lens investigation and signal models. Set it together with `LENS_GATEWAY_API_KEY`, or leave both empty to record and inspect traces only. Calls to this origin carry a signed Lens identity (`LENS_GATEWAY_URL` is set to the same value) so the gateway keeps their content out of its logs and out of Lens. |
+| `LENS_GATEWAY_API_KEY` | Empty; LiteLLM virtual key; secret | Virtual key Lens uses for analysis models. Create a dedicated key limited to the models Lens may use and with a budget; Lens lists only the models this key can access. Investigations send selected trace content to those models. |
+| `LENS_CPU_LIMIT` | `2`; positive decimal CPUs | CPU cap of the Lens service (UI, API, ingestion, and investigation workers). |
+| `LENS_MEMORY_LIMIT` | `2g`; Docker size | Memory cap of the Lens service, the upstream default. Raise it for large traces or several concurrent investigations. |
+| `LENS_PIDS_LIMIT` | `128`; positive integer | Process limit for the Lens service and its investigation sandboxes, the upstream default. |
+| `LENS_TMP_SIZE` | `1g`; Docker size | Size of the `noexec` tmpfs at `/tmp`, the only writable path in the read-only Lens container. |
+
+See [LiteLLM Lens](lens.md) for the operating guide.
 
 ## Development model and data services
 

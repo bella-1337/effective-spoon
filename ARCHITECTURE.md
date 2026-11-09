@@ -19,7 +19,9 @@ This repository deploys a local, Docker Compose-based LiteLLM platform with:
 - optional Grafana, Loki, and a Loki-specific Alloy collector (`grafana`
   profile) for operators who still want the Grafana dashboards;
 - optional Langfuse (`langfuse` profile) for LLM-specific tracing workflows
-  beyond the default OpenSearch Trace Analytics pipeline.
+  beyond the default OpenSearch Trace Analytics pipeline;
+- optional LiteLLM Lens (`lens` profile), embedded in the LiteLLM dashboard,
+  for AI review of agent traces, backed by its own ClickHouse.
 
 The bundled `mkcert` configuration is for a trusted local workstation or
 private network. It is not a public Internet TLS solution.
@@ -68,9 +70,10 @@ Docker metadata access, image-security monitoring, and untrusted fetch egress.
 
 | Network | Members | Purpose |
 | --- | --- | --- |
-| `edge` | Traefik, OpenSearch Dashboards, optional Grafana and Langfuse web/MinIO, LiteLLM prod/dev | Services reachable through Traefik routes |
+| `edge` | Traefik, OpenSearch Dashboards, optional Grafana, Langfuse web/MinIO, and Lens, LiteLLM prod/dev | Services reachable through Traefik routes |
 | `internal` | Trusted application, data, and observability services, including SearXNG | Databases, telemetry, Presidio, SearXNG (internal-only, reached through LiteLLM), and service-to-service calls |
 | `xberg-sandbox` | Xberg, its DNS and egress proxies, LiteLLM prod/dev | Internal-only MCP traffic; Xberg has no direct route to `internal` or the Internet |
+| `lens-storage` | Optional Lens and its ClickHouse store | Internal-only trace storage; no other service, including Prometheus, can reach Lens ClickHouse |
 | `egress` | Xberg DNS and egress proxies | Internet route available only to the allowlist-only DNS resolver and the HTTPS-only destination-filtering proxy |
 | `traefik-monitor` | Traefik and its Docker socket proxy | Read-only Docker routing metadata |
 | `alloy-monitor` | Alloy and its Docker socket proxy | Read-only Docker discovery and log metadata |
@@ -78,7 +81,8 @@ Docker metadata access, image-security monitoring, and untrusted fetch egress.
 
 Only Traefik publishes host ports `80` and `443`. OpenSearch, Data Prepper,
 Prometheus, Loki, PostgreSQL, exporters, socket proxies, and the Xberg egress
-proxy remain internal-only. `opensearch-certs` runs without any network.
+proxy remain internal-only. `opensearch-certs` and `lens-preflight` run without
+any network.
 
 ## Runtime Profiles
 
@@ -91,7 +95,7 @@ docker compose --profile prod --profile dev up -d
 ```
 
 The root `docker-compose.yml` includes `compose.optional.yml`, which owns
-Grafana/Loki, Langfuse, and image-security services and state. The core file
+Grafana/Loki, Langfuse, Lens, and image-security services and state. The core file
 groups its services along the request path (edge, LiteLLM, guardrails and
 tools, data stores, the dev model plane, observability); the optional file
 groups them by profile. YAML anchors cannot cross the include boundary, so the
@@ -108,17 +112,24 @@ commands pass it after `.env`.
 | `dev` | `litellm-dev` | `litellm_dev` | Debug-oriented proxy configuration |
 | `grafana` | `grafana`, `loki`, `alloy-loki` | read-only `grafana_ro` | Optional Grafana dashboards, Explore, and alert rules |
 | `langfuse` | Langfuse web/worker, PostgreSQL, ClickHouse, Redis, MinIO | Langfuse-specific stores | Optional LLM trace UI, datasets, prompt management, and evaluations |
+| `lens` | `lens`, `lens-clickhouse`, `lens-preflight` | Lens ClickHouse (`lens-clickhouse-data`) | Optional AI review of agent traces, findings, and datasets inside the LiteLLM dashboard; see [LiteLLM Lens](docs/lens.md) |
 | `security` | Image scanner and read-only Docker socket proxy | Bind-mounted reports and state | Optional scheduled image inventory and vulnerability policy |
 
 `postgres-init` is a required one-shot service, not redundant: it creates the
 two LiteLLM databases on a fresh PostgreSQL volume. The optional
 `grafana-db-init` job separately creates Grafana's read-only role.
 
+Both LiteLLM proxies start through `litellm/modules/prepare_runtime_config.py`.
+It keeps every optional integration off unless its profile's service resolves
+on the Compose network: the Langfuse callbacks, and the LiteLLM Lens connection,
+whose `LITELLM_LENS_*` variables it removes from the proxy process when Lens is
+not running. An enabled integration with missing credentials fails closed.
+
 ## Request and PII Flow
 
 1. A client connects to a configured hostname over HTTPS.
 2. Traefik selects the matching LiteLLM, OpenSearch Dashboards, or optional
-   Grafana or Langfuse route. SearXNG has no route; it is reachable only through
+   Grafana, Langfuse, or Lens route. SearXNG has no route; it is reachable only through
    LiteLLM's authenticated `searxng-search` tool.
 3. LiteLLM authenticates API requests with `LITELLM_MASTER_KEY`.
 4. Requests for `coding-router` are classified by the remote authenticated D3-mini
@@ -160,6 +171,7 @@ blackbox `/health` probes.
 | `langfuse-clickhouse-logs` | ClickHouse (optional) | Warning-or-higher ClickHouse logs, rotated at 100 MB with three files per channel |
 | `langfuse-minio-data` | MinIO (optional) | Langfuse events and media objects |
 | `langfuse-redis-data` | Redis (optional) | Langfuse queues |
+| `lens-clickhouse-data` | Lens ClickHouse (optional) | Lens agent traces, investigations, findings, datasets, sessions, recorded gateway costs, and Keeper coordination state |
 
 The D3-mini model and its cache live on a separate GPU host, deployed by the
 separate [`gpu-host/`](gpu-host/README.md) Compose project, and are not part of
@@ -192,7 +204,9 @@ Prometheus scrapes:
 
 - LiteLLM prod and dev metrics using the master-key credential file;
 - Traefik, PostgreSQL exporter, node exporter, and cAdvisor;
-- Blackbox `/health` probes for Presidio and SearXNG.
+- Blackbox `/health` probes for Presidio and SearXNG;
+- with the `lens` profile, a blackbox `/health/ready` probe of Lens (job
+  `lens`), discovered through DNS so it disappears with the profile.
 
 `opensearch-bridge` evaluates `opensearch/tools/metrics.yml` against Prometheus
 every minute and stores the results in `litellm-metrics-*`:
@@ -218,6 +232,10 @@ runtime config removes that callback and its attribution hook. Message content
 capture stays disabled, and only `litellm_operator` can read the OpenSearch span
 indices. The proxies do not depend on Data Prepper at startup; spans are dropped
 while it is unavailable.
+
+LiteLLM Lens is not part of this pipeline. With the `lens` profile, agents send
+their own OTLP traces directly to Lens over HTTPS, and the proxies export only
+content-free spend records to Lens for cost matching.
 
 ### Alerting
 
@@ -296,6 +314,8 @@ Before declaring a change complete:
 docker compose --profile prod --profile dev config --quiet
 docker compose --env-file .env --env-file .env.optional \
   --profile prod --profile langfuse config --quiet
+docker compose --env-file .env --env-file .env.optional \
+  --profile prod --profile lens config --quiet
 docker compose --profile prod --profile dev up -d --wait --wait-timeout 150
 ```
 

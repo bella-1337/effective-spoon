@@ -94,6 +94,14 @@ development hostname after policy changes.
   Define and operate a supported Langfuse deletion/export policy and a complete
   backup policy before production use. The database-only backup scripts in this
   repository do not constitute a complete Langfuse backup.
+- LiteLLM Lens (optional `lens` profile) stores the agent traces that agents
+  upload, **with their full inputs, outputs, and tool calls**, in its own
+  ClickHouse volume for `LENS_TRACE_RETENTION_DAYS` (default 14). The gateways
+  export only content-free spend records to it. With `LENS_GATEWAY_API_KEY`
+  set, investigations send selected trace content to the configured analysis
+  models through the gateway. Agent owners must decide what their exporters
+  send; gateway administrators and the Lens administrator token can read every
+  trace. See [LiteLLM Lens data protection](lens.md#data-protection).
 
 These periods must be recorded in the deployment's retention schedule and
 reviewed against its documented purposes. Restrict proxy-admin access because
@@ -105,15 +113,19 @@ that system to the data-flow and retention review.
 
 Every registry image is pinned to an immutable digest. The development
 `litellm-pgvector` image is built from the official BerriAI repository at a
-full, signed Git commit. Renovate or manually review upstream release notes,
+full, signed Git commit, and the optional `litellm-lens` image from the BerriAI
+Lens repository at a full commit of its paired release candidate. Renovate or
+manually review upstream release notes,
 update the matching digest or source commit, and re-run the complete validation
 before deploying an update.
 
-External routes use TLS through Traefik. The LiteLLM and Langfuse containers
+External routes use TLS through Traefik, including Lens trace uploads. The LiteLLM and Langfuse containers
 trust forwarded headers because they are not published directly and only
 Traefik is expected to reach them on the edge network. Internal Compose traffic,
-including PostgreSQL, ClickHouse, Redis, MinIO, Loki, Presidio, SearXNG, and the
-Alloy-to-Data Prepper OTLP stream, is not encrypted. OpenSearch traffic always
+including PostgreSQL, ClickHouse, Redis, MinIO, Loki, Presidio, SearXNG, the
+gateway-to-Lens connection (authenticated by `LITELLM_LENS_SERVICE_TOKEN` and
+signed identities), and the Alloy-to-Data Prepper OTLP stream, is not
+encrypted. OpenSearch traffic always
 uses verified TLS. Treat the isolated Docker networks as a compensating
 control for local use; enable authenticated internal TLS before using an
 untrusted or multi-host network.

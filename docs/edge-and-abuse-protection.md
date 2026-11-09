@@ -13,7 +13,8 @@ behind each control.
 
 `traefik/dynamic.yml` defines the controls, and the `websecure` entrypoint in
 `docker-compose.yml` attaches the edge middlewares to every route, including
-the optional Grafana and Langfuse routes.
+the optional Grafana, Langfuse, and Lens routes. Lens trace uploads share the
+uploading client's budget; agents that batch their exports stay far below it.
 
 | Control | Setting | Effect |
 | --- | --- | --- |

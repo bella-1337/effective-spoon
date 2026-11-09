@@ -68,10 +68,24 @@ Profile `core` services run without a profile. Other profiles are described in
 | --- | --- | --- | --- |
 | Langfuse web | `4.72.0` | `docker.langfuse.com/langfuse/langfuse` | `langfuse-web` (langfuse) |
 | Langfuse worker | `4.72.0` | `docker.langfuse.com/langfuse/langfuse-worker` | `langfuse-worker` (langfuse) |
-| PostgreSQL 17 | `17.11` | `postgres` | `langfuse-postgres`, `langfuse-preflight` (langfuse); `grafana-db-init` (grafana) |
+| PostgreSQL 17 | `17.11` | `postgres` | `langfuse-postgres`, `langfuse-preflight` (langfuse); `grafana-db-init` (grafana); `lens-preflight` (lens) |
 | ClickHouse | `26.3.62.3` | `clickhouse/clickhouse-server` | `langfuse-clickhouse`, `langfuse-clickhouse-observability-setup` (langfuse) |
 | Redis | `7.4.12` | `redis` | `langfuse-redis` (langfuse) |
 | MinIO (Chainguard) | `latest` | `cgr.dev/chainguard/minio` | `langfuse-minio` (langfuse) |
+
+## LiteLLM Lens
+
+| Component | Version | Image | Used by (profile) |
+| --- | --- | --- | --- |
+| LiteLLM Lens (local build) | `1.108.0-rc.1` | `litellm-lens` | `lens` (lens) |
+| ClickHouse | `26.9.6.6` | `clickhouse/clickhouse-server` | `lens-clickhouse` (lens) |
+
+Lens publishes no release image yet. The stack builds the upstream
+`deploy/runtime/Dockerfile` from the pinned release-candidate commit
+`b2ac5f8a289c3f77f02b81d67ca1ee075bfead6d` (tag `v1.108.0-rc.1`). Its build
+images are pinned by digest upstream; the runtime base is overridden with a
+newer `cgr.dev/chainguard/wolfi-base` digest in `compose.optional.yml`. See
+[LiteLLM Lens](lens.md#upgrade-lens).
 
 ## Image security
 

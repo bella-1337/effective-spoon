@@ -33,8 +33,8 @@ python3 -m unittest discover -s scripts/tests -v
 ```
 
 The preflight renders every Compose profile and verifies the contracts required
-by the drills: optional Langfuse wiring, production independence from Langfuse
-and Xberg, required alert definitions, complete-backup freshness metrics,
+by the drills: optional Langfuse and LiteLLM Lens wiring, production
+independence from Langfuse, Lens, and Xberg, required alert definitions, complete-backup freshness metrics,
 rename-aside restore safety, and persistent rollback overrides. Stop if either
 command fails.
 
@@ -71,6 +71,13 @@ backend is unavailable; OpenSearch tracing remains the default path.
 6. Send one more completion and confirm new tracing resumes.
 
 Record whether production stayed within its availability and latency targets.
+
+When the optional `lens` profile is enabled, repeat the drill for LiteLLM Lens:
+stop `lens` with `--profile lens stop lens`, confirm production completions
+still succeed and that the gateway logs Lens export failures without request
+content, then start it with `--profile lens up -d --wait lens` and confirm
+`./scripts/lens.py status` reports both gateways connected. A gateway keeps its
+Lens connection across a Lens restart; it does not need to be recreated.
 
 ## 4. Backup and restore recovery
 

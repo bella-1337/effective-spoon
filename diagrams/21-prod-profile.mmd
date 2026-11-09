@@ -7,7 +7,7 @@ flowchart TD
   %% @mode architecture
   %% @subtitle Stable production serving with PII controls, isolated state, the configured provider, tools, and default observability
   %% @card cyan | Request path | Clients reach litellm-prod only through Traefik on the production hostname | The eu-data-protection policy applies Presidio before and after every model call | coding-router asks the remote D3-mini host for a tier, then calls OpenAI
-  %% @card violet | State and telemetry | litellm_prod keeps keys, budgets, and spend without prompt content | Prometheus scrapes metrics; OpenSearch stores logs, traces, and usage copies | Langfuse and Grafana are optional profiles, not part of the default path
+  %% @card violet | State and telemetry | litellm_prod keeps keys, budgets, and spend without prompt content | Prometheus scrapes metrics; OpenSearch stores logs, traces, and usage copies | Langfuse, Lens, and Grafana are optional profiles, not part of the default path
   %% @card rose | Production limits | No Qdrant cache, pgvector store, or BGE-M3 embeddings in production | Xberg reaches the Internet only through the Squid allowlist | The Chat UI is disabled; the demo profile seeds data only when explicitly enabled
   %% @journey #22d3ee: USR TR LP OAI
   %% @journey #fb7185: LP PR

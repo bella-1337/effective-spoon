@@ -21,7 +21,7 @@ from maintenance_common import (
     env_file_is_present,
 )
 
-COMPOSE_PROFILES = ("prod", "dev", "demo", "security", "grafana", "langfuse")
+COMPOSE_PROFILES = ("prod", "dev", "demo", "security", "grafana", "langfuse", "lens")
 EXPECTED_ALERT_UIDS = {
     "litellm-prod-unavailable",
     "litellm-postgres-unavailable",
@@ -59,6 +59,11 @@ LOCAL_BUILD_DOCKERFILES = (
     Path("opensearch") / "tools" / "Dockerfile",
     Path("security") / "image-monitor.Dockerfile",
 )
+# A build context fetched from a Git repository must pin a full commit, so the
+# image is reproducible and its revision label names the exact source.
+REMOTE_BUILD_CONTEXT_RE = re.compile(r"^(?:https://|git@)\S+?\.git#([0-9a-f]{40})$")
+LENS_SERVICES = ("lens-preflight", "lens-clickhouse", "lens")
+LENS_CORE_ENV_KEYS = frozenset({"LITELLM_LENS_SERVICE_TOKEN", "LENS_GATEWAY_SECRET"})
 DOCKERFILE_FROM_RE = re.compile(r"^FROM\s+(?:--platform=\S+\s+)?(\S+)", re.MULTILINE | re.IGNORECASE)
 # The remote GPU host stack pins its images in gpu-host/compose.yml and its
 # model revisions there and in gpu-host/deploy.py; the licence register must
@@ -149,7 +154,7 @@ def validate_compose_contracts(config: Mapping[str, Any]) -> list[str]:
     if not isinstance(production, dict):
         failures.append("Compose configuration has no litellm-prod service")
     else:
-        forbidden = required_dependency_names(production) & {"langfuse-web", "xberg"}
+        forbidden = required_dependency_names(production) & {"langfuse-web", "lens", "xberg"}
         if forbidden:
             failures.append(
                 "Production LiteLLM still depends on auxiliary services: "
@@ -240,6 +245,8 @@ def validate_compose_contracts(config: Mapping[str, Any]) -> list[str]:
             and "langfuse-preflight" not in required_dependency_names(service)
         ):
             failures.append(f"{name} must depend on langfuse-preflight")
+
+    failures.extend(lens_compose_failures(services))
 
     for name in ("image-security-docker-proxy", "image-security-monitor"):
         service = services.get(name)
@@ -353,6 +360,99 @@ def validate_compose_contracts(config: Mapping[str, Any]) -> list[str]:
     failures.extend(branding_failures(services))
     failures.extend(edge_and_abuse_compose_failures(services))
     return failures
+
+
+def service_label_keys(service: Mapping[str, Any]) -> set[str]:
+    labels = service.get("labels", {})
+    if isinstance(labels, list):
+        return {str(label).partition("=")[0] for label in labels}
+    return {str(key) for key in labels} if isinstance(labels, dict) else set()
+
+
+def lens_compose_failures(services: Mapping[str, Any]) -> list[str]:
+    """Keep LiteLLM Lens optional, private to its store, and least-privileged."""
+    failures: list[str] = []
+    for name in LENS_SERVICES:
+        service = services.get(name)
+        if not isinstance(service, dict):
+            failures.append(f"Optional Lens service is missing: {name}")
+        elif service.get("profiles") != ["lens"]:
+            failures.append(f"Optional Lens service must stay in the lens profile: {name}")
+        elif name != "lens-preflight" and "lens-preflight" not in required_dependency_names(
+            service
+        ):
+            failures.append(f"{name} must depend on lens-preflight")
+
+    for name in ("litellm-prod", "litellm-dev"):
+        service = services.get(name)
+        if not isinstance(service, dict):
+            continue
+        depends_on = service.get("depends_on", {})
+        dependency = depends_on.get("lens") if isinstance(depends_on, dict) else None
+        if not isinstance(dependency, dict) or (
+            dependency.get("condition") != "service_healthy"
+            or dependency.get("required") is not False
+        ):
+            failures.append(f"{name} must treat healthy Lens as an optional dependency")
+        environment = service.get("environment", {})
+        if not isinstance(environment, dict) or environment.get(
+            "LITELLM_LENS_URL"
+        ) != "http://lens:4318":
+            failures.append(f"{name} must reach Lens on the private Compose network")
+        command = service.get("command", [])
+        command_text = " ".join(str(part) for part in command) if isinstance(command, list) else ""
+        if "exec python /app/modules/prepare_runtime_config.py" not in command_text:
+            failures.append(
+                f"{name} must start through prepare_runtime_config.py so Lens stays optional"
+            )
+
+    store = services.get("lens-clickhouse")
+    if isinstance(store, dict):
+        if set(store.get("networks", {}) or {}) != {"lens-storage"}:
+            failures.append("Lens ClickHouse must stay on the internal lens-storage network only")
+        if store.get("ports") or any(key.startswith("traefik.") for key in service_label_keys(store)):
+            failures.append("Lens ClickHouse must not be published or routed")
+
+    lens = services.get("lens")
+    if isinstance(lens, dict):
+        if lens.get("ports"):
+            failures.append("Lens must not publish host ports; route it through Traefik")
+        if lens.get("read_only") is not True:
+            failures.append("Lens must keep a read-only root filesystem")
+        cap_drop = {str(cap).upper() for cap in lens.get("cap_drop", []) or []}
+        if "ALL" not in cap_drop:
+            failures.append("Lens must drop all Linux capabilities")
+        environment = lens.get("environment", {})
+        public_url = (
+            str(environment.get("LENS_PUBLIC_URL", "")) if isinstance(environment, dict) else ""
+        )
+        if not public_url.startswith("https://"):
+            failures.append("Lens public URL must use HTTPS so its session cookies stay secure")
+
+    networks_by_service = {
+        name: set(service.get("networks", {}) or {})
+        for name, service in services.items()
+        if isinstance(service, dict)
+    }
+    outsiders = sorted(
+        name
+        for name, networks in networks_by_service.items()
+        if "lens-storage" in networks and name not in {"lens", "lens-clickhouse"}
+    )
+    if outsiders:
+        failures.append(
+            "Only Lens and its ClickHouse may join lens-storage: " + ", ".join(outsiders)
+        )
+    return failures
+
+
+def remote_build_revision(build: Mapping[str, Any]) -> str | None:
+    """Return the pinned commit of a Git build context, or None for local builds."""
+    context = str(build.get("context") or "")
+    if not context.startswith(("https://", "git@")):
+        return None
+    match = REMOTE_BUILD_CONTEXT_RE.fullmatch(context)
+    return match.group(1) if match else ""
 
 
 def image_without_digest(reference: str) -> str:
@@ -606,6 +706,19 @@ def own_image_label_failures(config: Mapping[str, Any], root: Path = ROOT) -> li
         tag = str(image).partition("@")[0].rsplit("/", 1)[-1].partition(":")[2] if image else ""
         if labels["org.opencontainers.image.version"] != tag:
             failures.append(f"Version label of {name} must equal its image tag")
+        revision = remote_build_revision(build)
+        if revision is not None:
+            # The Dockerfile lives in the pinned upstream commit; the revision
+            # label must name that commit instead.
+            if not revision:
+                failures.append(
+                    f"Remote build context of {name} must pin a full 40-character commit"
+                )
+            elif labels["org.opencontainers.image.revision"] != revision:
+                failures.append(
+                    f"Revision label of {name} must equal its pinned build-context commit"
+                )
+            continue
         base = final_base_image(root / str(build.get("dockerfile") or "Dockerfile"))
         if labels["org.opencontainers.image.base.name"] != base:
             failures.append(
@@ -650,6 +763,12 @@ def licence_register_failures(
     )
     for name, service in sorted(services.items()):
         build = service.get("build") if isinstance(service, dict) else None
+        remote_revision = remote_build_revision(build) if isinstance(build, dict) else None
+        if remote_revision and f"`{remote_revision}`" not in source:
+            failures.append(
+                f"Licence register does not record the pinned source commit of {name}: "
+                f"{remote_revision}"
+            )
         labels = build.get("labels") if isinstance(build, dict) else None
         revision = (
             labels.get("org.opencontainers.image.revision")
@@ -1111,6 +1230,8 @@ def validate_repository_contracts(root: Path = ROOT) -> list[str]:
             "loki",
             "alloy-loki",
             "langfuse-web",
+            "lens",
+            "lens-clickhouse",
             "image-security-monitor",
         )
         for service in optional_services:
@@ -1168,8 +1289,9 @@ def validate_repository_contracts(root: Path = ROOT) -> list[str]:
         misplaced_optional_keys = {
             key
             for key in core_env_keys
-            if key.startswith(("GRAFANA_", "LANGFUSE_", "IMAGE_SECURITY_"))
+            if key.startswith(("GRAFANA_", "LANGFUSE_", "LENS_", "IMAGE_SECURITY_"))
             and key not in core_langfuse_keys
+            and key not in LENS_CORE_ENV_KEYS
         }
         if misplaced_optional_keys:
             failures.append(
@@ -1188,9 +1310,23 @@ def validate_repository_contracts(root: Path = ROOT) -> list[str]:
                 "Core-consumed Langfuse variables remain in .env.optional.example: "
                 + ", ".join(sorted(duplicated_core_langfuse_keys))
             )
+        missing_core_lens_keys = LENS_CORE_ENV_KEYS - core_env_keys
+        if missing_core_lens_keys:
+            failures.append(
+                "Core-consumed Lens variables are missing from .env.example: "
+                + ", ".join(sorted(missing_core_lens_keys))
+            )
+        duplicated_core_lens_keys = LENS_CORE_ENV_KEYS & optional_env_keys
+        if duplicated_core_lens_keys:
+            failures.append(
+                "Core-consumed Lens variables remain in .env.optional.example: "
+                + ", ".join(sorted(duplicated_core_lens_keys))
+            )
         required_optional_keys = {
             "GRAFANA_ADMIN_PASSWORD",
             "LANGFUSE_POSTGRES_PASSWORD",
+            "LENS_ADMIN_TOKEN",
+            "LENS_CLICKHOUSE_PASSWORD",
             "IMAGE_SECURITY_UID",
         }
         missing_optional_keys = required_optional_keys - optional_env_keys

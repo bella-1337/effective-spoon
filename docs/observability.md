@@ -82,6 +82,18 @@ Langfuse outages do not block model requests; their failures remain visible
 through service health, callback logs, and the default OpenSearch observability
 checks.
 
+## Optional LiteLLM Lens profile
+
+The optional `lens` profile adds [LiteLLM Lens](lens.md), which reviews the
+traces that your *agents* send it and groups recurring failures into findings.
+It is not part of the gateway telemetry pipeline: agents upload their own OTLP
+traces to `https://$LENS_HOST/v1/traces`, and the gateways only export
+content-free spend records for cost matching. Administrators open it from the
+LiteLLM dashboard under **Lens**. Lens logs reach OpenSearch like every other
+service (`log.attributes.compose_service:"lens"`), Prometheus probes its
+readiness as job `lens`, and the **LiteLLM Lens is not ready** alert fires when
+a running Lens stays unready for five minutes.
+
 ## OpenSearch: the default multi-user observability platform
 
 OpenSearch replaces Grafana as the default UI because Grafana OSS cannot
@@ -300,6 +312,7 @@ content or creating competing calculations:
 | Grafana (`grafana` profile) | **LiteLLM Management Summary** in the **LiteLLM** folder | Operator-only summary with request/session contribution breakdown and direct read-only PostgreSQL queries |
 | LiteLLM Admin UI | Native Usage, Models, Teams, Users, Keys, and Budgets pages | System-of-record operational administration and entity-level drill-down; no separate provisioned dashboard is required |
 | Langfuse | Native project dashboard, usage, latency, score, and trace analytics | Administrator/operator trace-quality and adoption drill-down; it is not an authorization-safe per-user management portal in this OSS deployment |
+| LiteLLM Lens (`lens` profile) | Agent traces, investigations, findings, and datasets in the LiteLLM dashboard | Agent-quality review for the teams that instrument their agents; it sees only the traces agents upload, not every gateway request |
 | Prometheus | Expression browser and source metrics for usage, reliability, and infrastructure | Diagnostic source of truth rather than a curated management dashboard; use Grafana or OpenSearch for reviewed summaries |
 | Loki | Explore container logs through Grafana | Operational drill-down only; it has no independent management dashboard UI |
 
@@ -349,6 +362,8 @@ Use each observability store for its intended telemetry:
   non-content copies of LiteLLM usage data, and the OpenSearch security audit
   log.
 - **Langfuse** contains content-redacted LiteLLM request traces.
+- **LiteLLM Lens** (optional `lens` profile) contains the agent traces that
+  agents upload, with their full content, for `LENS_TRACE_RETENTION_DAYS`.
 - **Prometheus** contains every scraped time series and remains the metrics
   source of truth.
 - **LiteLLM PostgreSQL** remains the system of record for spend and identity

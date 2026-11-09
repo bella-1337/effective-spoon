@@ -61,7 +61,9 @@ concurrency:
 jobs:
   images:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # The optional litellm-lens image compiles Lens (Rust and Node.js) from its
+    # pinned source commit, which dominates the job's run time.
+    timeout-minutes: 90
     env:
       MAINTENANCE_FILE_LOGGING: "false"
     steps:

@@ -16,6 +16,10 @@ SHA-256 checksums, and atomically publishes the completed directory under
 system user. Partial backups are removed on failure and are never published as
 complete.
 
+The script covers PostgreSQL only. Optional profiles keep their own state:
+see [Back up and restore](lens.md#back-up-and-restore) in the LiteLLM Lens
+guide for the `lens-clickhouse-data` volume.
+
 If a configured database service is unavailable or a database does not exist,
 the script writes a warning, records the reason in `metadata.txt`, and continues
 with the next database. A backup containing the remaining resources is still

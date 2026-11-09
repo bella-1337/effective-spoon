@@ -26,6 +26,7 @@ body:
         - dev
         - grafana
         - langfuse
+        - lens
         - security
         - remote GPU host
         - CI/CD or documentation

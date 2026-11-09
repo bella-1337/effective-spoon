@@ -357,6 +357,7 @@ updates:
             ".env.optional.example": {
                 "GRAFANA_HOST": "grafana.${STACK_DOMAIN}",
                 "LANGFUSE_WEB_HOST": "langfuse.${STACK_DOMAIN}",
+                "LENS_HOST": "lens.${STACK_DOMAIN}",
             },
         }
         failures = contracts.public_hostname_source_failures(
@@ -615,6 +616,85 @@ updates:
                 contracts.own_image_label_failures(config, root),
                 ["Locally built image of tools lacks OCI labels: title, revision, source"],
             )
+
+    def test_remote_build_context_must_pin_commit_named_by_labels(self) -> None:
+        commit = "b" * 40
+        labels = {
+            f"org.opencontainers.image.{key}": value
+            for key, value in {
+                "vendor": "example.test",
+                "title": "upstream-service",
+                "description": "Upstream service",
+                "version": "1.0.0-rc.1",
+                "revision": commit,
+                "licenses": "MIT",
+                "base.name": "upstream/base",
+                "created": "",
+                "source": "https://example.test/upstream",
+                "url": "https://example.test/upstream",
+            }.items()
+        }
+        build = {
+            "context": f"https://example.test/upstream.git#{commit}",
+            "dockerfile": "deploy/runtime/Dockerfile",
+            "labels": labels,
+        }
+        config = {
+            "x-stack-domain": "example.test",
+            "services": {"remote": {"image": "upstream-service:1.0.0-rc.1", "build": build}},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.assertEqual(contracts.own_image_label_failures(config, root), [])
+
+            labels["org.opencontainers.image.revision"] = "c" * 40
+            self.assertEqual(
+                contracts.own_image_label_failures(config, root),
+                ["Revision label of remote must equal its pinned build-context commit"],
+            )
+
+            for context in (
+                "https://example.test/upstream.git#main",
+                "https://example.test/upstream.git",
+                "git@example.test:upstream.git#" + commit[:12],
+            ):
+                with self.subTest(context=context):
+                    build["context"] = context
+                    self.assertEqual(
+                        contracts.own_image_label_failures(config, root),
+                        ["Remote build context of remote must pin a full 40-character commit"],
+                    )
+
+        self.assertIsNone(contracts.remote_build_revision({"context": "."}))
+        self.assertEqual(
+            contracts.remote_build_revision({"context": f"git@example.test:x/y.git#{commit}"}),
+            commit,
+        )
+
+    def test_licence_register_records_remote_build_commits(self) -> None:
+        commit = "e" * 40
+        services = {
+            "remote": {
+                "image": "upstream-service:1.0",
+                "build": {"context": f"https://example.test/upstream.git#{commit}"},
+            }
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_register_fixture(root, ["upstream-service:1.0", "python:3.11", "base:1"], "")
+            self.assertEqual(
+                contracts.licence_register_failures(services, root),
+                [
+                    "Licence register does not record the pinned source commit of remote: "
+                    + commit
+                ],
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_register_fixture(
+                root, ["upstream-service:1.0", "python:3.11", "base:1"], f"`{commit}`\n"
+            )
+            self.assertEqual(contracts.licence_register_failures(services, root), [])
 
 
 class EdgeAndAbuseContractTests(unittest.TestCase):

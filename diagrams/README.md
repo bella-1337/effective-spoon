@@ -43,9 +43,10 @@ loops, and parallel work (`par`/`and`). A dot replays the messages in order.
 | Diagram | Source | Shows |
 | --- | --- | --- |
 | [System context](01-system-context.html) | [01-system-context.mmd](01-system-context.mmd) | Clients, the services inside the stack, and the external providers, search engines, and websites it calls |
-| [Network boundaries](02-network-boundaries.html) | [02-network-boundaries.mmd](02-network-boundaries.mmd) | The `edge`, `internal`, `xberg-sandbox`, `egress`, and Docker-monitor networks, and what each one can reach |
+| [Network boundaries](02-network-boundaries.html) | [02-network-boundaries.mmd](02-network-boundaries.mmd) | The `edge`, `internal`, `lens-storage`, `xberg-sandbox`, `egress`, and Docker-monitor networks, and what each one can reach |
 | [Observability pipeline](03-observability-pipeline.html) | [03-observability-pipeline.mmd](03-observability-pipeline.mmd) | How logs, metrics, traces, and LiteLLM usage reach OpenSearch, and how alerts leave the stack |
 | [Langfuse profile](04-langfuse-profile.html) | [04-langfuse-profile.mmd](04-langfuse-profile.mmd) | The optional Langfuse services and the `langfuse_otel` trace path |
+| [LiteLLM Lens profile](26-lens-profile.html) | [26-lens-profile.mmd](26-lens-profile.mmd) | The optional Lens service, its private ClickHouse store, agent trace uploads, and the gateway connection |
 | [Grafana profile](05-grafana-profile.html) | [05-grafana-profile.mmd](05-grafana-profile.mmd) | The optional Grafana, Loki, and `alloy-loki` services and their read-only data sources |
 | [Xberg MCP sandbox](06-xberg-mcp-sandbox.html) | [06-xberg-mcp-sandbox.mmd](06-xberg-mcp-sandbox.mmd) | MCP extraction through LiteLLM, the sandbox network, and allowlisted egress |
 | [Development model plane](07-dev-model-plane.html) | [07-dev-model-plane.mmd](07-dev-model-plane.mmd) | The dev-only Qdrant cache, remote BGE-M3 embeddings, and pgvector knowledge store |
