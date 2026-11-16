@@ -292,10 +292,13 @@ services:
     profiles: [dev]
     image: ghcr.io/berriai/litellm:v1.111.0-dev.4@sha256:f38bf0888c091db9079396e17fc8f028d6b75cd26c3e8cb45c5fbdd1f3b66f87
     entrypoint: ["/bin/sh", "-ec"]
+    # From v1.111 the image runs as the non-root user 65532 and replaces
+    # docker/prod_entrypoint.sh with docker-entrypoint.sh, whose proxy
+    # component runs the monolithic proxy like before.
     command:
       - |
         exec python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml \
-          -- /app/docker/prod_entrypoint.sh --config=/app/runtime-config.yaml --port=4000
+          -- /app/docker-entrypoint.sh proxy --config=/app/runtime-config.yaml --port=4000
     volumes:
       - ./litellm/config.dev.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro

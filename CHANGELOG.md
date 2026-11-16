@@ -20,6 +20,11 @@ All notable changes to this stack are recorded here. The format follows
   defaults to off; both gateways keep `store_prompts_in_spend_logs: false`, so
   spend logs hold no free-form text to scan. Releases from `v1.111.0-dev.3`
   are signed with Sigstore keyless signing instead of `cosign.pub`.
+  The image now runs as the non-root user 65532 and replaces
+  `docker/prod_entrypoint.sh` with `docker-entrypoint.sh`, so `litellm-dev`
+  launches the proxy through `/app/docker-entrypoint.sh proxy`. The
+  compatibility check runs `litellm` directly and cannot detect such a
+  launcher change; only starting the gateway does.
 - The upgrade compatibility check gives its config validator 2 GiB of memory
   instead of 512 MiB. LiteLLM 1.111 peaks near 1 GiB while loading the
   configuration and otherwise never printed its policy-engine summary, which
