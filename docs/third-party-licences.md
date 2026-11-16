@@ -77,7 +77,7 @@ Licence categories: **permissive** (MIT, Apache-2.0, BSD, PostgreSQL, PSF),
 | `ghcr.io/xberg-io/xberg:1.3.10-core` | `xberg` (prod, dev) | MIT | Permissive | None. |
 | `ubuntu/bind9:9.20-26.04_stable` | `xberg-dns` (prod, dev) | BIND 9: MPL-2.0; Ubuntu base packages under their own licences | Weak copyleft | Unmodified internal use creates no MPL obligation. |
 | `ubuntu/squid:7.2-26.04_edge` | `xberg-egress-proxy` (core) | Squid: GPL-2.0-or-later; Ubuntu base packages under their own licences | Strong copyleft | Unmodified internal use creates no GPL obligation. The `edge` track is not a long-term-support channel; this is a support concern, not a licence one. |
-| `qdrant/qdrant:v1.20.0` | `qdrant` (dev) | Apache-2.0 | Permissive | None. |
+| `qdrant/qdrant:v1.20.1` | `qdrant` (dev) | Apache-2.0 | Permissive | None. |
 
 ## Build and auxiliary images
 

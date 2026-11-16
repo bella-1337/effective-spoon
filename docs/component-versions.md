@@ -43,7 +43,7 @@ Profile `core` services run without a profile. Other profiles are described in
 | PostgreSQL 16 | `16.16-alpine3.24` | `postgres` | `postgres`, `postgres-init`, `pgvector-access-init`, `pgvector-migrate` (core); `litellm-demo-data-dev` (dev); `litellm-demo-data-prod` (demo) |
 | PostgreSQL 16 + pgvector | `0.8.7-pg16` | `pgvector/pgvector` | `vector-postgres` (core) |
 | LiteLLM pgvector connector (local build) | `5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24` | `litellm-pgvector` | `litellm-pgvector` (dev) |
-| Qdrant | `v1.20.0` | `qdrant/qdrant` | `qdrant` (dev) |
+| Qdrant | `v1.20.1` | `qdrant/qdrant` | `qdrant` (dev) |
 
 ## Observability
 
