@@ -531,7 +531,7 @@ services:
   lens-clickhouse:
     logging: *default-logging
     profiles: [lens]
-    image: clickhouse/clickhouse-server:26.9.6.6@sha256:eb4870e7ca7ed70c259eebfcfbee6cf797017f6b5436c2926bbbfe3d4d28486e
+    image: clickhouse/clickhouse-server:26.9.29.5@sha256:68dee3566735345c725101317316253449d5bd107683c04a6a4b017058085057
     user: "101:101"
     environment:
       CLICKHOUSE_DB: lens
@@ -575,7 +575,7 @@ services:
         # with a fixable Critical CVE, and its runtime stage does not upgrade
         # base packages. Use a newer Wolfi digest until the Lens pin moves past
         # upstream's fix (apk add --upgrade).
-        LENS_RUNTIME_IMAGE: cgr.dev/chainguard/wolfi-base@sha256:24f549a7fcace88e69b9557941168c74645688ecc4acf7fb6d734a6b74e9019d
+        LENS_RUNTIME_IMAGE: cgr.dev/chainguard/wolfi-base@sha256:833c48f1faf32c90e6f9501a2410a9aa28ceb2c594102edd4470053c30efa089
       labels:
         <<: *own-image-labels
         org.opencontainers.image.title: litellm-lens

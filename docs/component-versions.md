@@ -78,7 +78,7 @@ Profile `core` services run without a profile. Other profiles are described in
 | Component | Version | Image | Used by (profile) |
 | --- | --- | --- | --- |
 | LiteLLM Lens (local build) | `1.108.0-rc.1` | `litellm-lens` | `lens` (lens) |
-| ClickHouse | `26.9.6.6` | `clickhouse/clickhouse-server` | `lens-clickhouse` (lens) |
+| ClickHouse | `26.9.29.5` | `clickhouse/clickhouse-server` | `lens-clickhouse` (lens) |
 
 Lens publishes no release image yet. The stack builds the upstream
 `deploy/runtime/Dockerfile` from the pinned release-candidate commit
