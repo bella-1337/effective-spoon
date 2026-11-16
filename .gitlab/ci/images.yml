@@ -10,10 +10,10 @@ variables:
   SHELLCHECK_IMAGE: "koalaman/shellcheck-alpine@sha256:5921d946dac740cbeec2fb1c898747b6105e585130cc7f0602eec9a10f7ddb63"
   HADOLINT_IMAGE: "hadolint/hadolint:v2.15.1-alpine@sha256:a1d49ae1a4e83c1dbad26b8c1ad7588c8bd1e04f4866b34ad3cac50335198552"
   ACTIONLINT_IMAGE: "rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9"
-  RUFF_IMAGE: "ghcr.io/astral-sh/ruff:0.17.4-alpine@sha256:7a717be3a7cfbef698a9b99e1555add93ec6b195242fe273997683e49b051f51"
+  RUFF_IMAGE: "ghcr.io/astral-sh/ruff:0.17.5-alpine@sha256:0e73e021bfa04c44bae2ad2b280b8a6ba3687a0e38af6ed1163b49ac9215a2c5"
   ZIZMOR_IMAGE: "ghcr.io/zizmorcore/zizmor:1.32.0@sha256:3014cc8f68f663935f69b3c3e0e41f5ce102b268d97db13db0f62208747f860d"
   GITLEAKS_IMAGE: "zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
   TRIVY_IMAGE: "aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb"
   # Documentation site build: uv, Python 3.13, and Git (full bookworm variant).
   DOCS_IMAGE: "ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm@sha256:47965cdc9d53a515f68f78241161c901e70051ce428f12e791bd7fe19f6a631a"
-  GLAB_IMAGE: "registry.gitlab.com/gitlab-org/cli:v1.128.0@sha256:00884510ffcbb6b03c0abc5dd058d7728a646cab2a419de4a7108d073ce90a03"
+  GLAB_IMAGE: "registry.gitlab.com/gitlab-org/cli:v1.130.0@sha256:28e300ff31bc0bb914ca983274177b9a9b12c77a9bd8478d420d4edfb3ec49cd"
