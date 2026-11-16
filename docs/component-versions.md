@@ -51,10 +51,10 @@ Profile `core` services run without a profile. Other profiles are described in
 | --- | --- | --- | --- |
 | OpenSearch | `3.9.0` | `opensearchproject/opensearch` | `opensearch` (core) |
 | OpenSearch Dashboards | `3.9.0` | `opensearchproject/opensearch-dashboards` | `opensearch-dashboards` (core) |
-| Data Prepper | `2.16.0` | `opensearchproject/data-prepper` | `data-prepper` (core) |
+| Data Prepper | `2.17.0` | `opensearchproject/data-prepper` | `data-prepper` (core) |
 | OpenSearch tools (local build) | `0.1.0` | `litellm-opensearch-tools` | `opensearch-certs`, `opensearch-setup`, `opensearch-dashboards-setup`, `opensearch-bridge` (core) |
-| Prometheus | `v3.15.1` | `prom/prometheus` | `prometheus`, `prometheus-secrets-init` (core) |
-| Grafana Alloy | `v1.21.3` | `grafana/alloy` | `alloy` (core); `alloy-loki` (grafana) |
+| Prometheus | `v3.16.0` | `prom/prometheus` | `prometheus`, `prometheus-secrets-init` (core) |
+| Grafana Alloy | `v1.22.0` | `grafana/alloy` | `alloy` (core); `alloy-loki` (grafana) |
 | Blackbox exporter | `v0.29.1` | `prom/blackbox-exporter` | `blackbox` (core) |
 | Node exporter | `v1.12.1` | `prom/node-exporter` | `node-exporter` (core) |
 | cAdvisor | `v0.55.1` | `gcr.io/cadvisor/cadvisor` | `cadvisor` (core) |

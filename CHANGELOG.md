@@ -24,6 +24,13 @@ All notable changes to this stack are recorded here. The format follows
   instead of 512 MiB. LiteLLM 1.111 peaks near 1 GiB while loading the
   configuration and otherwise never printed its policy-engine summary, which
   failed the check for a compatible image.
+- Prometheus `v3.15.1` to `v3.16.0`, Grafana Alloy `v1.21.3` to `v1.22.0`,
+  and Data Prepper `2.16.0` to `2.17.0`. Data Prepper's `otel_traces`
+  processor no longer copies `gen_ai.*` attributes and token totals onto
+  non-GenAI root spans, so the **Model calls by model** trace panel stops
+  counting each LiteLLM request's HTTP root span as a second model call. The
+  Alloy breaking changes (`loki.enrich`, `prometheus.enrich`, OTel connectors)
+  and the Prometheus TLS external-URL default do not affect this stack.
 - PostgreSQL `16.15-alpine3.24` to `16.16-alpine3.24` and `17.11` to `17.12`,
   and a rebuilt `pgvector/pgvector:0.8.7-pg16` digest. These minor releases
   need no dump or restore. Their release notes ask for a `REINDEX` of B-tree

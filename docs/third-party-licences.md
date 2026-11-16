@@ -60,11 +60,11 @@ Licence categories: **permissive** (MIT, Apache-2.0, BSD, PostgreSQL, PSF),
 | `pgvector/pgvector:0.8.7-pg16` | `vector-postgres` (core) | PostgreSQL Licence | Permissive | None. |
 | `opensearchproject/opensearch:3.9.0` | `opensearch` (core) | Apache-2.0 | Permissive | The security plugin is included under Apache-2.0; no commercial licence exists or is needed. |
 | `opensearchproject/opensearch-dashboards:3.9.0` | `opensearch-dashboards` (core) | Apache-2.0 | Permissive | None. |
-| `opensearchproject/data-prepper:2.16.0` | `data-prepper` (core) | Apache-2.0 | Permissive | None. |
+| `opensearchproject/data-prepper:2.17.0` | `data-prepper` (core) | Apache-2.0 | Permissive | None. |
 | `grafana/grafana:13.3.0` | `grafana` (grafana) | AGPL-3.0 | Strong copyleft | Unmodified internal use creates no obligation. Do not patch Grafana source and expose it to external users without legal review. |
 | `grafana/loki:3.7.9` | `loki` (grafana) | AGPL-3.0 | Strong copyleft | Same as Grafana. |
-| `grafana/alloy:v1.21.3` | `alloy` (core); `alloy-loki` (grafana) | Apache-2.0 | Permissive | None. |
-| `prom/prometheus:v3.15.1` | `prometheus`, `prometheus-secrets-init` (core) | Apache-2.0 | Permissive | None. |
+| `grafana/alloy:v1.22.0` | `alloy` (core); `alloy-loki` (grafana) | Apache-2.0 | Permissive | None. |
+| `prom/prometheus:v3.16.0` | `prometheus`, `prometheus-secrets-init` (core) | Apache-2.0 | Permissive | None. |
 | `prom/node-exporter:v1.12.1` | `node-exporter` (core) | Apache-2.0 | Permissive | None. |
 | `prom/blackbox-exporter:v0.29.1` | `blackbox` (core) | Apache-2.0 | Permissive | None. |
 | `prometheuscommunity/postgres-exporter:v0.20.1` | `postgres-exporter`, `pgvector-exporter` (core) | Apache-2.0 | Permissive | None. |

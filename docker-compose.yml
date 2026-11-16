@@ -871,7 +871,7 @@ services:
 
   prometheus:
     logging: *default-logging
-    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -890,7 +890,7 @@ services:
 
   prometheus-secrets-init:
     logging: *default-logging
-    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
     command:
@@ -976,7 +976,7 @@ services:
 
   alloy:
     logging: *default-logging
-    image: grafana/alloy:v1.21.3@sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
+    image: grafana/alloy:v1.22.0@sha256:9acc2529bc1edb7f5b2bd801dd8334ebc80c158e3a9e5526ecd7c9a273d43189
     user: "473:473"
     command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy/data"]
     environment:
@@ -1174,7 +1174,7 @@ services:
 
   data-prepper:
     logging: *default-logging
-    image: opensearchproject/data-prepper:2.16.0@sha256:6e74ebeddfd66549f623e6f3b8131111b34e85695f54bd68aac7563e80d6b546
+    image: opensearchproject/data-prepper:2.17.0@sha256:e5bad3b97dea9b38db77e230b965fce246e013b24e783bc668848e88ccbbc1d6
     entrypoint: ["/bin/bash", "/etc/data-prepper/entrypoint.sh"]
     environment:
       OPENSEARCH_INGEST_PASSWORD: ${OPENSEARCH_INGEST_PASSWORD:?Set OPENSEARCH_INGEST_PASSWORD in .env}
