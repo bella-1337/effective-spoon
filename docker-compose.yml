@@ -553,7 +553,7 @@ services:
   xberg-dns:
     logging: *default-logging
     profiles: [prod, dev]
-    image: ubuntu/bind9:9.20-26.04_stable@sha256:bce2d69f34f4dce93540118c1b05d2c8cd33817c1efc77bd82a8d75c3f722706
+    image: ubuntu/bind9:9.20-26.04_stable@sha256:7cb9c4d3f8d6457a38ddf6a5d8e5e1cba75907985946cebf696eb5bba39637cc
     # Deny-by-default resolver: an empty authoritative root answers NXDOMAIN
     # locally, and only the delegated allowlist zones are forwarded upstream,
     # so injected URLs cannot exfiltrate data through DNS lookups.
