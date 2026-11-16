@@ -174,7 +174,7 @@ services:
   litellm-prod:
     logging: *default-logging
     profiles: [prod]
-    image: ghcr.io/berriai/litellm:v1.108.2@sha256:d8b4ac356743d647a13bb93f45b941fcd5f5354122cfd205948a1b192790389d
+    image: ghcr.io/berriai/litellm:v1.108.9@sha256:d817e8e4d6698aad9f3d40b6ccbcaa1cde6c8256cb59867553f07383da3d6608
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |

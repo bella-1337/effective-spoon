@@ -10,9 +10,9 @@ development configuration into production.
 | Field | Value |
 | --- | --- |
 | Register tag | `dev-to-prod-register/v1.0.1` |
-| Snapshot date | `2026-11-07` |
-| Repository baseline | `ecf9cf5` |
-| Production LiteLLM image | `v1.108.2@sha256:d8b4ac356743d647a13bb93f45b941fcd5f5354122cfd205948a1b192790389d` |
+| Snapshot date | `2026-11-16` |
+| Repository baseline | `b231bf4` |
+| Production LiteLLM image | `v1.108.9@sha256:d817e8e4d6698aad9f3d40b6ccbcaa1cde6c8256cb59867553f07383da3d6608` |
 | Development LiteLLM image | `v1.110.0-dev.1@sha256:cca06d5cfdbd4412633d96257b60b84882822418fc72f15296b261e7ddfdfac1` (nightly) |
 
 Increment the register tag when the inventory, status model, or promotion

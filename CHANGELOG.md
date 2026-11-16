@@ -10,6 +10,10 @@ All notable changes to this stack are recorded here. The format follows
 
 ### Changed
 
+- Production LiteLLM moves from `v1.108.2` to the `v1.108.9` LTS patch
+  release, still pinned by digest. The 1.108.x LTS line needs no migration or
+  configuration change: production already sets `drop_params: true`, which
+  1.108.7 requires for Responses-only fields on bridged providers.
 - PostgreSQL `16.15-alpine3.24` to `16.16-alpine3.24` and `17.11` to `17.12`,
   and a rebuilt `pgvector/pgvector:0.8.7-pg16` digest. These minor releases
   need no dump or restore. Their release notes ask for a `REINDEX` of B-tree
