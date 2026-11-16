@@ -14,6 +14,16 @@ All notable changes to this stack are recorded here. The format follows
   release, still pinned by digest. The 1.108.x LTS line needs no migration or
   configuration change: production already sets `drop_params: true`, which
   1.108.7 requires for Responses-only fields on bridged providers.
+- Development LiteLLM follows the nightly channel from `v1.110.0-dev.1` to
+  `v1.111.0-dev.4`, still pinned by digest; it passes the upgrade
+  compatibility check. Its new `redact_tokens_in_spend_logs` setting now
+  defaults to off; both gateways keep `store_prompts_in_spend_logs: false`, so
+  spend logs hold no free-form text to scan. Releases from `v1.111.0-dev.3`
+  are signed with Sigstore keyless signing instead of `cosign.pub`.
+- The upgrade compatibility check gives its config validator 2 GiB of memory
+  instead of 512 MiB. LiteLLM 1.111 peaks near 1 GiB while loading the
+  configuration and otherwise never printed its policy-engine summary, which
+  failed the check for a compatible image.
 - PostgreSQL `16.15-alpine3.24` to `16.16-alpine3.24` and `17.11` to `17.12`,
   and a rebuilt `pgvector/pgvector:0.8.7-pg16` digest. These minor releases
   need no dump or restore. Their release notes ask for a `REINDEX` of B-tree

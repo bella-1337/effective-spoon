@@ -13,7 +13,7 @@ development configuration into production.
 | Snapshot date | `2026-11-16` |
 | Repository baseline | `b231bf4` |
 | Production LiteLLM image | `v1.108.9@sha256:d817e8e4d6698aad9f3d40b6ccbcaa1cde6c8256cb59867553f07383da3d6608` |
-| Development LiteLLM image | `v1.110.0-dev.1@sha256:cca06d5cfdbd4412633d96257b60b84882822418fc72f15296b261e7ddfdfac1` (nightly) |
+| Development LiteLLM image | `v1.111.0-dev.4@sha256:f38bf0888c091db9079396e17fc8f028d6b75cd26c3e8cb45c5fbdd1f3b66f87` (nightly) |
 
 Increment the register tag when the inventory, status model, or promotion
 requirements change:
