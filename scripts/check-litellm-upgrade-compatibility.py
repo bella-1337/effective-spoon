@@ -275,11 +275,16 @@ def static_checks(report: Reporter) -> None:
     (report.pass_ if isolation_ok else report.fail_)("Development and production services, databases, hostnames, and model lists remain isolated in the rendered Compose model")
 
 
+# Loading a full config peaks near 1 GiB from LiteLLM 1.111; below that the
+# validator thrashes and never prints its policy-engine summary.
+VALIDATOR_MEMORY_LIMIT = "2g"
+
+
 def docker_run_validation(image: str, config: Path, network: str, extra_environment: list[str]) -> tuple[int, str]:
     name = f"litellm-upgrade-check-{os.getpid()}-{time.time_ns()}"
     args = [
         "docker", "run", "-d", "--name", name, "--network", network, "--read-only", "--cap-drop", "ALL",
-        "--security-opt", "no-new-privileges:true", "--pids-limit", "256", "--memory", "512m",
+        "--security-opt", "no-new-privileges:true", "--pids-limit", "256", "--memory", VALIDATOR_MEMORY_LIMIT,
         "--tmpfs", "/tmp:mode=1777", "-v", f"{config}:/app/config.yaml:ro",
         "-v", f"{MODULES}:/app/modules:ro",
         "-e", "DATABASE_URL=postgresql://upgrade-check-placeholder@127.0.0.1:5432/upgrade-check",
