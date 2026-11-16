@@ -29,6 +29,10 @@ All notable changes to this stack are recorded here. The format follows
   instead of 512 MiB. LiteLLM 1.111 peaks near 1 GiB while loading the
   configuration and otherwise never printed its policy-engine summary, which
   failed the check for a compatible image.
+- The upgrade regression suite's `opensearch-logs` and `logs` checks no
+  longer fail for a running service whose container has written no log line;
+  they report it instead. Lens logs nothing in normal operation, so both
+  checks failed whenever the `lens` profile ran.
 - Prometheus `v3.15.1` to `v3.16.0`, Grafana Alloy `v1.21.3` to `v1.22.0`,
   and Data Prepper `2.16.0` to `2.17.0`. Data Prepper's `otel_traces`
   processor no longer copies `gen_ai.*` attributes and token totals onto
