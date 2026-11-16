@@ -48,6 +48,9 @@ All notable changes to this stack are recorded here. The format follows
   shell, so the service calls the image's entrypoint directly, owns its
   tmpfs mounts as that user, drops all capabilities, and probes its port with
   Perl instead of Bash.
+- Traefik `v3.7.17` to `v3.7.19`, which fixes five security advisories. Its
+  migration notes (BasicAuth password length, Ingress-NGINX TLS options,
+  dot-segments with path parameters) need no change here.
 - PostgreSQL `16.15-alpine3.24` to `16.16-alpine3.24` and `17.11` to `17.12`,
   and a rebuilt `pgvector/pgvector:0.8.7-pg16` digest. These minor releases
   need no dump or restore. Their release notes ask for a `REINDEX` of B-tree

@@ -22,7 +22,7 @@ Profile `core` services run without a profile. Other profiles are described in
 | --- | --- | --- | --- |
 | LiteLLM (production, LTS) | `v1.108.9` | `ghcr.io/berriai/litellm` | `litellm-prod` (prod) |
 | LiteLLM (development, nightly) | `v1.111.0-dev.4` | `ghcr.io/berriai/litellm` | `litellm-dev` (dev) |
-| Traefik | `v3.7.17` | `traefik` | `traefik` (core) |
+| Traefik | `v3.7.19` | `traefik` | `traefik` (core) |
 | Docker socket proxy | `v0.5.0` | `ghcr.io/tecnativa/docker-socket-proxy` | `traefik-docker-proxy`, `alloy-docker-proxy` (core); `image-security-docker-proxy` (security) |
 
 ## Guardrails, search, and extraction

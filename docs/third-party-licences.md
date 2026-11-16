@@ -70,7 +70,7 @@ Licence categories: **permissive** (MIT, Apache-2.0, BSD, PostgreSQL, PSF),
 | `prometheuscommunity/postgres-exporter:v0.20.1` | `postgres-exporter`, `pgvector-exporter` (core) | Apache-2.0 | Permissive | None. |
 | `gcr.io/cadvisor/cadvisor:v0.55.1` | `cadvisor` (core) | Apache-2.0 | Permissive | None. |
 | `ghcr.io/tecnativa/docker-socket-proxy:v0.5.0` | `traefik-docker-proxy`, `alloy-docker-proxy` (core); `image-security-docker-proxy` (security) | Apache-2.0; bundles HAProxy (GPL-2.0-or-later) | Permissive, with GPL component | Unmodified internal use creates no GPL obligation. |
-| `traefik:v3.7.17` | `traefik` (core) | MIT | Permissive | None. |
+| `traefik:v3.7.19` | `traefik` (core) | MIT | Permissive | None. |
 | `mcr.microsoft.com/presidio-analyzer:2.2.362` | `presidio-analyzer` (core) | MIT; includes the spaCy `en_core_web_lg` model (see [models](#models)) | Permissive | None. |
 | `mcr.microsoft.com/presidio-anonymizer:2.2.362` | `presidio-anonymizer` (core) | MIT | Permissive | None. |
 | `searxng/searxng:2026.10.30-ffa88e3ba` | `searxng` (core) | AGPL-3.0 | Strong copyleft | Unmodified internal use creates no AGPL obligation. The licence grants no right to use the queried search engines; see [external services](#external-services-and-terms) and [Search-engine terms of use](search-extraction-and-caching.md#search-engine-terms-of-use). |
