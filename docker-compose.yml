@@ -176,10 +176,14 @@ services:
     profiles: [prod]
     image: ghcr.io/berriai/litellm:v1.108.9@sha256:d817e8e4d6698aad9f3d40b6ccbcaa1cde6c8256cb59867553f07383da3d6608
     entrypoint: ["/bin/sh", "-ec"]
+    # LiteLLM v1.111 replaced docker/prod_entrypoint.sh with
+    # docker-entrypoint.sh (proxy component). Use whichever the image has, so
+    # an image-only upgrade or rollback across that release keeps working.
     command:
       - |
+        if [ -x /app/docker-entrypoint.sh ]; then set -- /app/docker-entrypoint.sh proxy; else set -- /app/docker/prod_entrypoint.sh; fi
         exec python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml \
-          -- /app/docker/prod_entrypoint.sh --config=/app/runtime-config.yaml --port=4000
+          -- "$$@" --config=/app/runtime-config.yaml --port=4000
     volumes:
       - ./litellm/config.prod.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
@@ -292,13 +296,14 @@ services:
     profiles: [dev]
     image: ghcr.io/berriai/litellm:v1.111.0-dev.4@sha256:f38bf0888c091db9079396e17fc8f028d6b75cd26c3e8cb45c5fbdd1f3b66f87
     entrypoint: ["/bin/sh", "-ec"]
-    # From v1.111 the image runs as the non-root user 65532 and replaces
-    # docker/prod_entrypoint.sh with docker-entrypoint.sh, whose proxy
-    # component runs the monolithic proxy like before.
+    # LiteLLM v1.111 replaced docker/prod_entrypoint.sh with
+    # docker-entrypoint.sh (proxy component). Use whichever the image has, so
+    # an image-only upgrade or rollback across that release keeps working.
     command:
       - |
+        if [ -x /app/docker-entrypoint.sh ]; then set -- /app/docker-entrypoint.sh proxy; else set -- /app/docker/prod_entrypoint.sh; fi
         exec python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml \
-          -- /app/docker-entrypoint.sh proxy --config=/app/runtime-config.yaml --port=4000
+          -- "$$@" --config=/app/runtime-config.yaml --port=4000
     volumes:
       - ./litellm/config.dev.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
