@@ -59,8 +59,8 @@ Profile `core` services run without a profile. Other profiles are described in
 | Node exporter | `v1.12.1` | `prom/node-exporter` | `node-exporter` (core) |
 | cAdvisor | `v0.55.1` | `gcr.io/cadvisor/cadvisor` | `cadvisor` (core) |
 | PostgreSQL exporter | `v0.20.1` | `prometheuscommunity/postgres-exporter` | `postgres-exporter`, `pgvector-exporter` (core) |
-| Grafana | `13.3.0` | `grafana/grafana` | `grafana` (grafana) |
-| Loki | `3.7.9` | `grafana/loki` | `loki` (grafana) |
+| Grafana | `13.3.1` | `grafana/grafana` | `grafana` (grafana) |
+| Loki | `3.7.10` | `grafana/loki` | `loki` (grafana) |
 
 ## Langfuse
 

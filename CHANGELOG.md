@@ -31,6 +31,8 @@ All notable changes to this stack are recorded here. The format follows
   counting each LiteLLM request's HTTP root span as a second model call. The
   Alloy breaking changes (`loki.enrich`, `prometheus.enrich`, OTel connectors)
   and the Prometheus TLS external-URL default do not affect this stack.
+- Optional `grafana` profile: Grafana `13.3.0` to `13.3.1` (six CVE fixes)
+  and Loki `3.7.9` to `3.7.10`.
 - PostgreSQL `16.15-alpine3.24` to `16.16-alpine3.24` and `17.11` to `17.12`,
   and a rebuilt `pgvector/pgvector:0.8.7-pg16` digest. These minor releases
   need no dump or restore. Their release notes ask for a `REINDEX` of B-tree
