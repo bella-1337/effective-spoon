@@ -40,7 +40,7 @@ Profile `core` services run without a profile. Other profiles are described in
 
 | Component | Version | Image | Used by (profile) |
 | --- | --- | --- | --- |
-| PostgreSQL 16 | `16.15-alpine3.24` | `postgres` | `postgres`, `postgres-init`, `pgvector-access-init`, `pgvector-migrate` (core); `litellm-demo-data-dev` (dev); `litellm-demo-data-prod` (demo) |
+| PostgreSQL 16 | `16.16-alpine3.24` | `postgres` | `postgres`, `postgres-init`, `pgvector-access-init`, `pgvector-migrate` (core); `litellm-demo-data-dev` (dev); `litellm-demo-data-prod` (demo) |
 | PostgreSQL 16 + pgvector | `0.8.7-pg16` | `pgvector/pgvector` | `vector-postgres` (core) |
 | LiteLLM pgvector connector (local build) | `5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24` | `litellm-pgvector` | `litellm-pgvector` (dev) |
 | Qdrant | `v1.20.0` | `qdrant/qdrant` | `qdrant` (dev) |
@@ -68,7 +68,7 @@ Profile `core` services run without a profile. Other profiles are described in
 | --- | --- | --- | --- |
 | Langfuse web | `4.72.0` | `docker.langfuse.com/langfuse/langfuse` | `langfuse-web` (langfuse) |
 | Langfuse worker | `4.72.0` | `docker.langfuse.com/langfuse/langfuse-worker` | `langfuse-worker` (langfuse) |
-| PostgreSQL 17 | `17.11` | `postgres` | `langfuse-postgres`, `langfuse-preflight` (langfuse); `grafana-db-init` (grafana); `lens-preflight` (lens) |
+| PostgreSQL 17 | `17.12` | `postgres` | `langfuse-postgres`, `langfuse-preflight` (langfuse); `grafana-db-init` (grafana); `lens-preflight` (lens) |
 | ClickHouse | `26.3.62.3` | `clickhouse/clickhouse-server` | `langfuse-clickhouse`, `langfuse-clickhouse-observability-setup` (langfuse) |
 | Redis | `7.4.12` | `redis` | `langfuse-redis` (langfuse) |
 | MinIO (Chainguard) | `latest` | `cgr.dev/chainguard/minio` | `langfuse-minio` (langfuse) |

@@ -55,8 +55,8 @@ Licence categories: **permissive** (MIT, Apache-2.0, BSD, PostgreSQL, PSF),
 | `clickhouse/clickhouse-server:26.9.6.6` | `lens-clickhouse` (lens) | Apache-2.0 | Permissive | The version Lens pins at its release-candidate commit; kept separate from the Langfuse ClickHouse so each upgrades with its own application. |
 | `cgr.dev/chainguard/minio:latest` | `langfuse-minio` (langfuse) | MinIO: AGPL-3.0; image distributed under Chainguard's free-tier terms | Strong copyleft | Unmodified internal use creates no AGPL obligation. Chainguard's free tier offers only the `latest` tag without support; pin by digest (done) and review the terms if a paid Chainguard or MinIO subscription is introduced. |
 | `redis:7.4.12` | `langfuse-redis` (langfuse) | RSALv2 or SSPLv1 (dual) | Source-available | Internal use is permitted. Offering Redis itself as a service to third parties is not. Valkey (BSD-3-Clause) is a drop-in alternative if legal policy rejects source-available licences. |
-| `postgres:17.11` | `grafana-db-init` (grafana); `langfuse-postgres`, `langfuse-preflight` (langfuse); `lens-preflight` (lens) | PostgreSQL Licence | Permissive | None. |
-| `postgres:16.15-alpine3.24` | `postgres`, `postgres-init`, `pgvector-access-init`, `pgvector-migrate` (core); `litellm-demo-data-dev` (dev); `litellm-demo-data-prod` (demo) | PostgreSQL Licence | Permissive | None. |
+| `postgres:17.12` | `grafana-db-init` (grafana); `langfuse-postgres`, `langfuse-preflight` (langfuse); `lens-preflight` (lens) | PostgreSQL Licence | Permissive | None. |
+| `postgres:16.16-alpine3.24` | `postgres`, `postgres-init`, `pgvector-access-init`, `pgvector-migrate` (core); `litellm-demo-data-dev` (dev); `litellm-demo-data-prod` (demo) | PostgreSQL Licence | Permissive | None. |
 | `pgvector/pgvector:0.8.7-pg16` | `vector-postgres` (core) | PostgreSQL Licence | Permissive | None. |
 | `opensearchproject/opensearch:3.9.0` | `opensearch` (core) | Apache-2.0 | Permissive | The security plugin is included under Apache-2.0; no commercial licence exists or is needed. |
 | `opensearchproject/opensearch-dashboards:3.9.0` | `opensearch-dashboards` (core) | Apache-2.0 | Permissive | None. |

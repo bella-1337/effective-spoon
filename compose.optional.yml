@@ -147,7 +147,7 @@ services:
   grafana-db-init:
     logging: *default-logging
     profiles: [grafana]
-    image: postgres:17.11@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
+    image: postgres:17.12@sha256:0d938e975177bef9f1f61f3f9dbcf2e0aa0a139568f66d3415ed8892eb97f6ac
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
@@ -229,7 +229,7 @@ services:
   langfuse-preflight:
     logging: *default-logging
     profiles: [langfuse]
-    image: postgres:17.11@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
+    image: postgres:17.12@sha256:0d938e975177bef9f1f61f3f9dbcf2e0aa0a139568f66d3415ed8892eb97f6ac
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
@@ -272,7 +272,7 @@ services:
   langfuse-postgres:
     logging: *default-logging
     profiles: [langfuse]
-    image: postgres:17.11@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
+    image: postgres:17.12@sha256:0d938e975177bef9f1f61f3f9dbcf2e0aa0a139568f66d3415ed8892eb97f6ac
     environment:
       POSTGRES_DB: langfuse
       POSTGRES_USER: langfuse
@@ -496,7 +496,7 @@ services:
   lens-preflight:
     logging: *default-logging
     profiles: [lens]
-    image: postgres:17.11@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
+    image: postgres:17.12@sha256:0d938e975177bef9f1f61f3f9dbcf2e0aa0a139568f66d3415ed8892eb97f6ac
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
