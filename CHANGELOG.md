@@ -57,6 +57,9 @@ All notable changes to this stack are recorded here. The format follows
 - Trivy `0.76.1` to `0.76.2` in the image-security monitor, host-mode scans,
   and both CI systems. The release rebuilds Trivy on Alpine 3.24.3 and fixes
   several dependency CVEs.
+- Docker CLI and buildx `29.9.2-cli` to `29.9.3-cli` in the image-security
+  monitor, and the GitLab CI Docker CLI and Docker-in-Docker images to
+  `29.9.3`.
 - PostgreSQL `16.15-alpine3.24` to `16.16-alpine3.24` and `17.11` to `17.12`,
   and a rebuilt `pgvector/pgvector:0.8.7-pg16` digest. These minor releases
   need no dump or restore. Their release notes ask for a `REINDEX` of B-tree
