@@ -93,7 +93,7 @@ stack is built, scanned, or extended.
 | `ghcr.io/huggingface/text-embeddings-inference:cuda-1.9.4` | `gpu-host/compose.yml` (`bge-m3`, remote GPU host) | Text Embeddings Inference: Apache-2.0; bundles NVIDIA CUDA runtime libraries under the NVIDIA CUDA EULA | Permissive, with proprietary redistributable runtime | Using the bundled CUDA libraries is permitted without a fee. Re-review before redistributing the image. |
 | `ghcr.io/vllm-project/semantic-router/vllm-sr-cuda:latest` | `gpu-host/compose.yml` (`d3-mini`, remote GPU host) | Apache-2.0; bundles NVIDIA CUDA runtime libraries under the NVIDIA CUDA EULA | Permissive, with proprietary redistributable runtime | Same CUDA note as Text Embeddings Inference. Pinned by digest despite the `latest` tag. |
 | `cgr.dev/chainguard/wolfi-base` and `node:24` (build digests pinned upstream; runtime base digest overridden in `compose.optional.yml`) | Build and runtime bases of the upstream Lens `deploy/runtime/Dockerfile` at the pinned commit | Wolfi packages and Node.js under their own licences (Apache-2.0, MIT, and others) | Permissive bases, mixed OS packages | None for internal use. Not listed as rows the contracts check, because the Dockerfile is fetched from the pinned Lens commit rather than kept in this repository. |
-| `docker.io/nginxinc/nginx-unprivileged:1.29.5-alpine` | `gpu-host/compose.yml` (`d3-tls`, D3 TLS terminator) | nginx: BSD-2-Clause; Alpine packages under their own licences | Permissive | None. |
+| `docker.io/nginxinc/nginx-unprivileged:1.31.7-alpine` | `gpu-host/compose.yml` (`d3-tls`, D3 TLS terminator) | nginx: BSD-2-Clause; Alpine packages under their own licences | Permissive | None. |
 
 ## Models
 

@@ -110,7 +110,7 @@ Deployed separately with [`gpu-host/`](../gpu-host/README.md).
 | --- | --- | --- | --- |
 | vLLM Semantic Router (CUDA) | `latest` | `ghcr.io/vllm-project/semantic-router/vllm-sr-cuda` | `d3-mini` |
 | Text Embeddings Inference (CUDA) | `cuda-1.9.4` | `ghcr.io/huggingface/text-embeddings-inference` | `bge-m3` |
-| nginx (unprivileged) | `1.29.5-alpine` | `docker.io/nginxinc/nginx-unprivileged` | `d3-tls` |
+| nginx (unprivileged) | `1.31.7-alpine` | `docker.io/nginxinc/nginx-unprivileged` | `d3-tls` |
 
 ## Models
 

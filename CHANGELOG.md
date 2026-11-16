@@ -62,6 +62,9 @@ All notable changes to this stack are recorded here. The format follows
   `29.9.3`.
 - CI tooling: Ruff `0.17.4` to `0.17.5` on GitHub Actions and GitLab CI, and
   the GitLab release job's `glab` image `v1.128.0` to `v1.130.0`.
+- Remote GPU host: the TLS terminator moves from nginx `1.29.5-alpine` to the
+  `1.31.7-alpine` mainline release; its configuration passes `nginx -t`
+  unchanged. Redeploy the GPU host with `gpu-host/deploy.py` to apply it.
 - PostgreSQL `16.15-alpine3.24` to `16.16-alpine3.24` and `17.11` to `17.12`,
   and a rebuilt `pgvector/pgvector:0.8.7-pg16` digest. These minor releases
   need no dump or restore. Their release notes ask for a `REINDEX` of B-tree
