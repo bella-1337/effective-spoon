@@ -62,9 +62,10 @@ fail-fast command:
 ```
 
 The compatibility script never reads `.env`, connects to the stack databases,
-or changes running services. It performs static configuration checks and runs
-the candidate's own configuration validator in network-isolated, read-only,
-capability-dropped containers with placeholder credentials.
+or changes running services. It performs static configuration checks, confirms
+that the candidate image provides a launcher the gateway start commands use,
+and runs the candidate's own configuration validator in network-isolated,
+read-only, capability-dropped containers with placeholder credentials.
 
 Immediately before changing the image digest, capture the deployed images,
 configuration checksums, and a fresh database backup:

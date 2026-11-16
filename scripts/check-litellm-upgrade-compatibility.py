@@ -135,6 +135,50 @@ def contains_exact(text: str, value: str) -> bool:
     return bool(re.search(rf"(^|[^A-Za-z0-9_.-]){re.escape(value)}([^A-Za-z0-9_.-]|$)", text))
 
 
+LAUNCHER_PATTERN = re.compile(r"/app/[A-Za-z0-9_./-]+\.sh")
+
+
+def service_launchers(name: str) -> list[str]:
+    """Launcher scripts the rendered gateway command may start, in order."""
+    command = service(name).get("command") or []
+    text = " ".join(str(part) for part in command) if isinstance(command, list) else str(command)
+    return list(dict.fromkeys(LAUNCHER_PATTERN.findall(text)))
+
+
+def executable_paths(image: str, paths: list[str]) -> set[str] | None:
+    """Return which paths are executable in the image, as its own user, or None on error."""
+    probe = 'command -v python >/dev/null || exit 3; for p; do if [ -x "$p" ]; then echo "$p"; fi; done'
+    result = run(
+        ["docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
+         "--security-opt", "no-new-privileges:true", "--pids-limit", "64", "--memory", "128m",
+         "--entrypoint", "/bin/sh", image, "-ec", probe, "sh", *paths],
+        capture=True, check=False,
+    )
+    if result.returncode:
+        return None
+    return set(result.stdout.split())
+
+
+def check_launchers(report: Reporter, image: str) -> None:
+    """The validator runs `litellm` directly, so prove the Compose start command also works."""
+    failures: list[str] = []
+    for name in ("litellm-prod", "litellm-dev"):
+        launchers = service_launchers(name)
+        if not launchers:
+            failures.append(f"{name} has no /app/*.sh launcher in its rendered command")
+            continue
+        found = executable_paths(image, launchers)
+        if found is None:
+            failures.append(f"could not run /bin/sh and python in the candidate image for {name}")
+        elif not found & set(launchers):
+            failures.append(f"{name} would start none of {', '.join(launchers)}")
+    title = "Candidate image provides a launcher that the litellm-prod and litellm-dev start commands use"
+    if failures:
+        report.fail_(title, "; ".join(failures))
+    else:
+        report.pass_(title)
+
+
 def static_checks(report: Reporter) -> None:
     search_text, guard_text, policy_text = (path.read_text(encoding="utf-8") for path in (SEARCH, GUARDRAILS, POLICIES))
     prod_text, dev_text = PROD.read_text(encoding="utf-8"), DEV.read_text(encoding="utf-8")
@@ -718,6 +762,7 @@ def main() -> None:
     else:
         report.fail_("Candidate image is available locally", "skipped: the image reference failed immutability validation")
     if available:
+        check_launchers(report, candidate)
         network = f"litellm-upgrade-check-{os.getpid()}-{time.time_ns()}"
         if run(["docker", "network", "create", "--internal", network], check=False).returncode:
             fail("could not create the isolated candidate-validation network", 2)
