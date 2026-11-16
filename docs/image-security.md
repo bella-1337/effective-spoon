@@ -5,7 +5,7 @@
 ## Monitor deployed image vulnerabilities
 
 The repository includes a fail-closed, scheduled image-security monitor. It
-uses Trivy `0.76.1` from an immutable container digest, downloads a fresh
+uses Trivy `0.76.2` from an immutable container digest, downloads a fresh
 vulnerability database, retrieves and validates the CISA Known Exploited
 Vulnerabilities (KEV) catalog, and scans the platform-specific digest actually
 used by each configured gateway and service container:

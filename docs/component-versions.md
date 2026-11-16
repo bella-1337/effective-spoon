@@ -92,7 +92,7 @@ newer `cgr.dev/chainguard/wolfi-base` digest in `compose.optional.yml`. See
 | Component | Version | Image | Used by (profile) |
 | --- | --- | --- | --- |
 | Image-security monitor (local build) | `0.1.0` | `litellm-image-security-monitor` | `image-security-monitor` (security) |
-| Trivy | `0.76.1` | `aquasec/trivy` | Copied into the monitor image; host-mode scans |
+| Trivy | `0.76.2` | `aquasec/trivy` | Copied into the monitor image; host-mode scans |
 | Docker CLI and buildx | `29.9.2-cli` | `docker` | Copied into the monitor image |
 
 ## Build base images

@@ -54,6 +54,9 @@ All notable changes to this stack are recorded here. The format follows
 - SearXNG `2026.10.30-ffa88e3ba` to `2026.11.15-2d500cb6b` (rolling release).
 - Qdrant `v1.20.0` to `v1.20.1`, which fixes slow HNSW builds on many-core
   hosts.
+- Trivy `0.76.1` to `0.76.2` in the image-security monitor, host-mode scans,
+  and both CI systems. The release rebuilds Trivy on Alpine 3.24.3 and fixes
+  several dependency CVEs.
 - PostgreSQL `16.15-alpine3.24` to `16.16-alpine3.24` and `17.11` to `17.12`,
   and a rebuilt `pgvector/pgvector:0.8.7-pg16` digest. These minor releases
   need no dump or restore. Their release notes ask for a `REINDEX` of B-tree
