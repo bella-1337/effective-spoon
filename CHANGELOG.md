@@ -51,6 +51,7 @@ All notable changes to this stack are recorded here. The format follows
 - Traefik `v3.7.17` to `v3.7.19`, which fixes five security advisories. Its
   migration notes (BasicAuth password length, Ingress-NGINX TLS options,
   dot-segments with path parameters) need no change here.
+- SearXNG `2026.10.30-ffa88e3ba` to `2026.11.15-2d500cb6b` (rolling release).
 - PostgreSQL `16.15-alpine3.24` to `16.16-alpine3.24` and `17.11` to `17.12`,
   and a rebuilt `pgvector/pgvector:0.8.7-pg16` digest. These minor releases
   need no dump or restore. Their release notes ask for a `REINDEX` of B-tree
