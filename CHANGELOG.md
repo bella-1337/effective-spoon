@@ -42,6 +42,12 @@ All notable changes to this stack are recorded here. The format follows
 - Optional `lens` profile: its ClickHouse `26.9.6.6` to `26.9.29.5`, the
   latest patch of the 26.9 series Lens pins, and a newer
   `cgr.dev/chainguard/wolfi-base` runtime digest for the Lens build.
+- The Xberg egress proxy moves from Squid `6.13-25.04_edge`, whose Ubuntu
+  25.04 base no longer receives updates, to `7.2-26.04_edge`. The new Ubuntu
+  rock runs Squid as its unprivileged `_daemon_` user (584792) without a
+  shell, so the service calls the image's entrypoint directly, owns its
+  tmpfs mounts as that user, drops all capabilities, and probes its port with
+  Perl instead of Bash.
 - PostgreSQL `16.15-alpine3.24` to `16.16-alpine3.24` and `17.11` to `17.12`,
   and a rebuilt `pgvector/pgvector:0.8.7-pg16` digest. These minor releases
   need no dump or restore. Their release notes ask for a `REINDEX` of B-tree

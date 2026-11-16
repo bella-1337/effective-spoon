@@ -34,7 +34,7 @@ Profile `core` services run without a profile. Other profiles are described in
 | SearXNG | `2026.10.30-ffa88e3ba` | `searxng/searxng` | `searxng` (core) |
 | Xberg | `1.3.10-core` | `ghcr.io/xberg-io/xberg` | `xberg` (prod, dev) |
 | BIND 9 (Xberg DNS) | `9.20-26.04_stable` | `ubuntu/bind9` | `xberg-dns` (prod, dev) |
-| Squid (Xberg egress proxy) | `6.13-25.04_edge` | `ubuntu/squid` | `xberg-egress-proxy` (core) |
+| Squid (Xberg egress proxy) | `7.2-26.04_edge` | `ubuntu/squid` | `xberg-egress-proxy` (core) |
 
 ## Data stores
 
