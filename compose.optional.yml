@@ -296,7 +296,7 @@ services:
   langfuse-clickhouse:
     logging: *default-logging
     profiles: [langfuse]
-    image: clickhouse/clickhouse-server:26.3.62.3@sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a
+    image: clickhouse/clickhouse-server:26.3.64.3@sha256:deadd72fe8b8b8608f8b7d6a988fcb5a8aee21dfaadc0f106c75f21bb9536395
     user: "101:101"
     environment:
       CLICKHOUSE_DB: default
@@ -323,7 +323,7 @@ services:
   langfuse-clickhouse-observability-setup:
     logging: *default-logging
     profiles: [langfuse]
-    image: clickhouse/clickhouse-server:26.3.62.3@sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a
+    image: clickhouse/clickhouse-server:26.3.64.3@sha256:deadd72fe8b8b8608f8b7d6a988fcb5a8aee21dfaadc0f106c75f21bb9536395
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
@@ -355,7 +355,7 @@ services:
   langfuse-minio:
     logging: *default-logging
     profiles: [langfuse]
-    image: cgr.dev/chainguard/minio:latest@sha256:c47b1779bfd12cdf5a4fcd3bd50671b8d66465fdae45271babc2fb467958b712
+    image: cgr.dev/chainguard/minio:latest@sha256:9158c67aa441627c366442e84656f689e16bec4809851ec64318561a365b69e4
     entrypoint: sh
     command: -c 'mkdir -p /data/langfuse && exec minio server --address ":9000" --console-address ":9001" /data'
     environment:
@@ -385,7 +385,7 @@ services:
   langfuse-redis:
     logging: *default-logging
     profiles: [langfuse]
-    image: redis:7.4.12@sha256:b6b6e3dc0c0952737748e55d5d885272840c7e42ba41ab1d5489f693419882f5
+    image: redis:7.4.12@sha256:2e3eb11462c4e3759e6972678dd051d150ff54b1e60714b3c33b701260172a90
     command:
       - redis-server
       - --requirepass
@@ -411,7 +411,7 @@ services:
   langfuse-worker:
     logging: *default-logging
     profiles: [langfuse]
-    image: docker.langfuse.com/langfuse/langfuse-worker:4.72.0@sha256:aa1724b989a00f1e4ca9930709202489c73deaaf2f1116bbd3d71c77edb8fedb
+    image: docker.langfuse.com/langfuse/langfuse-worker:4.80.0@sha256:da9f618dd784219aa6508ab6941c4a89c4ef6fb429fb1734c4163df3baa8f1ca
     environment:
       <<: *langfuse-environment
     depends_on:
@@ -440,7 +440,7 @@ services:
   langfuse-web:
     logging: *default-logging
     profiles: [langfuse]
-    image: docker.langfuse.com/langfuse/langfuse:4.72.0@sha256:c311fd9db4b69f6514fdcb1b86a2a105d5a4ed51fbf0ded033ff2722459c804a
+    image: docker.langfuse.com/langfuse/langfuse:4.80.0@sha256:0814758db3db8e923f733be3884e7d7a9e3afd60568d874a610d78aae47476c5
     environment:
       <<: *langfuse-environment
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-}

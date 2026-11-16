@@ -66,10 +66,10 @@ Profile `core` services run without a profile. Other profiles are described in
 
 | Component | Version | Image | Used by (profile) |
 | --- | --- | --- | --- |
-| Langfuse web | `4.72.0` | `docker.langfuse.com/langfuse/langfuse` | `langfuse-web` (langfuse) |
-| Langfuse worker | `4.72.0` | `docker.langfuse.com/langfuse/langfuse-worker` | `langfuse-worker` (langfuse) |
+| Langfuse web | `4.80.0` | `docker.langfuse.com/langfuse/langfuse` | `langfuse-web` (langfuse) |
+| Langfuse worker | `4.80.0` | `docker.langfuse.com/langfuse/langfuse-worker` | `langfuse-worker` (langfuse) |
 | PostgreSQL 17 | `17.12` | `postgres` | `langfuse-postgres`, `langfuse-preflight` (langfuse); `grafana-db-init` (grafana); `lens-preflight` (lens) |
-| ClickHouse | `26.3.62.3` | `clickhouse/clickhouse-server` | `langfuse-clickhouse`, `langfuse-clickhouse-observability-setup` (langfuse) |
+| ClickHouse | `26.3.64.3` | `clickhouse/clickhouse-server` | `langfuse-clickhouse`, `langfuse-clickhouse-observability-setup` (langfuse) |
 | Redis | `7.4.12` | `redis` | `langfuse-redis` (langfuse) |
 | MinIO (Chainguard) | `latest` | `cgr.dev/chainguard/minio` | `langfuse-minio` (langfuse) |
 
