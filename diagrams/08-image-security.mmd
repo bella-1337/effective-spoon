@@ -18,7 +18,7 @@ flowchart TD
   subgraph SEC["security profile (or host timer)"]
     MON["image-security-monitor<br/>daily 02:45 · scanner lock"]:::backend
     SDP["image-security proxy<br/>read-only Docker API"]:::security
-    TV["Trivy 0.76.1<br/>pinned digest"]:::security
+    TV["Trivy 0.76.2<br/>pinned digest"]:::security
   end
   subgraph ST["LiteLLM stack — Docker Compose host"]
     DOCK["Docker Engine<br/>running containers + digests"]:::cloud

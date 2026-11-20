@@ -20,9 +20,9 @@ Profile `core` services run without a profile. Other profiles are described in
 
 | Component | Version | Image | Used by (profile) |
 | --- | --- | --- | --- |
-| LiteLLM (production, LTS) | `v1.108.2` | `ghcr.io/berriai/litellm` | `litellm-prod` (prod) |
-| LiteLLM (development, nightly) | `v1.110.0-dev.1` | `ghcr.io/berriai/litellm` | `litellm-dev` (dev) |
-| Traefik | `v3.7.17` | `traefik` | `traefik` (core) |
+| LiteLLM (production, LTS) | `v1.108.9` | `ghcr.io/berriai/litellm` | `litellm-prod` (prod) |
+| LiteLLM (development, nightly) | `v1.111.0-dev.4` | `ghcr.io/berriai/litellm` | `litellm-dev` (dev) |
+| Traefik | `v3.7.19` | `traefik` | `traefik` (core) |
 | Docker socket proxy | `v0.5.0` | `ghcr.io/tecnativa/docker-socket-proxy` | `traefik-docker-proxy`, `alloy-docker-proxy` (core); `image-security-docker-proxy` (security) |
 
 ## Guardrails, search, and extraction
@@ -31,19 +31,19 @@ Profile `core` services run without a profile. Other profiles are described in
 | --- | --- | --- | --- |
 | Presidio analyzer | `2.2.362` | `mcr.microsoft.com/presidio-analyzer` | `presidio-analyzer` (core) |
 | Presidio anonymizer | `2.2.362` | `mcr.microsoft.com/presidio-anonymizer` | `presidio-anonymizer` (core) |
-| SearXNG | `2026.10.30-ffa88e3ba` | `searxng/searxng` | `searxng` (core) |
+| SearXNG | `2026.11.15-2d500cb6b` | `searxng/searxng` | `searxng` (core) |
 | Xberg | `1.3.10-core` | `ghcr.io/xberg-io/xberg` | `xberg` (prod, dev) |
 | BIND 9 (Xberg DNS) | `9.20-26.04_stable` | `ubuntu/bind9` | `xberg-dns` (prod, dev) |
-| Squid (Xberg egress proxy) | `6.13-25.04_edge` | `ubuntu/squid` | `xberg-egress-proxy` (core) |
+| Squid (Xberg egress proxy) | `7.2-26.04_edge` | `ubuntu/squid` | `xberg-egress-proxy` (core) |
 
 ## Data stores
 
 | Component | Version | Image | Used by (profile) |
 | --- | --- | --- | --- |
-| PostgreSQL 16 | `16.15-alpine3.24` | `postgres` | `postgres`, `postgres-init`, `pgvector-access-init`, `pgvector-migrate` (core); `litellm-demo-data-dev` (dev); `litellm-demo-data-prod` (demo) |
+| PostgreSQL 16 | `16.16-alpine3.24` | `postgres` | `postgres`, `postgres-init`, `pgvector-access-init`, `pgvector-migrate` (core); `litellm-demo-data-dev` (dev); `litellm-demo-data-prod` (demo) |
 | PostgreSQL 16 + pgvector | `0.8.7-pg16` | `pgvector/pgvector` | `vector-postgres` (core) |
 | LiteLLM pgvector connector (local build) | `5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24` | `litellm-pgvector` | `litellm-pgvector` (dev) |
-| Qdrant | `v1.20.0` | `qdrant/qdrant` | `qdrant` (dev) |
+| Qdrant | `v1.20.1` | `qdrant/qdrant` | `qdrant` (dev) |
 
 ## Observability
 
@@ -51,25 +51,25 @@ Profile `core` services run without a profile. Other profiles are described in
 | --- | --- | --- | --- |
 | OpenSearch | `3.9.0` | `opensearchproject/opensearch` | `opensearch` (core) |
 | OpenSearch Dashboards | `3.9.0` | `opensearchproject/opensearch-dashboards` | `opensearch-dashboards` (core) |
-| Data Prepper | `2.16.0` | `opensearchproject/data-prepper` | `data-prepper` (core) |
+| Data Prepper | `2.17.0` | `opensearchproject/data-prepper` | `data-prepper` (core) |
 | OpenSearch tools (local build) | `0.1.0` | `litellm-opensearch-tools` | `opensearch-certs`, `opensearch-setup`, `opensearch-dashboards-setup`, `opensearch-bridge` (core) |
-| Prometheus | `v3.15.1` | `prom/prometheus` | `prometheus`, `prometheus-secrets-init` (core) |
-| Grafana Alloy | `v1.21.3` | `grafana/alloy` | `alloy` (core); `alloy-loki` (grafana) |
+| Prometheus | `v3.16.0` | `prom/prometheus` | `prometheus`, `prometheus-secrets-init` (core) |
+| Grafana Alloy | `v1.22.0` | `grafana/alloy` | `alloy` (core); `alloy-loki` (grafana) |
 | Blackbox exporter | `v0.29.1` | `prom/blackbox-exporter` | `blackbox` (core) |
 | Node exporter | `v1.12.1` | `prom/node-exporter` | `node-exporter` (core) |
 | cAdvisor | `v0.55.1` | `gcr.io/cadvisor/cadvisor` | `cadvisor` (core) |
 | PostgreSQL exporter | `v0.20.1` | `prometheuscommunity/postgres-exporter` | `postgres-exporter`, `pgvector-exporter` (core) |
-| Grafana | `13.3.0` | `grafana/grafana` | `grafana` (grafana) |
-| Loki | `3.7.9` | `grafana/loki` | `loki` (grafana) |
+| Grafana | `13.3.1` | `grafana/grafana` | `grafana` (grafana) |
+| Loki | `3.7.10` | `grafana/loki` | `loki` (grafana) |
 
 ## Langfuse
 
 | Component | Version | Image | Used by (profile) |
 | --- | --- | --- | --- |
-| Langfuse web | `4.72.0` | `docker.langfuse.com/langfuse/langfuse` | `langfuse-web` (langfuse) |
-| Langfuse worker | `4.72.0` | `docker.langfuse.com/langfuse/langfuse-worker` | `langfuse-worker` (langfuse) |
-| PostgreSQL 17 | `17.11` | `postgres` | `langfuse-postgres`, `langfuse-preflight` (langfuse); `grafana-db-init` (grafana); `lens-preflight` (lens) |
-| ClickHouse | `26.3.62.3` | `clickhouse/clickhouse-server` | `langfuse-clickhouse`, `langfuse-clickhouse-observability-setup` (langfuse) |
+| Langfuse web | `4.80.0` | `docker.langfuse.com/langfuse/langfuse` | `langfuse-web` (langfuse) |
+| Langfuse worker | `4.80.0` | `docker.langfuse.com/langfuse/langfuse-worker` | `langfuse-worker` (langfuse) |
+| PostgreSQL 17 | `17.12` | `postgres` | `langfuse-postgres`, `langfuse-preflight` (langfuse); `grafana-db-init` (grafana); `lens-preflight` (lens) |
+| ClickHouse | `26.3.64.3` | `clickhouse/clickhouse-server` | `langfuse-clickhouse`, `langfuse-clickhouse-observability-setup` (langfuse) |
 | Redis | `7.4.12` | `redis` | `langfuse-redis` (langfuse) |
 | MinIO (Chainguard) | `latest` | `cgr.dev/chainguard/minio` | `langfuse-minio` (langfuse) |
 
@@ -78,7 +78,7 @@ Profile `core` services run without a profile. Other profiles are described in
 | Component | Version | Image | Used by (profile) |
 | --- | --- | --- | --- |
 | LiteLLM Lens (local build) | `1.108.0-rc.1` | `litellm-lens` | `lens` (lens) |
-| ClickHouse | `26.9.6.6` | `clickhouse/clickhouse-server` | `lens-clickhouse` (lens) |
+| ClickHouse | `26.9.29.5` | `clickhouse/clickhouse-server` | `lens-clickhouse` (lens) |
 
 Lens publishes no release image yet. The stack builds the upstream
 `deploy/runtime/Dockerfile` from the pinned release-candidate commit
@@ -92,8 +92,8 @@ newer `cgr.dev/chainguard/wolfi-base` digest in `compose.optional.yml`. See
 | Component | Version | Image | Used by (profile) |
 | --- | --- | --- | --- |
 | Image-security monitor (local build) | `0.1.0` | `litellm-image-security-monitor` | `image-security-monitor` (security) |
-| Trivy | `0.76.1` | `aquasec/trivy` | Copied into the monitor image; host-mode scans |
-| Docker CLI and buildx | `29.9.2-cli` | `docker` | Copied into the monitor image |
+| Trivy | `0.76.2` | `aquasec/trivy` | Copied into the monitor image; host-mode scans |
+| Docker CLI and buildx | `29.9.3-cli` | `docker` | Copied into the monitor image |
 
 ## Build base images
 
@@ -110,7 +110,7 @@ Deployed separately with [`gpu-host/`](../gpu-host/README.md).
 | --- | --- | --- | --- |
 | vLLM Semantic Router (CUDA) | `latest` | `ghcr.io/vllm-project/semantic-router/vllm-sr-cuda` | `d3-mini` |
 | Text Embeddings Inference (CUDA) | `cuda-1.9.4` | `ghcr.io/huggingface/text-embeddings-inference` | `bge-m3` |
-| nginx (unprivileged) | `1.29.5-alpine` | `docker.io/nginxinc/nginx-unprivileged` | `d3-tls` |
+| nginx (unprivileged) | `1.31.7-alpine` | `docker.io/nginxinc/nginx-unprivileged` | `d3-tls` |
 
 ## Models
 

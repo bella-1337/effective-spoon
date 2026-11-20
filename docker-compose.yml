@@ -92,7 +92,7 @@ services:
 
   traefik:
     logging: *default-logging
-    image: traefik:v3.7.17@sha256:30ff62491aacdb862ceb8c9edcf2627da638d7deafdd4b6dab32fe34f8aa3e90
+    image: traefik:v3.7.19@sha256:aa942a00bce033c909bf1f7e861d93761be4b31a035f10d2410d33e38a8f41cf
     command:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
@@ -174,12 +174,16 @@ services:
   litellm-prod:
     logging: *default-logging
     profiles: [prod]
-    image: ghcr.io/berriai/litellm:v1.108.2@sha256:d8b4ac356743d647a13bb93f45b941fcd5f5354122cfd205948a1b192790389d
+    image: ghcr.io/berriai/litellm:v1.108.9@sha256:d817e8e4d6698aad9f3d40b6ccbcaa1cde6c8256cb59867553f07383da3d6608
     entrypoint: ["/bin/sh", "-ec"]
+    # LiteLLM v1.111 replaced docker/prod_entrypoint.sh with
+    # docker-entrypoint.sh (proxy component). Use whichever the image has, so
+    # an image-only upgrade or rollback across that release keeps working.
     command:
       - |
+        if [ -x /app/docker-entrypoint.sh ]; then set -- /app/docker-entrypoint.sh proxy; else set -- /app/docker/prod_entrypoint.sh; fi
         exec python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml \
-          -- /app/docker/prod_entrypoint.sh --config=/app/runtime-config.yaml --port=4000
+          -- "$$@" --config=/app/runtime-config.yaml --port=4000
     volumes:
       - ./litellm/config.prod.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
@@ -266,7 +270,7 @@ services:
   litellm-demo-data-prod:
     logging: *default-logging
     profiles: [demo]
-    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    image: postgres:16.16-alpine3.24@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
     environment:
       PGHOST: postgres
       PGDATABASE: litellm_prod
@@ -290,12 +294,16 @@ services:
   litellm-dev:
     logging: *default-logging
     profiles: [dev]
-    image: ghcr.io/berriai/litellm:v1.110.0-dev.1@sha256:cca06d5cfdbd4412633d96257b60b84882822418fc72f15296b261e7ddfdfac1
+    image: ghcr.io/berriai/litellm:v1.111.0-dev.4@sha256:f38bf0888c091db9079396e17fc8f028d6b75cd26c3e8cb45c5fbdd1f3b66f87
     entrypoint: ["/bin/sh", "-ec"]
+    # LiteLLM v1.111 replaced docker/prod_entrypoint.sh with
+    # docker-entrypoint.sh (proxy component). Use whichever the image has, so
+    # an image-only upgrade or rollback across that release keeps working.
     command:
       - |
+        if [ -x /app/docker-entrypoint.sh ]; then set -- /app/docker-entrypoint.sh proxy; else set -- /app/docker/prod_entrypoint.sh; fi
         exec python /app/modules/prepare_runtime_config.py /app/config.yaml /app/runtime-config.yaml \
-          -- /app/docker/prod_entrypoint.sh --config=/app/runtime-config.yaml --port=4000
+          -- "$$@" --config=/app/runtime-config.yaml --port=4000
     volumes:
       - ./litellm/config.dev.yaml:/app/config.yaml:ro
       - ./litellm/modules:/app/modules:ro
@@ -400,7 +408,7 @@ services:
   litellm-demo-data-dev:
     logging: *default-logging
     profiles: [dev]
-    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    image: postgres:16.16-alpine3.24@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
     environment:
       PGHOST: postgres
       PGDATABASE: litellm_dev
@@ -470,7 +478,7 @@ services:
 
   searxng:
     logging: *default-logging
-    image: searxng/searxng:2026.10.30-ffa88e3ba@sha256:f4aa660c54d062dedb268be84e821ea24e39f48c7a496af8dd02cc9eedb93847
+    image: searxng/searxng:2026.11.15-2d500cb6b@sha256:932f69dca010db9880bddebb2171f05d8e1a25d04a59149ff65409993d680024
     volumes:
       - ./searxng:/etc/searxng:rw
     environment:
@@ -553,7 +561,7 @@ services:
   xberg-dns:
     logging: *default-logging
     profiles: [prod, dev]
-    image: ubuntu/bind9:9.20-26.04_stable@sha256:bce2d69f34f4dce93540118c1b05d2c8cd33817c1efc77bd82a8d75c3f722706
+    image: ubuntu/bind9:9.20-26.04_stable@sha256:7cb9c4d3f8d6457a38ddf6a5d8e5e1cba75907985946cebf696eb5bba39637cc
     # Deny-by-default resolver: an empty authoritative root answers NXDOMAIN
     # locally, and only the delegated allowlist zones are forwarded upstream,
     # so injected URLs cannot exfiltrate data through DNS lookups.
@@ -582,7 +590,11 @@ services:
 
   xberg-egress-proxy:
     logging: *default-logging
-    image: ubuntu/squid:6.13-25.04_edge@sha256:3de2e64f0ca6efdac3e98557607dc0f23050037f3885016d5d5bfcf9950501b8
+    image: ubuntu/squid:7.2-26.04_edge@sha256:42decc7f79b4e1044f4fe9b3a855af2cbfc76652f3191694726e21058443edc9
+    # The Ubuntu rock runs as its unprivileged _daemon_ user (584792) under
+    # Pebble. Call the image's own entrypoint, which forwards the log files
+    # to stdout, so Squid runs as PID 1 with the stack's configuration.
+    entrypoint: ["/usr/local/bin/entrypoint.sh"]
     command: ["-f", "/etc/squid/xberg-egress-squid.conf", "-NYC"]
     volumes:
       - ./security/xberg-egress-squid.conf:/etc/squid/xberg-egress-squid.conf:ro
@@ -590,15 +602,17 @@ services:
     networks: [xberg-sandbox, egress]
     read_only: true
     tmpfs:
-      - /run:mode=0755
-      - /var/log/squid:uid=13,gid=13,mode=0750
-      - /var/spool/squid:uid=13,gid=13,mode=0750
-    # The ICMP pinger is disabled in squid.conf, so raw sockets are unused.
-    cap_drop: [NET_RAW]
+      - /run:uid=584792,gid=584792,mode=0755
+      - /var/log/squid:uid=584792,gid=584792,mode=0750
+      - /var/spool/squid:uid=584792,gid=584792,mode=0750
+    # Squid never starts as root, and the ICMP pinger is disabled in
+    # squid.conf, so it needs no capabilities.
+    cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "/usr/bin/bash", "-ec", ": >/dev/tcp/127.0.0.1/3128"]
+      # The rock ships no bash; Perl opens the TCP probe instead.
+      test: ["CMD", "/usr/bin/perl", "-MIO::Socket::INET", "-e", "exit(IO::Socket::INET->new(PeerAddr => '127.0.0.1:3128', Timeout => 3) ? 0 : 1)"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -611,7 +625,7 @@ services:
 
   postgres:
     logging: *default-logging
-    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    image: postgres:16.16-alpine3.24@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
     environment:
       POSTGRES_DB: litellm_prod
       POSTGRES_USER: ${PG_USER:-litellm}
@@ -629,7 +643,7 @@ services:
 
   postgres-init:
     logging: *default-logging
-    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    image: postgres:16.16-alpine3.24@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
     environment:
       PGHOST: postgres
       PGUSER: ${PG_USER:-litellm}
@@ -718,7 +732,7 @@ services:
 
   vector-postgres:
     logging: *default-logging
-    image: pgvector/pgvector:0.8.7-pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
+    image: pgvector/pgvector:0.8.7-pg16@sha256:484e838076e04939d27d3e176e91c86eea96236126023be8d3059761122e579f
     environment:
       POSTGRES_DB: vector_store
       POSTGRES_USER: vector
@@ -737,7 +751,7 @@ services:
 
   pgvector-migrate:
     logging: *default-logging
-    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    image: postgres:16.16-alpine3.24@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
     environment:
       PGHOST: vector-postgres
       PGDATABASE: vector_store
@@ -760,7 +774,7 @@ services:
 
   pgvector-access-init:
     logging: *default-logging
-    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    image: postgres:16.16-alpine3.24@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
     environment:
       PGHOST: vector-postgres
       PGDATABASE: vector_store
@@ -793,7 +807,7 @@ services:
   qdrant:
     logging: *default-logging
     profiles: [dev]
-    image: qdrant/qdrant:v1.20.0@sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
+    image: qdrant/qdrant:v1.20.1@sha256:d18c8e5061be3eaea2f53fbee1f0bf0382dc59cbb9b7112e41ffcc937ec14220
     environment:
       QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
       QDRANT__TELEMETRY_DISABLED: "true"
@@ -871,7 +885,7 @@ services:
 
   prometheus:
     logging: *default-logging
-    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -890,7 +904,7 @@ services:
 
   prometheus-secrets-init:
     logging: *default-logging
-    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
     command:
@@ -976,7 +990,7 @@ services:
 
   alloy:
     logging: *default-logging
-    image: grafana/alloy:v1.21.3@sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
+    image: grafana/alloy:v1.22.0@sha256:9acc2529bc1edb7f5b2bd801dd8334ebc80c158e3a9e5526ecd7c9a273d43189
     user: "473:473"
     command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy/data"]
     environment:
@@ -1052,7 +1066,7 @@ services:
 
   opensearch:
     logging: *default-logging
-    image: opensearchproject/opensearch:3.9.0@sha256:3b55f6b6249cfdb92b52ee59adc8a266203ba9ef9f5d82544fad6f1af2f3609e
+    image: opensearchproject/opensearch:3.9.0@sha256:3bf4fe26aeb9f7b03c0ebcb1302bb24e855ee6b89fd926d26a71a83ef6f7e076
     environment:
       DISABLE_INSTALL_DEMO_CONFIG: "true"
       DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI: "true"
@@ -1120,7 +1134,7 @@ services:
 
   opensearch-dashboards:
     logging: *default-logging
-    image: opensearchproject/opensearch-dashboards:3.9.0@sha256:256d4cea5928868ac09bca642a0ac8285a2b7e4b7fdd45c4ec06e75a5cf3184c
+    image: opensearchproject/opensearch-dashboards:3.9.0@sha256:46c649e9c4412a56f49bd052c2ca458a2a4933e1706a1843b832b0806e3885dc
     environment:
       OPENSEARCH_DASHBOARDS_SERVER_PASSWORD: ${OPENSEARCH_DASHBOARDS_SERVER_PASSWORD:?Set OPENSEARCH_DASHBOARDS_SERVER_PASSWORD in .env}
       OPENSEARCH_DASHBOARDS_COOKIE_PASSWORD: ${OPENSEARCH_DASHBOARDS_COOKIE_PASSWORD:?Set OPENSEARCH_DASHBOARDS_COOKIE_PASSWORD in .env}
@@ -1174,7 +1188,7 @@ services:
 
   data-prepper:
     logging: *default-logging
-    image: opensearchproject/data-prepper:2.16.0@sha256:6e74ebeddfd66549f623e6f3b8131111b34e85695f54bd68aac7563e80d6b546
+    image: opensearchproject/data-prepper:2.17.0@sha256:e5bad3b97dea9b38db77e230b965fce246e013b24e783bc668848e88ccbbc1d6
     entrypoint: ["/bin/bash", "/etc/data-prepper/entrypoint.sh"]
     environment:
       OPENSEARCH_INGEST_PASSWORD: ${OPENSEARCH_INGEST_PASSWORD:?Set OPENSEARCH_INGEST_PASSWORD in .env}

@@ -88,6 +88,20 @@ def usage(stream: object = sys.stdout) -> None:
     print(USAGE, file=stream, end="")
 
 
+def services_without_output(services: list[str]) -> set[str]:
+    """Return the services whose containers have written no log line at all.
+
+    Lens, for example, logs nothing in normal operation, so a log pipeline
+    cannot be expected to hold lines for it.
+    """
+    silent: set[str] = set()
+    for service in services:
+        result = compose(["logs", "--no-log-prefix", "--tail", "1", service], capture_output=True, check=False)
+        if result.returncode == 0 and not (result.stdout or "").strip():
+            silent.add(service)
+    return silent
+
+
 class Suite:
     def __init__(self) -> None:
         self.prod_host = public_host("LITELLM_PROD_HOST")
@@ -1165,11 +1179,15 @@ SELECT
             return 1
         missing = [service for service in compose_capture(["ps", "--services", "--status", "running"]).splitlines()
                    if service not in available]
+        silent = services_without_output(missing)
+        if silent:
+            self.info(f"opensearch-logs: {' '.join(sorted(silent))} wrote no log lines, so none can reach OpenSearch")
+            missing = [service for service in missing if service not in silent]
         if missing:
             self.fail_(f"opensearch-logs: OpenSearch has no log lines for running service(s): {' '.join(missing)}")
             bad = True
         else:
-            self.pass_("opensearch-logs: OpenSearch has log lines for every currently running Compose service")
+            self.pass_("opensearch-logs: OpenSearch has log lines for every currently running Compose service that logs")
         status, result = self.opensearch_query(
             "/litellm-logs-*/_search?allow_no_indices=true",
             {"size": 0, "query": {"range": {"@timestamp": {"gte": "now-1h"}}},
@@ -1245,11 +1263,15 @@ SELECT
         else:
             available = set(labels.get("data", []))
             missing = [service for service in compose_capture(["ps", "--services", "--status", "running"]).splitlines() if service not in available]
+            silent = services_without_output(missing)
+            if silent:
+                self.info(f"logs: {' '.join(sorted(silent))} wrote no log lines, so none can reach Loki")
+                missing = [service for service in missing if service not in silent]
             if missing:
                 self.fail_(f"logs: Loki has no log label for running service(s): {' '.join(missing)}")
                 bad = True
             else:
-                self.pass_("logs: Loki has log labels for every currently running Compose service")
+                self.pass_("logs: Loki has log labels for every currently running Compose service that logs")
         if self.nonce and self.nonce_service:
             query = f'{{compose_service="{self.nonce_service}"}} |= `{self.nonce}`'
             url = f"{self.grafana_url}/api/datasources/proxy/uid/loki/loki/api/v1/query_range?{urlencode({'query': query, 'start': f'{now - 600}000000000', 'end': f'{now}000000000', 'limit': '5'})}"

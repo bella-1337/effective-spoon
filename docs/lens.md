@@ -39,7 +39,7 @@ these services, their networks, and the trace and gateway paths.
   `deploy/runtime/Dockerfile` from the pinned release-candidate commit
   `b2ac5f8a289c3f77f02b81d67ca1ee075bfead6d` (tag `v1.108.0-rc.1`, the Lens
   release paired with LiteLLM 1.108) as `litellm-lens:1.108.0-rc.1`. Both
-  gateway images (`v1.108.2` and `v1.110.0-dev.1`) include the Lens adapter
+  gateway images (`v1.108.9` and `v1.111.0-dev.4`) include the Lens adapter
   from LiteLLM PR #45529.
 - The build overrides the Dockerfile's `LENS_RUNTIME_IMAGE` argument with a
   newer `cgr.dev/chainguard/wolfi-base` digest. At the pinned commit the

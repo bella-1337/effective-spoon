@@ -73,7 +73,7 @@ jobs:
             --volume "$PWD:/repo:ro" \
             --workdir /repo \
             --entrypoint sh \
-            ghcr.io/astral-sh/ruff:0.17.4-alpine@sha256:7a717be3a7cfbef698a9b99e1555add93ec6b195242fe273997683e49b051f51 \
+            ghcr.io/astral-sh/ruff:0.17.5-alpine@sha256:0e73e021bfa04c44bae2ad2b280b8a6ba3687a0e38af6ed1163b49ac9215a2c5 \
             scripts/ci/static-checks.sh python
 
       - name: Lint GitHub Actions workflows

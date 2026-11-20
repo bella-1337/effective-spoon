@@ -43,41 +43,41 @@ Licence categories: **permissive** (MIT, Apache-2.0, BSD, PostgreSQL, PSF),
 
 | Image | Services (profile) | Licence | Category | Obligations and notes |
 | --- | --- | --- | --- | --- |
-| `ghcr.io/berriai/litellm:v1.108.2` | `litellm-prod` (prod) | MIT; `enterprise/` code under the BerriAI commercial licence | Permissive, with commercial add-ons | No key is configured. SSO beyond 5 users, audit logs, key rotation, team/key policy attachment, secret managers, IP allow-lists, organisations, and `DOCS_*`/`EMAIL_*` branding need a LiteLLM Enterprise licence. `store_audit_logs: true` writes nothing without a licence. |
-| `ghcr.io/berriai/litellm:v1.110.0-dev.1` | `litellm-dev` (dev; nightly) | Same as above | Permissive, with commercial add-ons | Same as above. |
+| `ghcr.io/berriai/litellm:v1.108.9` | `litellm-prod` (prod) | MIT; `enterprise/` code under the BerriAI commercial licence | Permissive, with commercial add-ons | No key is configured. SSO beyond 5 users, audit logs, key rotation, team/key policy attachment, secret managers, IP allow-lists, organisations, and `DOCS_*`/`EMAIL_*` branding need a LiteLLM Enterprise licence. `store_audit_logs: true` writes nothing without a licence. |
+| `ghcr.io/berriai/litellm:v1.111.0-dev.4` | `litellm-dev` (dev; nightly) | Same as above | Permissive, with commercial add-ons | Same as above. |
 | `litellm-pgvector:5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24` | `litellm-pgvector` (dev) | MIT (`BerriAI/litellm-pgvector`), built on the Python base below | Permissive | Local build from upstream commit `5bd8f3ab`; the image carries OCI source, revision, and licence labels. |
 | `litellm-lens:1.108.0-rc.1` | `lens` (lens) | MIT (`BerriAI/lens`; no `enterprise/` directory exists at the pinned commit), built on `cgr.dev/chainguard/wolfi-base` with Node.js (MIT) and Python 3.13 (PSF-2.0); bundled npm packages and Rust crates under their own licences | Permissive | Local build of upstream release-candidate commit `b2ac5f8a289c3f77f02b81d67ca1ee075bfead6d` (tag `v1.108.0-rc.1`) with the upstream `deploy/runtime/Dockerfile`, because Lens publishes no image yet; the image carries OCI source, revision, and licence labels. Investigations send selected trace content to the configured analysis model; see [LiteLLM Lens](lens.md#data-protection). |
 | `litellm-opensearch-tools:0.1.0` | `opensearch-certs`, `opensearch-setup`, `opensearch-dashboards-setup`, `opensearch-bridge` (core) | Repository code under MIT; packages listed under [repository Python dependencies](#repository-python-dependencies) | Mixed; see below | Local build. Includes psycopg (LGPL-3.0); internal use only. |
 | `litellm-image-security-monitor:0.1.0` | `image-security-monitor` (security) | Repository code under MIT plus Trivy (Apache-2.0), Docker CLI and buildx (Apache-2.0), uv (MIT OR Apache-2.0) | Permissive | Local build. |
-| `docker.langfuse.com/langfuse/langfuse:4.72.0` | `langfuse-web` (langfuse) | MIT; `ee/` code under the Langfuse Enterprise licence | Permissive, with commercial add-ons | Enterprise features (project-level retention, SCIM, organisation APIs, fine-grained project access) need a licence key and are not used. |
-| `docker.langfuse.com/langfuse/langfuse-worker:4.72.0` | `langfuse-worker` (langfuse) | Same as above | Permissive, with commercial add-ons | Same as above. |
-| `clickhouse/clickhouse-server:26.3.62.3` | `langfuse-clickhouse`, `langfuse-clickhouse-observability-setup` (langfuse) | Apache-2.0 | Permissive | None. |
-| `clickhouse/clickhouse-server:26.9.6.6` | `lens-clickhouse` (lens) | Apache-2.0 | Permissive | The version Lens pins at its release-candidate commit; kept separate from the Langfuse ClickHouse so each upgrades with its own application. |
+| `docker.langfuse.com/langfuse/langfuse:4.80.0` | `langfuse-web` (langfuse) | MIT; `ee/` code under the Langfuse Enterprise licence | Permissive, with commercial add-ons | Enterprise features (project-level retention, SCIM, organisation APIs, fine-grained project access) need a licence key and are not used. |
+| `docker.langfuse.com/langfuse/langfuse-worker:4.80.0` | `langfuse-worker` (langfuse) | Same as above | Permissive, with commercial add-ons | Same as above. |
+| `clickhouse/clickhouse-server:26.3.64.3` | `langfuse-clickhouse`, `langfuse-clickhouse-observability-setup` (langfuse) | Apache-2.0 | Permissive | None. |
+| `clickhouse/clickhouse-server:26.9.29.5` | `lens-clickhouse` (lens) | Apache-2.0 | Permissive | The latest patch of the 26.9 series that Lens pins (26.9.6.6) at its release-candidate commit; kept separate from the Langfuse ClickHouse so each upgrades with its own application. |
 | `cgr.dev/chainguard/minio:latest` | `langfuse-minio` (langfuse) | MinIO: AGPL-3.0; image distributed under Chainguard's free-tier terms | Strong copyleft | Unmodified internal use creates no AGPL obligation. Chainguard's free tier offers only the `latest` tag without support; pin by digest (done) and review the terms if a paid Chainguard or MinIO subscription is introduced. |
 | `redis:7.4.12` | `langfuse-redis` (langfuse) | RSALv2 or SSPLv1 (dual) | Source-available | Internal use is permitted. Offering Redis itself as a service to third parties is not. Valkey (BSD-3-Clause) is a drop-in alternative if legal policy rejects source-available licences. |
-| `postgres:17.11` | `grafana-db-init` (grafana); `langfuse-postgres`, `langfuse-preflight` (langfuse); `lens-preflight` (lens) | PostgreSQL Licence | Permissive | None. |
-| `postgres:16.15-alpine3.24` | `postgres`, `postgres-init`, `pgvector-access-init`, `pgvector-migrate` (core); `litellm-demo-data-dev` (dev); `litellm-demo-data-prod` (demo) | PostgreSQL Licence | Permissive | None. |
+| `postgres:17.12` | `grafana-db-init` (grafana); `langfuse-postgres`, `langfuse-preflight` (langfuse); `lens-preflight` (lens) | PostgreSQL Licence | Permissive | None. |
+| `postgres:16.16-alpine3.24` | `postgres`, `postgres-init`, `pgvector-access-init`, `pgvector-migrate` (core); `litellm-demo-data-dev` (dev); `litellm-demo-data-prod` (demo) | PostgreSQL Licence | Permissive | None. |
 | `pgvector/pgvector:0.8.7-pg16` | `vector-postgres` (core) | PostgreSQL Licence | Permissive | None. |
 | `opensearchproject/opensearch:3.9.0` | `opensearch` (core) | Apache-2.0 | Permissive | The security plugin is included under Apache-2.0; no commercial licence exists or is needed. |
 | `opensearchproject/opensearch-dashboards:3.9.0` | `opensearch-dashboards` (core) | Apache-2.0 | Permissive | None. |
-| `opensearchproject/data-prepper:2.16.0` | `data-prepper` (core) | Apache-2.0 | Permissive | None. |
-| `grafana/grafana:13.3.0` | `grafana` (grafana) | AGPL-3.0 | Strong copyleft | Unmodified internal use creates no obligation. Do not patch Grafana source and expose it to external users without legal review. |
-| `grafana/loki:3.7.9` | `loki` (grafana) | AGPL-3.0 | Strong copyleft | Same as Grafana. |
-| `grafana/alloy:v1.21.3` | `alloy` (core); `alloy-loki` (grafana) | Apache-2.0 | Permissive | None. |
-| `prom/prometheus:v3.15.1` | `prometheus`, `prometheus-secrets-init` (core) | Apache-2.0 | Permissive | None. |
+| `opensearchproject/data-prepper:2.17.0` | `data-prepper` (core) | Apache-2.0 | Permissive | None. |
+| `grafana/grafana:13.3.1` | `grafana` (grafana) | AGPL-3.0 | Strong copyleft | Unmodified internal use creates no obligation. Do not patch Grafana source and expose it to external users without legal review. |
+| `grafana/loki:3.7.10` | `loki` (grafana) | AGPL-3.0 | Strong copyleft | Same as Grafana. |
+| `grafana/alloy:v1.22.0` | `alloy` (core); `alloy-loki` (grafana) | Apache-2.0 | Permissive | None. |
+| `prom/prometheus:v3.16.0` | `prometheus`, `prometheus-secrets-init` (core) | Apache-2.0 | Permissive | None. |
 | `prom/node-exporter:v1.12.1` | `node-exporter` (core) | Apache-2.0 | Permissive | None. |
 | `prom/blackbox-exporter:v0.29.1` | `blackbox` (core) | Apache-2.0 | Permissive | None. |
 | `prometheuscommunity/postgres-exporter:v0.20.1` | `postgres-exporter`, `pgvector-exporter` (core) | Apache-2.0 | Permissive | None. |
 | `gcr.io/cadvisor/cadvisor:v0.55.1` | `cadvisor` (core) | Apache-2.0 | Permissive | None. |
 | `ghcr.io/tecnativa/docker-socket-proxy:v0.5.0` | `traefik-docker-proxy`, `alloy-docker-proxy` (core); `image-security-docker-proxy` (security) | Apache-2.0; bundles HAProxy (GPL-2.0-or-later) | Permissive, with GPL component | Unmodified internal use creates no GPL obligation. |
-| `traefik:v3.7.17` | `traefik` (core) | MIT | Permissive | None. |
+| `traefik:v3.7.19` | `traefik` (core) | MIT | Permissive | None. |
 | `mcr.microsoft.com/presidio-analyzer:2.2.362` | `presidio-analyzer` (core) | MIT; includes the spaCy `en_core_web_lg` model (see [models](#models)) | Permissive | None. |
 | `mcr.microsoft.com/presidio-anonymizer:2.2.362` | `presidio-anonymizer` (core) | MIT | Permissive | None. |
-| `searxng/searxng:2026.10.30-ffa88e3ba` | `searxng` (core) | AGPL-3.0 | Strong copyleft | Unmodified internal use creates no AGPL obligation. The licence grants no right to use the queried search engines; see [external services](#external-services-and-terms) and [Search-engine terms of use](search-extraction-and-caching.md#search-engine-terms-of-use). |
+| `searxng/searxng:2026.11.15-2d500cb6b` | `searxng` (core) | AGPL-3.0 | Strong copyleft | Unmodified internal use creates no AGPL obligation. The licence grants no right to use the queried search engines; see [external services](#external-services-and-terms) and [Search-engine terms of use](search-extraction-and-caching.md#search-engine-terms-of-use). |
 | `ghcr.io/xberg-io/xberg:1.3.10-core` | `xberg` (prod, dev) | MIT | Permissive | None. |
 | `ubuntu/bind9:9.20-26.04_stable` | `xberg-dns` (prod, dev) | BIND 9: MPL-2.0; Ubuntu base packages under their own licences | Weak copyleft | Unmodified internal use creates no MPL obligation. |
-| `ubuntu/squid:6.13-25.04_edge` | `xberg-egress-proxy` (core) | Squid: GPL-2.0-or-later; Ubuntu base packages under their own licences | Strong copyleft | Unmodified internal use creates no GPL obligation. The `edge` track is not a long-term-support channel; this is a support concern, not a licence one. |
-| `qdrant/qdrant:v1.20.0` | `qdrant` (dev) | Apache-2.0 | Permissive | None. |
+| `ubuntu/squid:7.2-26.04_edge` | `xberg-egress-proxy` (core) | Squid: GPL-2.0-or-later; Ubuntu base packages under their own licences | Strong copyleft | Unmodified internal use creates no GPL obligation. The `edge` track is not a long-term-support channel; this is a support concern, not a licence one. |
+| `qdrant/qdrant:v1.20.1` | `qdrant` (dev) | Apache-2.0 | Permissive | None. |
 
 ## Build and auxiliary images
 
@@ -88,12 +88,12 @@ stack is built, scanned, or extended.
 | --- | --- | --- | --- | --- |
 | `python:3.11-slim-bookworm` | Base of `pgvector/Dockerfile` | Python: PSF-2.0; Debian packages under their own licences | Permissive base, mixed OS packages | None for internal use. |
 | `ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm-slim` | Base of `opensearch/tools/Dockerfile` and `security/image-monitor.Dockerfile` | uv: MIT OR Apache-2.0; Python: PSF-2.0; Debian packages under their own licences | Permissive base, mixed OS packages | None for internal use. |
-| `docker:29.9.2-cli` | Docker CLI and buildx copied into `security/image-monitor.Dockerfile` | Apache-2.0 | Permissive | None. |
-| `aquasec/trivy:0.76.1` | Trivy copied into the monitor image; also run directly by host-mode scans | Apache-2.0 | Permissive | Trivy vulnerability and Java databases are downloaded at scan time under Aqua's database terms; internal use is permitted. |
+| `docker:29.9.3-cli` | Docker CLI and buildx copied into `security/image-monitor.Dockerfile` | Apache-2.0 | Permissive | None. |
+| `aquasec/trivy:0.76.2` | Trivy copied into the monitor image; also run directly by host-mode scans | Apache-2.0 | Permissive | Trivy vulnerability and Java databases are downloaded at scan time under Aqua's database terms; internal use is permitted. |
 | `ghcr.io/huggingface/text-embeddings-inference:cuda-1.9.4` | `gpu-host/compose.yml` (`bge-m3`, remote GPU host) | Text Embeddings Inference: Apache-2.0; bundles NVIDIA CUDA runtime libraries under the NVIDIA CUDA EULA | Permissive, with proprietary redistributable runtime | Using the bundled CUDA libraries is permitted without a fee. Re-review before redistributing the image. |
 | `ghcr.io/vllm-project/semantic-router/vllm-sr-cuda:latest` | `gpu-host/compose.yml` (`d3-mini`, remote GPU host) | Apache-2.0; bundles NVIDIA CUDA runtime libraries under the NVIDIA CUDA EULA | Permissive, with proprietary redistributable runtime | Same CUDA note as Text Embeddings Inference. Pinned by digest despite the `latest` tag. |
 | `cgr.dev/chainguard/wolfi-base` and `node:24` (build digests pinned upstream; runtime base digest overridden in `compose.optional.yml`) | Build and runtime bases of the upstream Lens `deploy/runtime/Dockerfile` at the pinned commit | Wolfi packages and Node.js under their own licences (Apache-2.0, MIT, and others) | Permissive bases, mixed OS packages | None for internal use. Not listed as rows the contracts check, because the Dockerfile is fetched from the pinned Lens commit rather than kept in this repository. |
-| `docker.io/nginxinc/nginx-unprivileged:1.29.5-alpine` | `gpu-host/compose.yml` (`d3-tls`, D3 TLS terminator) | nginx: BSD-2-Clause; Alpine packages under their own licences | Permissive | None. |
+| `docker.io/nginxinc/nginx-unprivileged:1.31.7-alpine` | `gpu-host/compose.yml` (`d3-tls`, D3 TLS terminator) | nginx: BSD-2-Clause; Alpine packages under their own licences | Permissive | None. |
 
 ## Models
 

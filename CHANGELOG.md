@@ -8,6 +8,83 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Production LiteLLM moves from `v1.108.2` to the `v1.108.9` LTS patch
+  release, still pinned by digest. The 1.108.x LTS line needs no migration or
+  configuration change: production already sets `drop_params: true`, which
+  1.108.7 requires for Responses-only fields on bridged providers.
+- Development LiteLLM follows the nightly channel from `v1.110.0-dev.1` to
+  `v1.111.0-dev.4`, still pinned by digest; it passes the upgrade
+  compatibility check. Its new `redact_tokens_in_spend_logs` setting now
+  defaults to off; both gateways keep `store_prompts_in_spend_logs: false`, so
+  spend logs hold no free-form text to scan. Releases from `v1.111.0-dev.3`
+  are signed with Sigstore keyless signing instead of `cosign.pub`.
+  The image now runs as the non-root user 65532 and replaces
+  `docker/prod_entrypoint.sh` with `docker-entrypoint.sh`. Both gateways now
+  start whichever of the two launchers the image provides (`docker-entrypoint.sh
+  proxy` first), so an image-only upgrade or rollback across v1.111 keeps
+  working without editing the command.
+- The upgrade compatibility check also proves that the candidate image
+  provides a launcher that the `litellm-prod` and `litellm-dev` start commands
+  use. Its config validator runs `litellm` directly, so v1.111.0-dev.4 passed
+  the check and then failed to start the gateway.
+- The upgrade compatibility check gives its config validator 2 GiB of memory
+  instead of 512 MiB. LiteLLM 1.111 peaks near 1 GiB while loading the
+  configuration and otherwise never printed its policy-engine summary, which
+  failed the check for a compatible image.
+- The upgrade regression suite's `opensearch-logs` and `logs` checks no
+  longer fail for a running service whose container has written no log line;
+  they report it instead. Lens logs nothing in normal operation, so both
+  checks failed whenever the `lens` profile ran.
+- Prometheus `v3.15.1` to `v3.16.0`, Grafana Alloy `v1.21.3` to `v1.22.0`,
+  and Data Prepper `2.16.0` to `2.17.0`. Data Prepper's `otel_traces`
+  processor no longer copies `gen_ai.*` attributes and token totals onto
+  non-GenAI root spans, so the **Model calls by model** trace panel stops
+  counting each LiteLLM request's HTTP root span as a second model call. The
+  Alloy breaking changes (`loki.enrich`, `prometheus.enrich`, OTel connectors)
+  and the Prometheus TLS external-URL default do not affect this stack.
+- Optional `grafana` profile: Grafana `13.3.0` to `13.3.1` (six CVE fixes)
+  and Loki `3.7.9` to `3.7.10`.
+- Optional `langfuse` profile: Langfuse web and worker `4.72.0` to `4.80.0`
+  and ClickHouse `26.3.62.3` to `26.3.64.3` (same 26.3 LTS series), with
+  rebuilt Redis `7.4.12` and Chainguard MinIO digests. Langfuse runs its
+  PostgreSQL and ClickHouse migrations on start. From 4.77 it no longer
+  tokenizes generations itself; LiteLLM already reports token usage on every
+  span.
+- Optional `lens` profile: its ClickHouse `26.9.6.6` to `26.9.29.5`, the
+  latest patch of the 26.9 series Lens pins, and a newer
+  `cgr.dev/chainguard/wolfi-base` runtime digest for the Lens build.
+- The Xberg egress proxy moves from Squid `6.13-25.04_edge`, whose Ubuntu
+  25.04 base no longer receives updates, to `7.2-26.04_edge`. The new Ubuntu
+  rock runs Squid as its unprivileged `_daemon_` user (584792) without a
+  shell, so the service calls the image's entrypoint directly, owns its
+  tmpfs mounts as that user, drops all capabilities, and probes its port with
+  Perl instead of Bash.
+- Traefik `v3.7.17` to `v3.7.19`, which fixes five security advisories. Its
+  migration notes (BasicAuth password length, Ingress-NGINX TLS options,
+  dot-segments with path parameters) need no change here.
+- SearXNG `2026.10.30-ffa88e3ba` to `2026.11.15-2d500cb6b` (rolling release).
+- Qdrant `v1.20.0` to `v1.20.1`, which fixes slow HNSW builds on many-core
+  hosts.
+- Trivy `0.76.1` to `0.76.2` in the image-security monitor, host-mode scans,
+  and both CI systems. The release rebuilds Trivy on Alpine 3.24.3 and fixes
+  several dependency CVEs.
+- Docker CLI and buildx `29.9.2-cli` to `29.9.3-cli` in the image-security
+  monitor, and the GitLab CI Docker CLI and Docker-in-Docker images to
+  `29.9.3`.
+- CI tooling: Ruff `0.17.4` to `0.17.5` on GitHub Actions and GitLab CI, and
+  the GitLab release job's `glab` image `v1.128.0` to `v1.130.0`.
+- Remote GPU host: the TLS terminator moves from nginx `1.29.5-alpine` to the
+  `1.31.7-alpine` mainline release; its configuration passes `nginx -t`
+  unchanged. Redeploy the GPU host with `gpu-host/deploy.py` to apply it.
+- PostgreSQL `16.15-alpine3.24` to `16.16-alpine3.24` and `17.11` to `17.12`,
+  and a rebuilt `pgvector/pgvector:0.8.7-pg16` digest. These minor releases
+  need no dump or restore. Their release notes ask for a `REINDEX` of B-tree
+  indexes on unconstrained `bpchar` columns and of `gist_trgm_ops` indexes,
+  and of GIN indexes suspected of corruption. None of the stack's databases
+  has such a B-tree or trigram index, so no `REINDEX` is needed.
+
 ## [v0.3.0] - 2026-11-09
 
 ### Added
