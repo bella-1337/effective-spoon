@@ -10,11 +10,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import signal
 import sys
 import time
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from maintenance_common import (
@@ -324,6 +325,30 @@ def static_checks(report: Reporter) -> None:
 VALIDATOR_MEMORY_LIMIT = "2g"
 
 
+# The gateways start through prepare_runtime_config.py, which keeps the
+# Langfuse callbacks only while langfuse-web resolves and adds Lens tracing only
+# while lens resolves. Pointing both names at loopback makes the validator load
+# the fullest config a gateway can run; every other start removes settings from
+# it. The hosts are unreachable on the internal network, and the throwaway
+# credentials only satisfy the launcher's checks.
+PREPARED_CONFIG = "/tmp/runtime-config.yaml"
+PREPARED_CONFIG_MARKERS = ("Langfuse callbacks are enabled", "LiteLLM Lens tracing is enabled")
+
+
+def optional_integration_environment() -> list[str]:
+    return [
+        "--add-host", "langfuse-web:127.0.0.1", "--add-host", "lens:127.0.0.1",
+        "-e", "LANGFUSE_HOST=http://langfuse-web:3000",
+        "-e", "LANGFUSE_PUBLIC_KEY=pk-lf-upgrade-check-placeholder",
+        "-e", "LANGFUSE_SECRET_KEY=sk-lf-upgrade-check-placeholder",
+        "-e", "LANGFUSE_USER_ID_SALT=upgrade-check-placeholder-salt",
+        "-e", "LITELLM_LENS_URL=http://lens:4318",
+        "-e", "LITELLM_LENS_PUBLIC_URL=https://lens.example.test",
+        "-e", f"LITELLM_LENS_SERVICE_TOKEN={secrets.token_urlsafe(32)}",
+        "-e", f"LENS_GATEWAY_SECRET={secrets.token_urlsafe(32)}",
+    ]
+
+
 def docker_run_validation(image: str, config: Path, network: str, extra_environment: list[str]) -> tuple[int, str]:
     name = f"litellm-upgrade-check-{os.getpid()}-{time.time_ns()}"
     args = [
@@ -331,11 +356,17 @@ def docker_run_validation(image: str, config: Path, network: str, extra_environm
         "--security-opt", "no-new-privileges:true", "--pids-limit", "256", "--memory", VALIDATOR_MEMORY_LIMIT,
         "--tmpfs", "/tmp:mode=1777", "-v", f"{config}:/app/config.yaml:ro",
         "-v", f"{MODULES}:/app/modules:ro",
+        # LiteLLM resolves includes and callback modules next to the config it
+        # loads. The root filesystem is read-only, so the prepared config lives
+        # in /tmp and needs the modules beside it, as /app/modules is in Compose.
+        "-v", f"{MODULES}:{PurePosixPath(PREPARED_CONFIG).parent / 'modules'}:ro",
         "-e", "DATABASE_URL=postgresql://upgrade-check-placeholder@127.0.0.1:5432/upgrade-check",
         "-e", "LITELLM_MASTER_KEY=sk-upgrade-check-placeholder",
         "-e", "OPENAI_API_KEY=sk-upgrade-check-placeholder",
-        "-e", "LITELLM_LOCAL_MODEL_COST_MAP=True", *extra_environment, "--entrypoint", "litellm", image,
-        "--config", "/app/config.yaml", "--validate_config",
+        "-e", "LITELLM_LOCAL_MODEL_COST_MAP=True", *optional_integration_environment(), *extra_environment,
+        "--entrypoint", "python", image,
+        "/app/modules/prepare_runtime_config.py", "/app/config.yaml", PREPARED_CONFIG,
+        "--", "litellm", "--config", PREPARED_CONFIG, "--validate_config",
     ]
     if run(args, check=False).returncode:
         return 125, "candidate validation container could not start"
@@ -355,18 +386,36 @@ def docker_run_validation(image: str, config: Path, network: str, extra_environm
                 exit_code = int(status)
                 if exit_code != 0 or "LiteLLM: config OK" not in output:
                     return exit_code or 125, output
-                return 0, output
+                return prepared_status(output), output
             # The proxy prints search-tool and policy summaries after the first
             # success line, so wait until its startup output has settled.
             if (
                 re.search(r"LiteLLM: config OK|LiteLLM: Proxy initialized with Config, Set models:", output)
                 and unchanged_polls >= 5
             ):
-                return 0, output
+                return prepared_status(output), output
             time.sleep(1)
         return 124, output
     finally:
         run(["docker", "rm", "-f", name], check=False, capture=True)
+
+
+def prepared_status(output: str) -> int:
+    """0 only when the launcher enabled both integrations, so the full config was validated."""
+    return 0 if all(marker in output for marker in PREPARED_CONFIG_MARKERS) else 125
+
+
+def validation_failure_detail(code: int, output: str) -> str:
+    lines = output.splitlines()
+    last = lines[-1] if lines else ""
+    missing = [marker for marker in PREPARED_CONFIG_MARKERS if marker not in output]
+    if missing:
+        return (
+            "prepare_runtime_config.py did not report "
+            + " and ".join(f"'{marker}'" for marker in missing)
+            + f", so the validated config is not the full runtime config; exit {code}; last output line: {last}"
+        )
+    return f"'litellm --validate_config' exited {code}; last output line: {last}"
 
 
 def start_validation_mcp_server(network: str) -> str:
@@ -378,9 +427,14 @@ def start_validation_mcp_server(network: str) -> str:
     command = [
         "docker", "run", "-d", "--name", name, "--network", network, "--network-alias", "xberg",
         "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
-        "--pids-limit", "256", "--memory", "1g", "--tmpfs", "/tmp:mode=1777", xberg_image,
+        "--pids-limit", "256", "--memory", "1g", "--tmpfs", "/tmp:mode=1777",
+        # Load the operator's SSRF policy as Compose does, so the candidate is
+        # validated against the Xberg configuration that actually runs.
+        "--volume", f"{ROOT / 'security' / 'xberg-config.toml'}:/etc/xberg/xberg.toml:ro",
+        xberg_image,
         "mcp", "--transport", "http", "--host", "0.0.0.0", "--port", "8001",
         "--allowed-host", "xberg", "--allowed-host", "xberg:8001",
+        "--config", "/etc/xberg/xberg.toml",
     ]
     if run(command, check=False).returncode:
         fail("could not start the isolated Xberg MCP validator", 2)
@@ -806,22 +860,12 @@ def main() -> None:
             for sig, handler in previous_handlers.items():
                 signal.signal(sig, handler)
         success_output = re.compile(r"LiteLLM: config OK|LiteLLM: Proxy initialized with Config, Set models:")
-        if prod_code == 0 and success_output.search(prod_output):
-            report.pass_("Candidate image loads litellm/config.prod.yaml without error")
-        else:
-            report.fail_(
-                "Candidate image loads litellm/config.prod.yaml without error",
-                f"'litellm --validate_config' exited {prod_code}; last output line: "
-                f"{prod_output.splitlines()[-1] if prod_output.splitlines() else ''}",
-            )
-        if dev_code == 0 and success_output.search(dev_output):
-            report.pass_("Candidate image loads litellm/config.dev.yaml without error")
-        else:
-            report.fail_(
-                "Candidate image loads litellm/config.dev.yaml without error",
-                f"'litellm --validate_config' exited {dev_code}; last output line: "
-                f"{dev_output.splitlines()[-1] if dev_output.splitlines() else ''}",
-            )
+        for label, code, output in (("prod", prod_code, prod_output), ("dev", dev_code, dev_output)):
+            title = f"Candidate image loads the prepared litellm/config.{label}.yaml runtime config without error"
+            if code == 0 and success_output.search(output):
+                report.pass_(title)
+            else:
+                report.fail_(title, validation_failure_detail(code, output))
         search_name = next((line.split(":", 1)[1].strip() for line in SEARCH.read_text().splitlines() if "search_tool_name:" in line), "")
         guard_name = next((line.split(":", 1)[1].strip() for line in GUARDRAILS.read_text().splitlines()
                            if "guardrail_name:" in line), "")
@@ -885,8 +929,8 @@ def main() -> None:
             )
     else:
         for message in (
-            "Candidate image loads litellm/config.prod.yaml without error",
-            "Candidate image loads litellm/config.dev.yaml without error",
+            "Candidate image loads the prepared litellm/config.prod.yaml runtime config without error",
+            "Candidate image loads the prepared litellm/config.dev.yaml runtime config without error",
             "Candidate image's own output confirms it recognizes the modular search tool and the guardrail/policy modules in both profiles",
             "Candidate image's installed package recognizes the provider, Langfuse OTel, and privacy/retention identifiers this repository depends on",
             "Candidate image preserves trusted pseudonymous Langfuse user and session attribution without exporting raw identifiers",

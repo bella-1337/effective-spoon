@@ -229,11 +229,18 @@ one of:
 
 ```sh
 # Production LiteLLM config
-docker compose --profile prod up -d
+./scripts/maintenance.py up --profile prod -d
 
 # Development LiteLLM config, including detailed debug logging
-docker compose --profile dev up -d
+./scripts/maintenance.py up --profile dev -d
 ```
+
+`maintenance.py up` runs `doctor` first: it renders every profile and checks
+the safety contracts, including that the Xberg allowlists match
+`security/xberg-destinations.toml`, and starts nothing when a check fails.
+It then runs `docker compose --profile ... up` with `.env` and, when present,
+`.env.optional`, passing every other option through. The plain
+`docker compose` commands below start the same services without those checks.
 
 Both proxies can be run together when needed:
 

@@ -1,9 +1,13 @@
+; GENERATED from security/xberg-destinations.toml by
+; `python3 scripts/maintenance.py xberg-allowlist render`. Do not edit:
+; change the source file and run `xberg-allowlist apply`.
+;
 ; Empty authoritative root for the Xberg sandbox resolver. Only the delegated
 ; names below are resolved, through the forward zones in xberg-dns-zones.conf.
 $TTL 300
-@                   IN SOA  localhost. nobody.invalid. ( 1 3600 600 86400 300 )
-@                   IN NS   localhost.
-localhost.          IN A    127.0.0.1
+@                    IN SOA  localhost. nobody.invalid. ( 1 3600 600 86400 300 )
+@                    IN NS   localhost.
+localhost.           IN A    127.0.0.1
 
-docs.xberg.io.      IN NS   localhost.
-xberg-io.github.io. IN NS   localhost.
+docs.xberg.io.       IN NS   localhost.
+xberg-io.github.io.  IN NS   localhost.

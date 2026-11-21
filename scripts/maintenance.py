@@ -30,6 +30,7 @@ from maintenance_contracts import (
     validate_compose_contracts,
     validate_repository_contracts,
 )
+import xberg_allowlist as xberg_allowlist_module
 
 USAGE = """Usage: scripts/maintenance.py COMMAND [OPTIONS]
 
@@ -38,6 +39,11 @@ Central maintenance entry point for the LiteLLM stack.
 Commands:
   doctor
       Validate required scripts, Python syntax, Docker Compose, and both profiles.
+
+  up [--profile NAME]... [UP_OPTIONS]
+      Run doctor, then start the stack with `docker compose up`. Each
+      --profile is passed to Compose; every other option goes to `up`
+      unchanged, for example: up --profile prod -d --wait
 
   status
       Show all Compose containers and their current state.
@@ -93,6 +99,13 @@ Commands:
   rollback --confirm-rollback --mode image-only|restore-db [OPTIONS]
       Run the validated rollback workflow. All confirmation, state, backup,
       drift, and service-selection options are delegated unchanged.
+
+  xberg-allowlist render|check|apply
+      Manage Xberg's outbound destinations from the single source
+      security/xberg-destinations.toml. render rewrites the SSRF policy, DNS
+      zones, and Squid allowlist from it; check fails when they differ; apply
+      renders, then recreates the running xberg-dns, xberg-egress-proxy, and
+      xberg containers, which read their configuration only at startup.
 
   lens secrets|status|smoke [OPTIONS]
       Operate the optional LiteLLM Lens profile: generate missing secrets,
@@ -175,6 +188,45 @@ def doctor() -> None:
     LOG.info("PASS: all Compose profiles and game-day safety contracts are valid")
 
 
+def split_up_arguments(arguments: list[str]) -> tuple[list[str], list[str]]:
+    """Return (Compose global options, `up` options) for the up command."""
+    profiles: list[str] = []
+    options: list[str] = []
+    index = 0
+    while index < len(arguments):
+        arg = arguments[index]
+        if arg == "--profile":
+            if index + 1 >= len(arguments) or not arguments[index + 1] or arguments[index + 1].startswith("-"):
+                usage_error("--profile requires a profile name")
+            profiles.extend(("--profile", arguments[index + 1]))
+            index += 2
+            continue
+        if arg.startswith("--profile="):
+            name = arg.partition("=")[2]
+            if not name:
+                usage_error("--profile requires a profile name")
+            profiles.extend(("--profile", name))
+        elif arg in {"--env-file", "-f", "--file", "--project-directory"} or arg.startswith(
+            ("--env-file=", "--file=", "--project-directory=")
+        ):
+            # doctor validates .env and .env.optional; starting with other
+            # files would deploy something it never checked.
+            usage_error(f"up does not accept {arg.partition('=')[0]}; doctor validates only .env and .env.optional")
+        else:
+            options.append(arg)
+        index += 1
+    return profiles, options
+
+
+def up(arguments: list[str]) -> None:
+    profiles, options = split_up_arguments(arguments)
+    doctor()
+    LOG.info("\n== Starting the stack ==")
+    result = compose([*profiles, "up", *options], check=False)
+    if result.returncode:
+        raise SystemExit(result.returncode)
+
+
 def pre_upgrade(arguments: list[str]) -> None:
     candidate = ""
     pull = False
@@ -216,6 +268,40 @@ def pre_upgrade(arguments: list[str]) -> None:
            [*(["--skip-backup"] if skip_backup else []), *(["--services", services] if services else [])])
 
 
+def xberg_allowlist(arguments: list[str]) -> None:
+    if len(arguments) != 1 or arguments[0] not in {"render", "check", "apply"}:
+        usage_error("xberg-allowlist requires exactly one of: render, check, apply")
+    action = arguments[0]
+    if action == "check":
+        failures = xberg_allowlist_module.drift_failures(ROOT)
+        if failures:
+            fail("\n".join(failures))
+        LOG.info("PASS: Xberg allowlists match security/xberg-destinations.toml")
+        return
+    try:
+        changed = xberg_allowlist_module.write_rendered(ROOT)
+    except xberg_allowlist_module.DestinationError as error:
+        fail(f"Xberg destinations are invalid: {error}")
+    for relative in changed:
+        LOG.info(f"Rendered {relative}")
+    if not changed:
+        LOG.info("PASS: Xberg allowlists were already up to date")
+    if action == "render":
+        return
+    require_docker()
+    running = compose(["ps", "--services", "--status", "running"], capture_output=True)
+    assert isinstance(running.stdout, str)
+    active = set(running.stdout.splitlines())
+    services = [name for name in xberg_allowlist_module.SANDBOX_SERVICES if name in active]
+    if not services:
+        LOG.info("No Xberg sandbox service is running; the next start uses the new allowlists")
+        return
+    # A changed bind-mounted file does not change the Compose model, so a plain
+    # `up -d` would keep the old containers and their startup-time config.
+    compose(["up", "-d", "--no-deps", "--force-recreate", "--wait", "--wait-timeout", "150", *services])
+    LOG.info("PASS: recreated " + ", ".join(services) + " with the new Xberg allowlists")
+
+
 def main() -> None:
     args = sys.argv[1:]
     command = args.pop(0) if args else "help"
@@ -227,6 +313,8 @@ def main() -> None:
         if args:
             usage_error("doctor accepts no additional arguments")
         doctor()
+    elif command == "up":
+        up(args)
     elif command == "status":
         if args:
             usage_error("status accepts no additional arguments")
@@ -262,6 +350,8 @@ def main() -> None:
         invoke("rollback-litellm-upgrade.py", args)
     elif command == "lens":
         invoke("lens.py", args)
+    elif command == "xberg-allowlist":
+        xberg_allowlist(args)
     else:
         usage_error(f"unknown command: {command}")
 

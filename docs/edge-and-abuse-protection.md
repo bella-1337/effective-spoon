@@ -112,14 +112,21 @@ document containing a name. Grant MCP access only to trusted keys and teams.
 
 | File | Control |
 | --- | --- |
+| `security/xberg-destinations.toml` | The single source of allowed destinations; the four allowlist files below are generated from it |
 | `security/xberg-config.toml` | Local paths and `file://` URIs are disabled; only uploaded bytes and allowlisted URLs are extracted |
 | `security/xberg-egress-squid.conf` | Only HTTPS `CONNECT` tunnels; unlisted names are denied before any DNS lookup; the ICMP pinger is off |
 | `security/xberg-dns-zones.conf` and `security/xberg-dns-deny-root.zone` | An empty authoritative root answers `NXDOMAIN` locally; only delegated, forwarded names are resolved upstream |
 | `security/xberg-egress-allowlist.txt` | Destination allowlist for Squid |
 
-When you add a destination, update all four files and include every CNAME
-target of the new name. `python3 scripts/maintenance.py doctor` fails when the
-lists diverge.
+To change destinations, edit only `security/xberg-destinations.toml`, listing
+every CNAME target of a new name in its `dns_aliases`, then run
+`python3 scripts/maintenance.py xberg-allowlist apply`. It regenerates the
+SSRF policy, both DNS files, and the Squid allowlist with matching
+exact-or-subdomain semantics, and recreates the running sandbox services,
+which read their configuration only at startup.
+`python3 scripts/maintenance.py doctor` fails when a generated file differs
+from the source, or when `XBERG_HEALTHCHECK_DOMAIN` is not an allowed
+destination.
 
 ## Internal network
 
