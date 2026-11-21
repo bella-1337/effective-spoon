@@ -1,0 +1,580 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["global", "images"],
+  "properties": {
+    "global": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "imageRegistry": {
+          "type": "string",
+          "description": "Prefix for every image reference. Set this to the additional in-house registry the custom images are published to."
+        },
+        "imagePullSecrets": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "imagePullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        },
+        "storageClass": { "type": "string" },
+        "domain": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Base DNS domain; hosts default to <service>.<domain>."
+        },
+        "timezone": { "type": "string" },
+        "nodeSelector": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "tolerations": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "affinity": { "type": "object" }
+      }
+    },
+    "useDigest": {
+      "type": "boolean",
+      "description": "Prefer the pinned digest over the tag. Turning this off follows a mutable tag, which the upstream security notes advise against."
+    },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "propertyNames": {
+        "enum": [
+          "opensearchTools",
+          "pgvector",
+          "lens",
+          "imageSecurityMonitor",
+          "litellmProd",
+          "litellmDev",
+          "postgres",
+          "postgresModern",
+          "pgvectorPostgres",
+          "presidioAnalyzer",
+          "presidioAnonymizer",
+          "searxng",
+          "xberg",
+          "bind9",
+          "squid",
+          "qdrant",
+          "prometheus",
+          "postgresExporter",
+          "nodeExporter",
+          "blackboxExporter",
+          "alloy",
+          "opensearch",
+          "opensearchDashboards",
+          "dataPrepper",
+          "loki",
+          "grafana",
+          "clickhouseLangfuse",
+          "clickhouseLens",
+          "minio",
+          "redis",
+          "langfuseWeb",
+          "langfuseWorker",
+          "trivy"
+        ]
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository", "tag"],
+        "properties": {
+          "registry": { "type": "string" },
+          "repository": { "type": "string", "minLength": 1 },
+          "tag": { "type": "string", "minLength": 1 },
+          "digest": { "type": "string", "pattern": "^$|^sha256:[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "existingSecret": { "type": "string" },
+        "generateMissing": { "type": "boolean" },
+        "values": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": { "type": "string" },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "secretName": { "type": "string" }
+          }
+        },
+        "hosts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "litellmProd": { "type": "string" },
+            "litellmDev": { "type": "string" },
+            "opensearchDashboards": { "type": "string" },
+            "grafana": { "type": "string" },
+            "langfuse": { "type": "string" },
+            "langfuseS3": { "type": "string" },
+            "lens": { "type": "string" }
+          }
+        }
+      }
+    },
+    "litellmProd": { "$ref": "#/$defs/gateway" },
+    "litellmDev": { "$ref": "#/$defs/gateway" },
+    "demo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "enabled": { "type": "boolean" } }
+    },
+    "presidio": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "analyzer": { "$ref": "#/$defs/presidioService" },
+        "anonymizer": { "$ref": "#/$defs/presidioService" }
+      }
+    },
+    "searxng": { "$ref": "#/$defs/component" },
+    "xberg": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicaCount": { "type": "integer", "minimum": 1 },
+        "logLevel": { "type": "string" },
+        "maxRequestBodyBytes": { "type": "integer" },
+        "maxMultipartFieldBytes": { "type": "integer" },
+        "resources": { "$ref": "#/$defs/resources" },
+        "egress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "proxy": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "resources": { "$ref": "#/$defs/resources" }
+              }
+            },
+            "dns": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "clusterIP": { "type": "string" },
+                "resources": { "$ref": "#/$defs/resources" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "postgres": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "persistence": { "$ref": "#/$defs/persistence" },
+        "resources": { "$ref": "#/$defs/resources" },
+        "roi": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "minutesSavedPerRequest": { "type": "number" },
+            "minutesSavedPerSession": { "type": "number" },
+            "loadedHourlyCost": { "type": "number" },
+            "valueRealizationFactor": { "type": "number" },
+            "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+          }
+        }
+      }
+    },
+    "pgvector": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "persistence": { "$ref": "#/$defs/persistence" },
+        "resources": { "$ref": "#/$defs/resources" },
+        "connector": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "replicaCount": { "type": "integer", "minimum": 1 },
+            "embeddingModel": { "type": "string" },
+            "embeddingDimensions": { "type": "integer" },
+            "resources": { "$ref": "#/$defs/resources" }
+          }
+        }
+      }
+    },
+    "qdrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "persistence": { "$ref": "#/$defs/optionalPersistence" },
+        "resources": { "$ref": "#/$defs/resources" }
+      }
+    },
+    "prometheus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "persistence": { "$ref": "#/$defs/persistence" },
+        "retentionTime": { "type": "string" },
+        "retentionSize": { "type": "string" },
+        "resources": { "$ref": "#/$defs/resources" },
+        "exporters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "postgres": { "type": "boolean" },
+            "pgvector": { "type": "boolean" },
+            "blackbox": { "type": "boolean" }
+          }
+        },
+        "nodeExporter": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "resources": { "$ref": "#/$defs/resources" }
+          }
+        },
+        "kubernetesTargets": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "enabled": { "type": "boolean" } }
+        }
+      }
+    },
+    "alloy": { "$ref": "#/$defs/component" },
+    "opensearch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicas": { "type": "integer", "minimum": 1 },
+        "javaHeap": { "type": "string", "pattern": "^[0-9]+[mg]$" },
+        "resources": { "$ref": "#/$defs/resources" },
+        "persistence": { "$ref": "#/$defs/persistence" },
+        "ulimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "nofile": { "type": "integer" } }
+        },
+        "retention": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "logs": { "type": "integer" },
+            "metrics": { "type": "integer" },
+            "usage": { "type": "integer" },
+            "audit": { "type": "integer" },
+            "traces": { "type": "integer" }
+          }
+        },
+        "bridgeIntervalSeconds": { "type": "integer", "minimum": 1 },
+        "usageOverlapMinutes": { "type": "integer", "minimum": 0 },
+        "certificate": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "validityDays": { "type": "integer", "minimum": 1 },
+            "renewBeforeDays": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "alertChannelId": { "type": "string" }
+      }
+    },
+    "opensearchDashboards": { "$ref": "#/$defs/component" },
+    "dataPrepper": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "javaOpts": { "type": "string" },
+        "resources": { "$ref": "#/$defs/resources" }
+      }
+    },
+    "grafana": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "host": { "type": "string" },
+        "allowSignUp": { "type": "boolean" },
+        "resources": { "$ref": "#/$defs/resources" },
+        "persistence": { "$ref": "#/$defs/persistence" },
+        "database": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "user": { "type": "string" } }
+        },
+        "loki": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "persistence": { "$ref": "#/$defs/persistence" },
+            "retention": { "type": "string" },
+            "resources": { "$ref": "#/$defs/resources" }
+          }
+        }
+      }
+    },
+    "langfuse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "webHost": { "type": "string" },
+        "s3Host": { "type": "string" },
+        "telemetryEnabled": { "type": "boolean" },
+        "enableExperimentalFeatures": { "type": "boolean" },
+        "s3BatchExportEnabled": { "type": "boolean" },
+        "redisTlsEnabled": { "type": "boolean" },
+        "trustedProxyCount": { "type": "integer" },
+        "disableSignupOnboarding": { "type": "boolean" },
+        "init": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "orgId": { "type": "string" },
+            "orgName": { "type": "string" },
+            "projectId": { "type": "string" },
+            "projectName": { "type": "string" }
+          }
+        },
+        "postgres": { "$ref": "#/$defs/store" },
+        "clickhouse": { "$ref": "#/$defs/store" },
+        "minio": { "$ref": "#/$defs/store" },
+        "redis": { "$ref": "#/$defs/store" },
+        "web": { "$ref": "#/$defs/workload" },
+        "worker": { "$ref": "#/$defs/workload" }
+      }
+    },
+    "lens": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "host": { "type": "string" },
+        "traceRetentionDays": { "type": "integer", "minimum": 1 },
+        "gatewayApiBase": { "type": "string" },
+        "replicaCount": { "type": "integer", "minimum": 1 },
+        "resources": { "$ref": "#/$defs/resources" },
+        "tmpSize": { "type": "string" },
+        "pidsLimit": { "type": "integer", "minimum": 1 },
+        "clickhouse": { "$ref": "#/$defs/store" }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "schedule": { "type": "string", "minLength": 1 },
+        "runOnInstall": { "type": "boolean" },
+        "enforce": { "type": "boolean" },
+        "severity": {
+          "type": "string",
+          "enum": ["UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
+        },
+        "persistence": { "$ref": "#/$defs/optionalPersistence" },
+        "resources": { "$ref": "#/$defs/resources" },
+        "backoffLimit": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "networkPolicies": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "enabled": { "type": "boolean" } }
+    },
+    "jobs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hooks": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "deletePolicy": { "type": "string" }
+          }
+        }
+      }
+    },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" }
+  },
+  "$defs": {
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requests": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": { "type": ["string", "number"] },
+            "memory": { "type": "string" }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpu", "memory"],
+          "properties": {
+            "cpu": { "type": ["string", "number"] },
+            "memory": { "type": "string" }
+          }
+        }
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size": {
+          "type": "string",
+          "pattern": "^[0-9]+(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|K)$"
+        },
+        "storageClass": { "type": "string" },
+        "existingClaim": { "type": "string" }
+      }
+    },
+    "optionalPersistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "When false the component keeps its data in an emptyDir and loses it on restart, which is the upstream behavior for the disposable development cache."
+        },
+        "size": {
+          "type": "string",
+          "pattern": "^[0-9]+(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|K)$"
+        },
+        "storageClass": { "type": "string" },
+        "existingClaim": { "type": "string" }
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicaCount": { "type": "integer", "minimum": 1 },
+        "host": { "type": "string" },
+        "resources": { "$ref": "#/$defs/resources" },
+        "nodeSelector": { "type": "object" },
+        "tolerations": { "type": "array" },
+        "affinity": { "type": "object" }
+      }
+    },
+    "presidioService": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicaCount": { "type": "integer", "minimum": 1 },
+        "nlpEngine": { "type": "string" },
+        "supportedLanguages": { "type": "string" },
+        "workers": { "type": "integer", "minimum": 1 },
+        "resources": { "$ref": "#/$defs/resources" }
+      }
+    },
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicaCount": { "type": "integer", "minimum": 1 },
+        "resources": { "$ref": "#/$defs/resources" }
+      }
+    },
+    "store": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "persistence": { "$ref": "#/$defs/persistence" },
+        "resources": { "$ref": "#/$defs/resources" }
+      }
+    },
+    "gateway": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicaCount": { "type": "integer", "minimum": 0 },
+        "host": { "type": "string" },
+        "resources": { "$ref": "#/$defs/resources" },
+        "autoscaling": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "minReplicas": { "type": "integer", "minimum": 1 },
+            "maxReplicas": { "type": "integer", "minimum": 1 },
+            "targetCPUUtilizationPercentage": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        },
+        "podDisruptionBudget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "minAvailable": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "topologySpread": { "type": "boolean" },
+        "storeModelInDB": { "type": "boolean" },
+        "useV2MigrationResolver": { "type": "boolean" },
+        "otelV2": { "type": "boolean" },
+        "otelTraceExporter": { "type": "string", "enum": ["otlp_grpc", "console"] },
+        "otelCaptureMessageContent": {
+          "type": "string",
+          "enum": ["no_content", "span_only", "span_and_event"]
+        },
+        "forwardedAllowIps": { "type": "string" },
+        "requestTimeout": { "type": "integer", "minimum": 1 },
+        "d3DecisionApiBase": { "type": "string" },
+        "bgeM3ApiBase": { "type": "string" },
+        "branding": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "companyName": { "type": "string" }
+          }
+        },
+        "nodeSelector": { "type": "object" },
+        "tolerations": { "type": "array" },
+        "affinity": { "type": "object" }
+      }
+    }
+  }
+}

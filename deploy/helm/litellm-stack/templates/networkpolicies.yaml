@@ -1,0 +1,230 @@
+{{- /*
+NetworkPolicies.
+
+Upstream relied on Compose networks for isolation: an internal network has no
+gateway out, so a service attached only to it cannot reach the internet, and only
+services on the same network can reach each other. A Kubernetes namespace is flat
+by default, so the same isolation is expressed here as policies.
+
+Shape: one default-deny for every pod of this release, then one policy per trust
+zone listing exactly the flows it needs. The zone table below is the single source
+of truth, and the render fails if an enabled workload appears in no zone, so a new
+component cannot be added without deciding who may talk to it.
+*/ -}}
+{{- if .Values.networkPolicies.enabled }}
+{{- $root := . -}}
+{{- $name := include "litellm-stack.fullname" $root -}}
+{{- $ns := $root.Release.Namespace -}}
+
+{{- /*
+Trust zones. Each entry renders one NetworkPolicy:
+  name        policy name suffix
+  components  workloads the policy selects
+  ingress     list of allowed inbound flows. peers is "any" (outside the
+              namespace), "namespace" (any pod in this namespace), or a list of
+              component names. ports is a list of {port, protocol}.
+  egress      additional outbound flows beyond DNS, same shape.
+  internet    allow outbound 443 to anywhere outside the cluster.
+*/ -}}
+{{- $zones := list
+  (dict "name" "guardrails" "components" (list "presidio-analyzer" "presidio-anonymizer")
+    "ingress" (list
+      (dict "peers" (list "litellm-prod" "litellm-dev") "ports" (list (dict "port" 3000 "protocol" "TCP")))
+      (dict "peers" (list "prometheus" "blackbox") "ports" (list (dict "port" 3000 "protocol" "TCP"))))
+    "egress" (list) "internet" false)
+  (dict "name" "searxng" "components" (list "searxng")
+    "ingress" (list
+      (dict "peers" (list "litellm-prod" "litellm-dev") "ports" (list (dict "port" 8080 "protocol" "TCP")))
+      (dict "peers" (list "prometheus" "blackbox") "ports" (list (dict "port" 8080 "protocol" "TCP"))))
+    "egress" (list) "internet" true)
+  (dict "name" "monitoring" "components" (list "prometheus" "blackbox" "postgres-exporter" "pgvector-exporter" "node-exporter")
+    "ingress" (list
+      (dict "peers" "namespace" "ports" (list (dict "port" 9090 "protocol" "TCP") (dict "port" 9115 "protocol" "TCP") (dict "port" 9187 "protocol" "TCP") (dict "port" 9100 "protocol" "TCP")))
+      (dict "peers" "any" "ports" (list (dict "port" 9090 "protocol" "TCP"))))
+    "egress" (list
+      (dict "peers" "namespace" "ports" (list (dict "port" 4000 "protocol" "TCP") (dict "port" 9187 "protocol" "TCP") (dict "port" 9100 "protocol" "TCP") (dict "port" 3000 "protocol" "TCP") (dict "port" 8080 "protocol" "TCP") (dict "port" 9363 "protocol" "TCP") (dict "port" 4318 "protocol" "TCP") (dict "port" 5432 "protocol" "TCP"))))
+    "internet" false)
+  (dict "name" "telemetry-pipeline" "components" (list "data-prepper")
+    "ingress" (list
+      (dict "peers" (list "litellm-prod" "litellm-dev") "ports" (list (dict "port" 21890 "protocol" "TCP")))
+      (dict "peers" (list "alloy" "alloy-loki") "ports" (list (dict "port" 21892 "protocol" "TCP"))))
+    "egress" (list
+      (dict "peers" (list "opensearch") "ports" (list (dict "port" 9200 "protocol" "TCP"))))
+    "internet" false)
+  (dict "name" "opensearch-dashboards" "components" (list "opensearch-dashboards")
+    "ingress" (list
+      (dict "peers" "any" "ports" (list (dict "port" 5601 "protocol" "TCP")))
+      (dict "peers" (list "opensearch-dashboards-setup") "ports" (list (dict "port" 5601 "protocol" "TCP"))))
+    "egress" (list
+      (dict "peers" (list "opensearch") "ports" (list (dict "port" 9200 "protocol" "TCP"))))
+    "internet" false)
+  (dict "name" "dev-stores" "components" (list "vector-postgres" "qdrant" "litellm-pgvector")
+    "ingress" (list
+      (dict "peers" (list "litellm-prod" "litellm-dev" "litellm-pgvector" "pgvector-migrate" "pgvector-access-init" "pgvector-exporter" "prometheus") "ports" (list (dict "port" 5432 "protocol" "TCP") (dict "port" 6333 "protocol" "TCP") (dict "port" 8000 "protocol" "TCP"))))
+    "egress" (list
+      (dict "peers" (list "vector-postgres" "litellm-dev") "ports" (list (dict "port" 5432 "protocol" "TCP") (dict "port" 4000 "protocol" "TCP"))))
+    "internet" false)
+  (dict "name" "grafana-loki" "components" (list "grafana" "loki")
+    "ingress" (list
+      (dict "peers" "any" "ports" (list (dict "port" 3000 "protocol" "TCP")))
+      (dict "peers" (list "alloy" "alloy-loki") "ports" (list (dict "port" 3100 "protocol" "TCP"))))
+    "egress" (list
+      (dict "peers" (list "prometheus" "loki" "postgres") "ports" (list (dict "port" 9090 "protocol" "TCP") (dict "port" 3100 "protocol" "TCP") (dict "port" 5432 "protocol" "TCP"))))
+    "internet" false)
+  (dict "name" "langfuse" "components" (list "langfuse-web" "langfuse-worker" "langfuse-postgres" "langfuse-clickhouse" "langfuse-minio" "langfuse-redis")
+    "ingress" (list
+      (dict "peers" "any" "ports" (list (dict "port" 3000 "protocol" "TCP") (dict "port" 9000 "protocol" "TCP")))
+      (dict "peers" (list "litellm-prod" "litellm-dev" "prometheus" "langfuse-web" "langfuse-worker" "langfuse-clickhouse-cleanup" "langfuse-minio" "langfuse-redis" "langfuse-clickhouse") "ports" (list (dict "port" 5432 "protocol" "TCP") (dict "port" 8123 "protocol" "TCP") (dict "port" 9000 "protocol" "TCP") (dict "port" 6379 "protocol" "TCP") (dict "port" 9363 "protocol" "TCP"))))
+    "egress" (list
+      (dict "peers" (list "langfuse-postgres" "langfuse-clickhouse" "langfuse-minio" "langfuse-redis") "ports" (list (dict "port" 5432 "protocol" "TCP") (dict "port" 8123 "protocol" "TCP") (dict "port" 9000 "protocol" "TCP") (dict "port" 6379 "protocol" "TCP"))))
+    "internet" false)
+  (dict "name" "opensearch-setup" "components" (list "opensearch-setup" "opensearch-dashboards-setup" "opensearch-bridge")
+    "ingress" (list) "egress" (list
+      (dict "peers" (list "opensearch" "opensearch-dashboards" "postgres" "prometheus") "ports" (list (dict "port" 9200 "protocol" "TCP") (dict "port" 5601 "protocol" "TCP") (dict "port" 5432 "protocol" "TCP") (dict "port" 9090 "protocol" "TCP"))))
+    "internet" false)
+-}}
+
+{{- /*
+Cluster-scoped zones: these need different peers than the table can express
+(the API server, the internet, or a single unnamed gateway), so they are written
+out below. Their component names still register in the coverage check.
+*/ -}}
+{{- $covered := list -}}
+{{- range $zone := $zones -}}
+{{- range $zone.components -}}
+{{- $covered = append $covered . -}}
+{{- end -}}
+{{- end -}}
+{{- /* Components with a hand-written policy below. */ -}}
+{{- range $component := list "litellm-prod" "litellm-dev" "postgres" "opensearch" "alloy" "alloy-loki" "xberg" "xberg-egress-proxy" "xberg-dns" "lens" "lens-clickhouse" "opensearch-certs" "image-security-monitor" "langfuse-preflight" "lens-preflight" "postgres-init" "pgvector-migrate" "pgvector-access-init" "grafana-db-init" "langfuse-clickhouse-cleanup" -}}
+{{- $covered = append $covered $component -}}
+{{- end -}}
+
+{{- /*
+Coverage check. Every workload this release enables must appear in a zone, either
+through the table or in the hand-written list above. A new component that is not
+listed would silently lose all traffic under the default-deny, so fail instead.
+*/ -}}
+{{- $enabled := list -}}
+{{- if .Values.litellmProd.enabled }}{{- $enabled = append $enabled "litellm-prod" -}}{{- end -}}
+{{- if .Values.litellmDev.enabled }}{{- $enabled = append $enabled "litellm-dev" -}}{{- end -}}
+{{- if .Values.searxng.enabled }}{{- $enabled = append $enabled "searxng" -}}{{- end -}}
+{{- if .Values.xberg.enabled }}
+{{- $enabled = append $enabled "xberg" -}}
+{{- if .Values.xberg.egress.proxy.enabled }}{{- $enabled = append $enabled "xberg-egress-proxy" -}}{{- end -}}
+{{- if .Values.xberg.egress.dns.enabled }}{{- $enabled = append $enabled "xberg-dns" -}}{{- end -}}
+{{- end -}}
+{{- /* Always-on components. */ -}}
+{{- range $component := list "presidio-analyzer" "presidio-anonymizer" "postgres" "postgres-init" "prometheus" "blackbox" "postgres-exporter" -}}
+{{- $enabled = append $enabled $component -}}
+{{- end -}}
+{{- if .Values.opensearch.enabled }}
+{{- range $component := list "opensearch" "opensearch-certs" "opensearch-setup" "opensearch-bridge" "opensearch-dashboards" "opensearch-dashboards-setup" "data-prepper" -}}
+{{- $enabled = append $enabled $component -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.alloy.enabled }}{{- $enabled = append $enabled "alloy" -}}{{- end -}}
+{{- if and .Values.grafana.enabled .Values.grafana.loki.enabled }}{{- $enabled = append $enabled "alloy-loki" -}}{{- end -}}
+{{- if .Values.prometheus.nodeExporter.enabled }}{{- $enabled = append $enabled "node-exporter" -}}{{- end -}}
+{{- if .Values.litellmDev.enabled }}
+{{- range $component := list "vector-postgres" "qdrant" "litellm-pgvector" "pgvector-migrate" "pgvector-access-init" "pgvector-exporter" -}}
+{{- $enabled = append $enabled $component -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.grafana.enabled }}
+{{- $enabled = append $enabled "grafana" -}}
+{{- $enabled = append $enabled "grafana-db-init" -}}
+{{- if .Values.grafana.loki.enabled }}{{- $enabled = append $enabled "loki" -}}{{- end -}}
+{{- end -}}
+{{- if .Values.langfuse.enabled }}
+{{- range $component := list "langfuse-web" "langfuse-worker" "langfuse-postgres" "langfuse-clickhouse" "langfuse-minio" "langfuse-redis" "langfuse-clickhouse-cleanup" "langfuse-preflight" -}}
+{{- $enabled = append $enabled $component -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.lens.enabled }}
+{{- range $component := list "lens" "lens-clickhouse" "lens-preflight" -}}
+{{- $enabled = append $enabled $component -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.security.enabled }}{{- $enabled = append $enabled "image-security-monitor" -}}{{- end -}}
+{{- range $component := $enabled -}}
+{{- if not (has $component $covered) -}}
+{{- fail (printf "networkPolicies: component %q has no policy; add it to a zone in templates/networkpolicies.yaml or set networkPolicies.enabled=false" $component) -}}
+{{- end -}}
+{{- end -}}
+---
+{{/* Default deny for every pod of this release. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-default-deny
+  namespace: {{ $ns }}
+  labels:
+    {{- include "litellm-stack.labels" $root | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "litellm-stack.selectorLabels" $root | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+{{- /* One policy per zone in the table. */}}
+{{- range $zone := $zones }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-{{ $zone.name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" (first $zone.components)) | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      # One policy may cover several workloads that share a trust level.
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          {{- range $zone.components }}
+          - {{ . }}
+          {{- end }}
+      - key: app.kubernetes.io/instance
+        operator: In
+        values:
+          - {{ $root.Release.Name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  {{- with $zone.ingress }}
+  ingress:
+    {{- range . }}
+    - from:
+        {{- include "litellm-stack.policyPeers" (dict "context" $root "peers" .peers) | nindent 8 }}
+      ports:
+        {{- include "litellm-stack.policyPorts" (dict "ports" .ports) | nindent 8 }}
+    {{- end }}
+  {{- end }}
+  egress:
+    {{- include "litellm-stack.dnsEgress" $root | nindent 4 }}
+    {{- range $zone.egress }}
+    - to:
+        {{- include "litellm-stack.policyPeers" (dict "context" $root "peers" .peers) | nindent 8 }}
+      ports:
+        {{- include "litellm-stack.policyPorts" (dict "ports" .ports) | nindent 8 }}
+    {{- end }}
+    {{- if $zone.internet }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              # Private ranges stay unreachable even through an allowlisted
+              # destination, matching the squid configuration upstream.
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+    {{- end }}
+{{- end }}
+{{- end }}

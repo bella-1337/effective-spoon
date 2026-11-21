@@ -1,0 +1,332 @@
+{{- /*
+lens profile: LiteLLM Lens agent-trace analysis with its own ClickHouse.
+
+Off by default, and never a dependency of a gateway. Upstream started both
+gateways through prepare_runtime_config.py, which enabled the Lens exporter only
+while Lens resolved and refused to start on a half-configured connection. That
+behavior is preserved in the gateway template, which enables the integration only
+when the lens profile is on and the tokens are present.
+
+Lens publishes no release image; the pinned release-candidate commit is built
+into the in-house registry (see deploy/images) rather than pulled from a vendor.
+*/ -}}
+{{- if .Values.lens.enabled }}
+{{- $root := . -}}
+{{- $secret := include "litellm-stack.secretName" $root -}}
+{{- $lensHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "lens") -}}
+{{- $chHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "lens-clickhouse") -}}
+{{- $publicHost := include "litellm-stack.host" (dict "context" $root "service" "lens" "override" (default $root.Values.lens.host $root.Values.ingress.hosts.lens)) -}}
+---
+{{- /* 
+Preflight: the upstream lens-preflight checks. Each secret must be 32-512
+characters and the three must be distinct; the render-time check in the Secret
+template catches the same collisions earlier, and this keeps the runtime
+guarantee.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "lens-preflight") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "lens-preflight") | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: {{ $root.Values.jobs.hooks.deletePolicy }}
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "lens-preflight") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: preflight
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.postgresModern) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              require_secret() {
+                length=$$(printf '%s' "$$2" | wc -c)
+                [ "$$length" -ge 32 ] && [ "$$length" -le 512 ] || { echo "Set $$1 to 32-512 characters to use the lens profile" >&2; exit 64; }
+              }
+              require_secret LENS_ADMIN_TOKEN "$$LENS_ADMIN_TOKEN"
+              require_secret LENS_CLICKHOUSE_PASSWORD "$$LENS_CLICKHOUSE_PASSWORD"
+              require_secret LITELLM_LENS_SERVICE_TOKEN "$$LITELLM_LENS_SERVICE_TOKEN"
+              require_secret LENS_GATEWAY_SECRET "$$LENS_GATEWAY_SECRET"
+              [ "$$LENS_ADMIN_TOKEN" != "$$LITELLM_LENS_SERVICE_TOKEN" ] && [ "$$LENS_ADMIN_TOKEN" != "$$LENS_GATEWAY_SECRET" ] && [ "$$LITELLM_LENS_SERVICE_TOKEN" != "$$LENS_GATEWAY_SECRET" ] || { echo "Use different values for LENS_ADMIN_TOKEN, LITELLM_LENS_SERVICE_TOKEN, and LENS_GATEWAY_SECRET" >&2; exit 64; }
+              if [ -n "$$LENS_GATEWAY_API_BASE$$LENS_GATEWAY_API_KEY" ]; then
+                [ -n "$$LENS_GATEWAY_API_BASE" ] && [ -n "$$LENS_GATEWAY_API_KEY" ] || { echo "Set both lens.gatewayApiBase and secrets.values.LENS_GATEWAY_API_KEY, or neither" >&2; exit 64; }
+              fi
+          env:
+            - name: LENS_GATEWAY_API_BASE
+              value: {{ $root.Values.lens.gatewayApiBase | quote }}
+            {{- range $key := list "LENS_ADMIN_TOKEN" "LENS_CLICKHOUSE_PASSWORD" "LITELLM_LENS_SERVICE_TOKEN" "LENS_GATEWAY_SECRET" "LENS_GATEWAY_API_KEY" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ $key }}
+                  optional: true
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+---
+{{- /* 
+Lens ClickHouse. Reachable only from the Lens pods: upstream put it alone on an
+internal lens-storage network so nothing else, including Prometheus, could read
+the trace database. The NetworkPolicy carries that rule.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $chHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "lens-clickhouse") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "lens-clickhouse") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8123
+      targetPort: http
+    - name: native
+      port: 9000
+      targetPort: native
+    - name: keeper
+      port: 9181
+      targetPort: keeper
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $chHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "lens-clickhouse") | nindent 4 }}
+spec:
+  serviceName: {{ $chHost }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "lens-clickhouse") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "lens-clickhouse") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: clickhouse
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.clickhouseLens) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            - name: CLICKHOUSE_DB
+              value: lens
+            - name: CLICKHOUSE_USER
+              value: lens
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LENS_CLICKHOUSE_PASSWORD
+            # Lens creates its own bounded read-only users for ad-hoc SQL.
+            - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 8123
+            - name: native
+              containerPort: 9000
+            - name: keeper
+              containerPort: 9181
+          volumeMounts:
+            - name: config
+              mountPath: /etc/clickhouse-server/config.d/lens-keeper.xml
+              subPath: keeper.xml
+              readOnly: true
+            - name: config
+              mountPath: /etc/clickhouse-server/config.d/lens-logging.xml
+              subPath: logging.xml
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/clickhouse
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - >-
+                  clickhouse-client --user lens --password "$CLICKHOUSE_PASSWORD" --query 'SELECT 1' >/dev/null
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.lens.clickhouse.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-lens-clickhouse
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "lens-clickhouse") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "litellm-stack.storageClass" (dict "context" $root "local" $root.Values.lens.clickhouse.persistence.storageClass) | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ $root.Values.lens.clickhouse.persistence.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $lensHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "lens") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "lens") | nindent 4 }}
+  ports:
+    - name: http
+      port: 4318
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $lensHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "lens") | nindent 4 }}
+spec:
+  replicas: {{ $root.Values.lens.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "lens") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "lens") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: lens
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.lens) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            - name: LENS_MODE
+              value: standalone
+            - name: LENS_PUBLIC_URL
+              value: https://{{ $publicHost }}
+            - name: CLICKHOUSE_HOST
+              value: {{ $chHost }}
+            - name: CLICKHOUSE_USER
+              value: lens
+            - name: CLICKHOUSE_DATABASE
+              value: lens
+            - name: AGENT_TRACING_RETENTION_DAYS
+              value: {{ $root.Values.lens.traceRetentionDays | quote }}
+            # Gateway connection: LiteLLM authenticates to Lens with the service
+            # token and signs each dashboard user's identity with the gateway
+            # secret.
+            - name: LENS_GATEWAY_API_BASE
+              value: {{ $root.Values.lens.gatewayApiBase | quote }}
+            - name: LENS_GATEWAY_URL
+              value: {{ $root.Values.lens.gatewayApiBase | quote }}
+            {{- range $key := list "LENS_ADMIN_TOKEN" "LENS_CLICKHOUSE_PASSWORD" "LITELLM_LENS_SERVICE_TOKEN" "LENS_GATEWAY_SECRET" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ $key }}
+            {{- end }}
+            - name: LENS_GATEWAY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LENS_GATEWAY_API_KEY
+                  optional: true
+          ports:
+            - name: http
+              containerPort: 4318
+          volumeMounts:
+            # The image is read-only and writes only to a bounded tmpfs, matching
+            # the upstream LENS_TMP_SIZE cap.
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 18
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: {{ $root.Values.lens.resources.requests.cpu }}
+              memory: {{ $root.Values.lens.resources.requests.memory }}
+            limits:
+              cpu: {{ $root.Values.lens.resources.limits.cpu }}
+              memory: {{ $root.Values.lens.resources.limits.memory }}
+          {{- /*
+          Lens budgeted its process count upstream (LENS_PIDS_LIMIT). Kubernetes
+          has no per-container PID limit; the kubelet's --pod-max-pids is the
+          cluster-level equivalent, so the value is documented in values.yaml
+          rather than silently ignored here.
+          */}}
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ $root.Values.lens.tmpSize }}
+{{- end }}

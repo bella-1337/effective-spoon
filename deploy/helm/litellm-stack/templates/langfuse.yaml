@@ -1,0 +1,747 @@
+{{- /*
+langfuse profile: Langfuse web and worker with their stores.
+
+Off by default. The upstream preflight refused to start the profile until every
+required value was set, and refused an encryption key that was not exactly 64 hex
+characters. Both checks are reproduced: the Secret template fails the render for
+a bad encryption key, and the preflight Job keeps the runtime behavior so a
+misconfigured release cannot boot a half-configured Langfuse.
+
+Langfuse is optional for the gateways. nothing here is a dependency of
+litellm-prod; the gateway enables the callbacks only when the langfuse values are
+present.
+*/ -}}
+{{- if .Values.langfuse.enabled }}
+{{- $root := . -}}
+{{- $secret := include "litellm-stack.secretName" $root -}}
+{{- $env := dict
+      "HOSTNAME" "0.0.0.0"
+      "TZ" "UTC"
+      "CLICKHOUSE_USER" "langfuse"
+      "CLICKHOUSE_CLUSTER_ENABLED" "false"
+      "LANGFUSE_S3_EVENT_UPLOAD_BUCKET" "langfuse"
+      "LANGFUSE_S3_EVENT_UPLOAD_REGION" "auto"
+      "LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID" "langfuse"
+      "LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE" "true"
+      "LANGFUSE_S3_MEDIA_UPLOAD_BUCKET" "langfuse"
+      "LANGFUSE_S3_MEDIA_UPLOAD_REGION" "auto"
+      "LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID" "langfuse"
+      "LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE" "true"
+      "REDIS_HOST" (include "litellm-stack.serviceHost" (dict "context" $root "component" "langfuse-redis"))
+      "REDIS_PORT" "6379" -}}
+{{- $webHost := include "litellm-stack.host" (dict "context" $root "service" "langfuse" "override" (default $root.Values.langfuse.webHost $root.Values.ingress.hosts.langfuse)) -}}
+{{- $s3Host := include "litellm-stack.host" (dict "context" $root "service" "langfuse-s3" "override" (default $root.Values.langfuse.s3Host $root.Values.ingress.hosts.langfuseS3)) -}}
+{{- $pgHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "langfuse-postgres") -}}
+{{- $chHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "langfuse-clickhouse") -}}
+{{- $minioHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "langfuse-minio") -}}
+{{- $redisHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "langfuse-redis") -}}
+---
+{{- /* 
+Preflight: the upstream langfuse-preflight checks, run as a hook so a
+misconfigured release fails before any Langfuse pod starts.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "langfuse-preflight") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-preflight") | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: {{ $root.Values.jobs.hooks.deletePolicy }}
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-preflight") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: preflight
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.postgresModern) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              test -n "$$LANGFUSE_POSTGRES_PASSWORD" || { echo "Set secrets.values.LANGFUSE_POSTGRES_PASSWORD to use the langfuse profile" >&2; exit 64; }
+              test -n "$$LANGFUSE_CLICKHOUSE_PASSWORD" || { echo "Set secrets.values.LANGFUSE_CLICKHOUSE_PASSWORD to use the langfuse profile" >&2; exit 64; }
+              test -n "$$LANGFUSE_REDIS_AUTH" || { echo "Set secrets.values.LANGFUSE_REDIS_AUTH to use the langfuse profile" >&2; exit 64; }
+              test -n "$$LANGFUSE_MINIO_PASSWORD" || { echo "Set secrets.values.LANGFUSE_MINIO_PASSWORD to use the langfuse profile" >&2; exit 64; }
+              test -n "$$LANGFUSE_NEXTAUTH_SECRET" || { echo "Set secrets.values.LANGFUSE_NEXTAUTH_SECRET to use the langfuse profile" >&2; exit 64; }
+              test -n "$$LANGFUSE_SALT" || { echo "Set secrets.values.LANGFUSE_SALT to use the langfuse profile" >&2; exit 64; }
+              printf '%s' "$$LANGFUSE_ENCRYPTION_KEY" | grep -Eq '^[[:xdigit:]]{64}$' || { echo "Set secrets.values.LANGFUSE_ENCRYPTION_KEY to exactly 64 hexadecimal characters to use the langfuse profile" >&2; exit 64; }
+              test -n "$$LANGFUSE_PUBLIC_KEY" || { echo "Set secrets.values.LANGFUSE_PUBLIC_KEY to use the langfuse profile" >&2; exit 64; }
+              test -n "$$LANGFUSE_SECRET_KEY" || { echo "Set secrets.values.LANGFUSE_SECRET_KEY to use the langfuse profile" >&2; exit 64; }
+              test -n "$$LANGFUSE_USER_ID_SALT" || { echo "Set secrets.values.LANGFUSE_USER_ID_SALT to use the langfuse profile" >&2; exit 64; }
+              test -n "$$LANGFUSE_INIT_USER_EMAIL" || { echo "Set secrets.values.LANGFUSE_INIT_USER_EMAIL to use the langfuse profile" >&2; exit 64; }
+              test -n "$$LANGFUSE_INIT_USER_NAME" || { echo "Set secrets.values.LANGFUSE_INIT_USER_NAME to use the langfuse profile" >&2; exit 64; }
+              test -n "$$LANGFUSE_INIT_USER_PASSWORD" || { echo "Set secrets.values.LANGFUSE_INIT_USER_PASSWORD to use the langfuse profile" >&2; exit 64; }
+          env:
+            {{- range $key := list "LANGFUSE_POSTGRES_PASSWORD" "LANGFUSE_CLICKHOUSE_PASSWORD" "LANGFUSE_REDIS_AUTH" "LANGFUSE_MINIO_PASSWORD" "LANGFUSE_NEXTAUTH_SECRET" "LANGFUSE_SALT" "LANGFUSE_ENCRYPTION_KEY" "LANGFUSE_PUBLIC_KEY" "LANGFUSE_SECRET_KEY" "LANGFUSE_USER_ID_SALT" "LANGFUSE_INIT_USER_EMAIL" "LANGFUSE_INIT_USER_NAME" "LANGFUSE_INIT_USER_PASSWORD" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ $key }}
+                  optional: true
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+---
+{{/* Langfuse PostgreSQL. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $pgHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-postgres") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "langfuse-postgres") | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $pgHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-postgres") | nindent 4 }}
+spec:
+  serviceName: {{ $pgHost }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "langfuse-postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-postgres") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.postgresModern) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            - name: POSTGRES_DB
+              value: langfuse
+            - name: POSTGRES_USER
+              value: langfuse
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_POSTGRES_PASSWORD
+            - name: TZ
+              value: UTC
+            - name: PGTZ
+              value: UTC
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.langfuse.postgres.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-postgres") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "litellm-stack.storageClass" (dict "context" $root "local" $root.Values.langfuse.postgres.persistence.storageClass) | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ $root.Values.langfuse.postgres.persistence.size }}
+---
+{{/* Langfuse ClickHouse: trace storage. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $chHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-clickhouse") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "langfuse-clickhouse") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8123
+      targetPort: http
+    - name: native
+      port: 9000
+      targetPort: native
+    - name: metrics
+      port: 9363
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $chHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-clickhouse") | nindent 4 }}
+spec:
+  serviceName: {{ $chHost }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "langfuse-clickhouse") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-clickhouse") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: clickhouse
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.clickhouseLangfuse) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            - name: CLICKHOUSE_DB
+              value: default
+            - name: CLICKHOUSE_USER
+              value: langfuse
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_CLICKHOUSE_PASSWORD
+          ports:
+            - name: http
+              containerPort: 8123
+            - name: native
+              containerPort: 9000
+            - name: metrics
+              containerPort: 9363
+          volumeMounts:
+            - name: config
+              mountPath: /etc/clickhouse-server/config.d/observability.xml
+              subPath: observability.xml
+              readOnly: true
+            - name: config
+              mountPath: /etc/clickhouse-server/users.d/observability.xml
+              subPath: users-observability.xml
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/clickhouse
+            - name: logs
+              mountPath: /var/log/clickhouse-server
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.langfuse.clickhouse.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-langfuse-clickhouse
+        - name: logs
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-clickhouse") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "litellm-stack.storageClass" (dict "context" $root "local" $root.Values.langfuse.clickhouse.persistence.storageClass) | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ $root.Values.langfuse.clickhouse.persistence.size }}
+---
+{{/* One-shot cleanup of ClickHouse system log tables. */}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "langfuse-clickhouse-cleanup") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-clickhouse") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "25"
+    helm.sh/hook-delete-policy: {{ $root.Values.jobs.hooks.deletePolicy }}
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-clickhouse") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cleanup
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.clickhouseLangfuse) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              until clickhouse-client --host "$$CH_HOST" --user "$$CLICKHOUSE_USER" --password "$$CLICKHOUSE_PASSWORD" --query 'SELECT 1' >/dev/null 2>&1; do
+                echo "waiting for ClickHouse"
+                sleep 5
+              done
+              exec clickhouse-client \
+                --host "$$CH_HOST" \
+                --user "$$CLICKHOUSE_USER" \
+                --password "$$CLICKHOUSE_PASSWORD" \
+                --multiquery \
+                --queries-file /cleanup/cleanup-system-logs.sql
+          env:
+            - name: CH_HOST
+              value: {{ $chHost }}
+            - name: CLICKHOUSE_USER
+              value: langfuse
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_CLICKHOUSE_PASSWORD
+          volumeMounts:
+            - name: cleanup
+              mountPath: /cleanup
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1
+              memory: 512Mi
+      volumes:
+        - name: cleanup
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-langfuse-clickhouse
+---
+{{/* MinIO: event and media object storage. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $minioHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-minio") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "langfuse-minio") | nindent 4 }}
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: s3
+    - name: console
+      port: 9001
+      targetPort: console
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $minioHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-minio") | nindent 4 }}
+spec:
+  serviceName: {{ $minioHost }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "langfuse-minio") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-minio") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: minio
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.minio) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          # The upstream command creates the bucket directory before serving.
+          command:
+            - sh
+            - -c
+            - mkdir -p /data/langfuse && exec minio server --address ":9000" --console-address ":9001" /data
+          env:
+            - name: MINIO_ROOT_USER
+              value: langfuse
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_MINIO_PASSWORD
+          ports:
+            - name: s3
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: s3
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.langfuse.minio.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-minio") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "litellm-stack.storageClass" (dict "context" $root "local" $root.Values.langfuse.minio.persistence.storageClass) | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ $root.Values.langfuse.minio.persistence.size }}
+---
+{{/* Redis: Langfuse queue and cache. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $redisHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-redis") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "langfuse-redis") | nindent 4 }}
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $redisHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-redis") | nindent 4 }}
+spec:
+  serviceName: {{ $redisHost }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "langfuse-redis") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-redis") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.redis) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          # noeviction matches upstream: dropping queued events silently would
+          # lose traces Langfuse has already accepted.
+          command:
+            - redis-server
+            - --requirepass
+            - $(REDIS_AUTH)
+            - --maxmemory-policy
+            - noeviction
+          env:
+            - name: REDIS_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_REDIS_AUTH
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "REDISCLI_AUTH=\"$REDIS_AUTH\" redis-cli ping | grep -q PONG"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.langfuse.redis.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-redis") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "litellm-stack.storageClass" (dict "context" $root "local" $root.Values.langfuse.redis.persistence.storageClass) | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ $root.Values.langfuse.redis.persistence.size }}
+---
+
+---
+{{/* Langfuse worker: consumes the ingestion queue. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "langfuse-worker") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-worker") | nindent 4 }}
+spec:
+  replicas: {{ $root.Values.langfuse.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "langfuse-worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-worker") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: langfuse-worker
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.langfuseWorker) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            {{- include "litellm-stack.langfuseEnv" (dict "root" $root "secret" $secret "webHost" $webHost "pgHost" $pgHost "chHost" $chHost "minioHost" $minioHost "redisHost" $redisHost) | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 3030
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.langfuse.worker.resources | nindent 12 }}
+---
+{{/* Langfuse web UI and API. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "langfuse-web") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-web") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "langfuse-web") | nindent 4 }}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "langfuse-web") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-web") | nindent 4 }}
+spec:
+  replicas: {{ $root.Values.langfuse.web.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "langfuse-web") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "langfuse-web") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: langfuse-web
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.langfuseWeb) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            {{- include "litellm-stack.langfuseEnv" (dict "root" $root "secret" $secret "webHost" $webHost "pgHost" $pgHost "chHost" $chHost "minioHost" $minioHost "redisHost" $redisHost) | nindent 12 }}
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_NEXTAUTH_SECRET
+            # Uploads the browser makes must point at the public S3 host, while
+            # the worker keeps using the in-cluster endpoint.
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT
+              value: https://{{ $s3Host }}
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT
+              value: http://{{ $minioHost }}:9000
+            - name: LANGFUSE_INIT_ORG_ID
+              value: {{ $root.Values.langfuse.init.orgId | quote }}
+            - name: LANGFUSE_INIT_ORG_NAME
+              value: {{ $root.Values.langfuse.init.orgName | quote }}
+            - name: LANGFUSE_INIT_PROJECT_ID
+              value: {{ $root.Values.langfuse.init.projectId | quote }}
+            - name: LANGFUSE_INIT_PROJECT_NAME
+              value: {{ $root.Values.langfuse.init.projectName | quote }}
+            - name: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_PUBLIC_KEY
+            - name: LANGFUSE_INIT_PROJECT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_SECRET_KEY
+            - name: LANGFUSE_INIT_USER_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_INIT_USER_EMAIL
+            - name: LANGFUSE_INIT_USER_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_INIT_USER_NAME
+            - name: LANGFUSE_INIT_USER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_INIT_USER_PASSWORD
+            - name: LANGFUSE_TRUSTED_PROXY_COUNT
+              value: {{ $root.Values.langfuse.trustedProxyCount | quote }}
+            # Private stack: users come only from LANGFUSE_INIT_USER_*.
+            - name: AUTH_DISABLE_SIGNUP
+              value: "true"
+            - name: LANGFUSE_DISABLE_SIGNUP_ONBOARDING
+              value: {{ $root.Values.langfuse.disableSignupOnboarding | quote }}
+          ports:
+            - name: http
+              containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /api/public/health?failIfDatabaseUnavailable=true
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 18
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.langfuse.web.resources | nindent 12 }}
+{{- end }}

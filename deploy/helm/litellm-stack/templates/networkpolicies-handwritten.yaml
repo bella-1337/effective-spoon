@@ -1,0 +1,486 @@
+{{- /*
+NetworkPolicies whose peer set the zone table cannot express.
+
+Kept in a separate file so the table in networkpolicies.yaml stays readable. The
+coverage check there registers these component names.
+*/ -}}
+{{- if .Values.networkPolicies.enabled }}
+{{- $root := . -}}
+{{- $name := include "litellm-stack.fullname" $root -}}
+{{- $ns := $root.Release.Namespace -}}
+{{- if .Values.litellmProd.enabled }}
+{{- /* Production gateway: ingress controller in, dependencies out. */}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-litellm-prod
+  namespace: {{ $ns }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "litellm-prod") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "litellm-prod") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # The cluster ingress controller reaches the proxy from its own namespace.
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 4000
+  egress:
+    {{- include "litellm-stack.dnsEgress" $root | nindent 4 }}
+    - to:
+        {{- range $component := list "postgres" "presidio-analyzer" "presidio-anonymizer" "searxng" "data-prepper" "xberg" "opensearch" "langfuse-web" "lens" "prometheus" }}
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" $component) | nindent 14 }}
+        {{- end }}
+    {{- /*
+    Model providers, the remote GPU host, and the optional analysis gateway are
+    outside the cluster. 443 covers hosted providers; 8443 and 9443 are the
+    D3-mini and BGE-M3 endpoints on the gpu-host stack.
+*/}}
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 8443
+        - protocol: TCP
+          port: 9443
+{{- end }}
+{{- if .Values.litellmDev.enabled }}
+{{- /* Development gateway. */}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-litellm-dev
+  namespace: {{ $ns }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "litellm-dev") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "litellm-dev") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 4000
+    # The pgvector connector calls the dev gateway's embedding endpoint.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "litellm-pgvector") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 4000
+  egress:
+    {{- include "litellm-stack.dnsEgress" $root | nindent 4 }}
+    - to:
+        {{- range $component := list "postgres" "presidio-analyzer" "presidio-anonymizer" "searxng" "data-prepper" "xberg" "opensearch" "langfuse-web" "lens" "prometheus" "vector-postgres" "litellm-pgvector" "qdrant" }}
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" $component) | nindent 14 }}
+        {{- end }}
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 8443
+        - protocol: TCP
+          port: 9443
+{{- end }}
+{{- /* LiteLLM database. */}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-postgres
+  namespace: {{ $ns }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "postgres") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "postgres") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        {{- range $component := list "litellm-prod" "litellm-dev" "postgres-init" "postgres-exporter" "opensearch-bridge" "grafana-db-init" "grafana" "pgvector-migrate" }}
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" $component) | nindent 14 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 5432
+  egress:
+    {{- include "litellm-stack.dnsEgress" $root | nindent 4 }}
+{{- if .Values.opensearch.enabled }}
+{{- /* OpenSearch cluster. Only the stack's own services write to it. */}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-opensearch
+  namespace: {{ $ns }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "opensearch") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        {{- range $component := list "opensearch-setup" "opensearch-bridge" "opensearch-dashboards" "data-prepper" "litellm-prod" "litellm-dev" }}
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" $component) | nindent 14 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 9200
+  egress:
+    {{- include "litellm-stack.dnsEgress" $root | nindent 4 }}
+{{- end }}
+{{- if .Values.alloy.enabled }}
+{{- /*
+Log collector. It reads the pod log API, served by kubelet on every node, which is
+outside the namespace and not expressible as a pod selector.
+*/}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-alloy
+  namespace: {{ $ns }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "alloy") | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - alloy
+          {{- if and $root.Values.grafana.enabled $root.Values.grafana.loki.enabled }}
+          - alloy-loki
+          {{- end }}
+      - key: app.kubernetes.io/instance
+        operator: In
+        values:
+          - {{ $root.Release.Name }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- include "litellm-stack.dnsEgress" $root | nindent 4 }}
+    - to:
+        {{- range $component := list "data-prepper" "loki" }}
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" $component) | nindent 14 }}
+        {{- end }}
+    # kubelet's log endpoint.
+    - ports:
+        - protocol: TCP
+          port: 10250
+{{- end }}
+{{- if .Values.xberg.enabled }}
+{{- /*
+Xberg sandbox: the strictest policy in the chart. Only the gateways may call in,
+and the pod may reach only its egress proxy plus DNS. This is the Kubernetes
+equivalent of an internal network with no gateway out, paired with an
+allowlisting proxy.
+*/}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-xberg
+  namespace: {{ $ns }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "xberg") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "xberg") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        {{- if .Values.litellmProd.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "litellm-prod") | nindent 14 }}
+        {{- end }}
+        {{- if .Values.litellmDev.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "litellm-dev") | nindent 14 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 8001
+  egress:
+    {{- include "litellm-stack.dnsEgress" $root | nindent 4 }}
+    {{- if .Values.xberg.egress.dns.enabled }}
+    # The pinned resolver, and only it, answers lookups.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "xberg-dns") | nindent 14 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- end }}
+    {{- if .Values.xberg.egress.proxy.enabled }}
+    # The egress proxy is the only route out.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "xberg-egress-proxy") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 3128
+    {{- end }}
+{{- if .Values.xberg.egress.proxy.enabled }}
+{{- /*
+The proxy itself reaches the internet. The allowlist it enforces is an
+application-layer control in squid.conf; a NetworkPolicy cannot pin those
+destinations without hard-coding their addresses.
+*/}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-xberg-egress-proxy
+  namespace: {{ $ns }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "xberg-egress-proxy") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "xberg-egress-proxy") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "xberg") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 3128
+  egress:
+    {{- include "litellm-stack.dnsEgress" $root | nindent 4 }}
+    - ports:
+        - protocol: TCP
+          port: 443
+{{- end }}
+{{- if .Values.xberg.egress.dns.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-xberg-dns
+  namespace: {{ $ns }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "xberg-dns") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "xberg-dns") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "xberg") | nindent 14 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+  egress:
+    # Upstream forwarding goes to the cluster resolver; the deny-root zone keeps
+    # every other name local.
+    {{- include "litellm-stack.dnsEgress" $root | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- if .Values.lens.enabled }}
+{{- /*
+Lens storage: the trace database answers only Lens. Upstream had a dedicated
+internal network that excluded even Prometheus.
+*/}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-lens-clickhouse
+  namespace: {{ $ns }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "lens-clickhouse") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "lens-clickhouse") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "lens") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8123
+        - protocol: TCP
+          port: 9000
+  egress:
+    {{- include "litellm-stack.dnsEgress" $root | nindent 4 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-lens
+  namespace: {{ $ns }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "lens") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "lens") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 4318
+    # Both gateways push traces and serve the dashboard's Lens page.
+    - from:
+        {{- range $component := list "litellm-prod" "litellm-dev" }}
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" $component) | nindent 14 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 4318
+  egress:
+    {{- include "litellm-stack.dnsEgress" $root | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "lens-clickhouse") | nindent 14 }}
+    {{- if .Values.lens.gatewayApiBase }}
+    # Optional analysis models through a LiteLLM gateway.
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 4000
+    {{- end }}
+{{- end }}
+{{- /*
+Jobs and preflight checks need no inbound traffic. They get an explicit
+egress-only policy so the coverage check finds them and their outbound calls are
+limited to the services they initialize.
+*/}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-init-jobs
+  namespace: {{ $ns }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-certs") | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - opensearch-certs
+          - postgres-init
+          - pgvector-migrate
+          - pgvector-access-init
+          - grafana-db-init
+          - langfuse-preflight
+          - langfuse-clickhouse-cleanup
+          - lens-preflight
+      - key: app.kubernetes.io/instance
+        operator: In
+        values:
+          - {{ $root.Release.Name }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- include "litellm-stack.dnsEgress" $root | nindent 4 }}
+    # The certificate Job talks to the Kubernetes API to publish its Secret.
+    # The jobs reach the stores they initialize and the services they probe.
+    - to:
+        {{- range $component := list "postgres" "vector-postgres" "litellm-dev" "prometheus" "langfuse-clickhouse" }}
+        - podSelector:
+            matchLabels:
+              {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" $component) | nindent 14 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 4000
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 9000
+    - ports:
+        - protocol: TCP
+          port: 443
+{{- if .Values.security.enabled }}
+{{- /* Image scanner: pulls images from the registry and writes reports. */}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-image-security-monitor
+  namespace: {{ $ns }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "image-security-monitor") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "image-security-monitor") | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- include "litellm-stack.dnsEgress" $root | nindent 4 }}
+    - ports:
+        - protocol: TCP
+          port: 443
+{{- end }}
+{{- end }}

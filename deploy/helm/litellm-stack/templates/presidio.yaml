@@ -1,0 +1,111 @@
+{{- /*
+Presidio guardrails.
+
+Upstream calls these without a profile, so they run in both environments. They
+stay internal-only: no Ingress, and the NetworkPolicy admits traffic from the
+gateways and Prometheus alone.
+*/ -}}
+{{- $root := . -}}
+{{- range $component := list "presidio-analyzer" "presidio-anonymizer" }}
+{{- $isAnalyzer := eq $component "presidio-analyzer" -}}
+{{- $config := ternary $root.Values.presidio.analyzer $root.Values.presidio.anonymizer $isAnalyzer -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" $component) }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" $component) | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" $component) }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ $config.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" $component) | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: {{ $component }}
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" (ternary $root.Values.images.presidioAnalyzer $root.Values.images.presidioAnonymizer $isAnalyzer)) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            # Each gunicorn worker is synchronous; one large prompt otherwise
+            # serializes the PII guardrail for every caller.
+            - name: WORKERS
+              value: {{ $config.workers | quote }}
+            {{- if $isAnalyzer }}
+            - name: PRESIDIO_NLP_ENGINE
+              value: {{ $config.nlpEngine | quote }}
+            - name: PRESIDIO_SUPPORTED_LANGUAGES
+              value: {{ $config.supportedLanguages | quote }}
+            - name: NLP_CONF_FILE
+              value: /app/presidio_analyzer/conf/litellm-analyzer.yaml
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 3000
+          {{- if $isAnalyzer }}
+          volumeMounts:
+            - name: config
+              mountPath: /app/presidio_analyzer/conf/litellm-analyzer.yaml
+              subPath: analyzer.yaml
+              readOnly: true
+          {{- end }}
+          # Probed on /health, not /: the upstream troubleshooting note calls
+          # this out because / returns 404.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $config.resources | nindent 12 }}
+      {{- if $isAnalyzer }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-presidio
+      {{- end }}
+      {{- include "litellm-stack.nodeSelector" (dict "context" $root "component" $config) | nindent 6 }}
+      {{- include "litellm-stack.tolerations" (dict "context" $root "component" $config) | nindent 6 }}
+      {{- include "litellm-stack.affinity" (dict "context" $root "component" $config) | nindent 6 }}
+---
+{{ end }}

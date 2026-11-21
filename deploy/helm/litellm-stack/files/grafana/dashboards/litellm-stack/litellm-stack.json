@@ -1,0 +1,184 @@
+{
+  "uid": "litellm-stack",
+  "title": "LiteLLM Stack (dev/prod)",
+  "tags": [
+    "litellm",
+    "single-node"
+  ],
+  "timezone": "utc",
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROM",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Prometheus",
+          "value": "prom"
+        }
+      },
+      {
+        "name": "job",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROM}"
+        },
+        "query": "label_values(up{job=~\"litellm-(prod|dev)\"}, job)",
+        "includeAll": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Requests / min",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (job, model) (rate(litellm_requests_metric_total{job=~\"$job\"}[5m])) * 60",
+          "legendFormat": "{{job}} · {{model}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Latency p95/p99",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, job) (rate(litellm_request_total_latency_metric_bucket{job=~\"$job\"}[5m])))",
+          "legendFormat": "p95 {{job}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, job) (rate(litellm_request_total_latency_metric_bucket{job=~\"$job\"}[5m])))",
+          "legendFormat": "p99 {{job}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Failed requests",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (job) (rate(litellm_llm_api_failed_requests_metric_total{job=~\"$job\"}[5m]))",
+          "legendFormat": "{{job}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Spend ($/h)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (job) (increase(litellm_spend_metric_total{job=~\"$job\"}[1h]))",
+          "legendFormat": "{{job}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Deployment health (success vs failure)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (job) (rate(litellm_deployment_success_responses_total{job=~\"$job\"}[5m]))",
+          "legendFormat": "OK {{job}}"
+        },
+        {
+          "expr": "sum by (job) (rate(litellm_deployment_failure_responses_total{job=~\"$job\"}[5m]))",
+          "legendFormat": "FAIL {{job}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Presidio guardrail requests (24h)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROM}"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(litellm_guardrail_requests_total{job=~\"$job\", guardrail_name=~\"[Pp]residio.*\"}[24h]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—"
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

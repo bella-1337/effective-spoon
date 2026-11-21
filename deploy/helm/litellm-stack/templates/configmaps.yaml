@@ -1,0 +1,379 @@
+{{- /*
+Configuration files ported from the upstream repository.
+
+Every file under files/ is rendered into a ConfigMap rather than baked into an
+image, so an operator can review the effective configuration with
+`helm get manifest` and diff it across releases. The keys are the filenames the
+upstream Compose stack mounts.
+*/ -}}
+
+{{/* LiteLLM gateway configuration and Python modules (prod + dev). */}}
+{{- if or .Values.litellmProd.enabled .Values.litellmDev.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-litellm-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "litellm") | nindent 4 }}
+data:
+  {{- if .Values.litellmProd.enabled }}
+  config.prod.yaml: |-
+    {{- .Files.Get "files/litellm/config.prod.yaml" | nindent 4 }}
+  {{- end }}
+  {{- if .Values.litellmDev.enabled }}
+  config.dev.yaml: |-
+    {{- .Files.Get "files/litellm/config.dev.yaml" | nindent 4 }}
+  {{- end }}
+  search.yaml: |-
+    {{- .Files.Get "files/litellm/modules/search.yaml" | nindent 4 }}
+  presidio.yaml: |-
+    {{- .Files.Get "files/litellm/modules/guardrails/presidio.yaml" | nindent 4 }}
+  prompt-injection.yaml: |-
+    {{- .Files.Get "files/litellm/modules/guardrails/prompt-injection.yaml" | nindent 4 }}
+  eu-data-protection.yaml: |-
+    {{- .Files.Get "files/litellm/modules/policies/eu-data-protection.yaml" | nindent 4 }}
+  prepare_runtime_config.py: |-
+    {{- .Files.Get "files/litellm/modules/prepare_runtime_config.py" | nindent 4 }}
+  langfuse_user_attribution.py: |-
+    {{- .Files.Get "files/litellm/modules/langfuse_user_attribution.py" | nindent 4 }}
+  xberg_auto_index.py: |-
+    {{- .Files.Get "files/litellm/modules/xberg_auto_index.py" | nindent 4 }}
+---
+{{ end }}
+
+{{/* Demo seed data, used by the demo profile one-shot Jobs. */}}
+{{- if .Values.demo.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-demo-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "demo") | nindent 4 }}
+data:
+  demo-data.sql: |-
+    {{- .Files.Get "files/litellm/demo-data.sql" | nindent 4 }}
+---
+{{ end }}
+
+{{/* Presidio analyzer NLP configuration. */}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-presidio
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "presidio") | nindent 4 }}
+data:
+  analyzer.yaml: |-
+    {{- .Files.Get "files/presidio/analyzer.yaml" | nindent 4 }}
+---
+
+{{/* SearXNG settings; the secret key is injected as an environment variable. */}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-searxng
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "searxng") | nindent 4 }}
+data:
+  settings.yml: |-
+    {{- .Files.Get "files/searxng/settings.yml" | nindent 4 }}
+---
+
+{{/* Xberg MCP sandbox: extraction policy, egress proxy, and DNS policy. */}}
+{{- if .Values.xberg.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-xberg
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "xberg") | nindent 4 }}
+data:
+  xberg.toml: |-
+    {{- .Files.Get "files/xberg/xberg-config.toml" | nindent 4 }}
+  xberg-egress-squid.conf: |-
+    {{- .Files.Get "files/xberg/xberg-egress-squid.conf" | nindent 4 }}
+  xberg-egress-allowlist.txt: |-
+    {{- .Files.Get "files/xberg/xberg-egress-allowlist.txt" | nindent 4 }}
+  {{- if .Values.xberg.egress.dns.enabled }}
+  xberg-dns.conf: |-
+    {{- .Files.Get "files/xberg/xberg-dns.conf" | nindent 4 }}
+  xberg-dns-zones.conf: |-
+    {{- .Files.Get "files/xberg/xberg-dns-zones.conf" | nindent 4 }}
+  xberg-dns-deny-root.zone: |-
+    {{- .Files.Get "files/xberg/xberg-dns-deny-root.zone" | nindent 4 }}
+  {{- end }}
+---
+{{ end }}
+
+{{/* OpenSearch cluster, security, Dashboards, and Data Prepper configuration. */}}
+{{- if .Values.opensearch.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-opensearch
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "opensearch") | nindent 4 }}
+data:
+  # The upstream file interpolates OPENSEARCH_DATASOURCES_MASTER_KEY from the
+  # environment; it is passed as a container env var instead, because a
+  # ConfigMap cannot read a Secret.
+  opensearch.yml: |-
+    {{- .Files.Get "files/opensearch/opensearch.yml" | nindent 4 }}
+  internal_users.yml: |-
+    {{- .Files.Get "files/opensearch/security/internal_users.yml" | nindent 4 }}
+  roles_mapping.yml: |-
+    {{- .Files.Get "files/opensearch/security/roles_mapping.yml" | nindent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-opensearch-dashboards
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "opensearch-dashboards") | nindent 4 }}
+data:
+  opensearch_dashboards.yml: |-
+    {{- .Files.Get "files/opensearch/dashboards/opensearch_dashboards.yml" | nindent 4 }}
+---
+{{ end }}
+
+{{- if .Values.dataPrepper.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-data-prepper
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "data-prepper") | nindent 4 }}
+data:
+  entrypoint.sh: |-
+    {{- .Files.Get "files/opensearch/data-prepper/entrypoint.sh" | nindent 4 }}
+  pipelines.yaml: |-
+    {{- .Files.Get "files/opensearch/data-prepper/pipelines.yaml" | nindent 4 }}
+---
+{{ end }}
+
+{{/* OpenSearch certificate generation script, mounted into the cert Job. */}}
+{{- if .Values.opensearch.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-opensearch-certs
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "opensearch-certs") | nindent 4 }}
+data:
+  # The upstream script is used unchanged; publish-certs.py wraps it and moves
+  # the result into a Secret so pods on different nodes can mount it.
+  generate-certs.sh: |-
+    {{- .Files.Get "files/opensearch/generate-certs.sh" | nindent 4 }}
+  publish-certs.py: |-
+    {{- .Files.Get "files/opensearch/publish-certs.py" | nindent 4 }}
+---
+
+{{/* Metric catalog used by the OpenSearch bridge. */}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-opensearch-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "opensearch-bridge") | nindent 4 }}
+data:
+  metrics.yml: |-
+    {{- .Files.Get "files/opensearch/tools/metrics.yml" | nindent 4 }}
+---
+{{ end }}
+
+{{/* Alert rule files: Grafana provisions them and the OpenSearch setup and bridge jobs read them, so they render for either. */}}
+{{- if or .Values.grafana.enabled .Values.opensearch.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-grafana-alerting
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "grafana") | nindent 4 }}
+data:
+  stack-production.yml: |-
+    {{- .Files.Get "files/grafana/alerting/stack-production.yml" | nindent 4 }}
+  image-security.yml: |-
+    {{- .Files.Get "files/grafana/alerting/image-security.yml" | nindent 4 }}
+---
+{{- end }}
+
+{{/* Grafana provisioning: datasources, dashboards, and alert rules. */}}
+{{- if .Values.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-grafana-datasources
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "grafana") | nindent 4 }}
+data:
+  prometheus.yml: |-
+    {{- .Files.Get "files/grafana/datasources/prometheus.yml" | nindent 4 }}
+  loki.yml: |-
+    {{- .Files.Get "files/grafana/datasources/loki.yml" | nindent 4 }}
+  litellm-pg.yml: |-
+    {{- .Files.Get "files/grafana/datasources/litellm-pg.yml" | nindent 4 }}
+  {{- if .Values.litellmDev.enabled }}
+  litellm-pg-dev.yml: |-
+    {{- .Files.Get "files/grafana/datasources/litellm-pg-dev.yml" | nindent 4 }}
+  {{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-grafana-dashboards-provider
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "grafana") | nindent 4 }}
+data:
+  dashboards.yml: |-
+    {{- .Files.Get "files/grafana/dashboards/dashboards.yml" | nindent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-grafana-dashboards
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "grafana") | nindent 4 }}
+data:
+  litellm-admin.json: |-
+    {{- .Files.Get "files/grafana/dashboards/litellm-admin/litellm-admin.json" | nindent 4 }}
+  litellm-cost.json: |-
+    {{- .Files.Get "files/grafana/dashboards/litellm-cost/litellm-cost.json" | nindent 4 }}
+  litellm-management.json: |-
+    {{- .Files.Get "files/grafana/dashboards/litellm-management/litellm-management.json" | nindent 4 }}
+  litellm-stack.json: |-
+    {{- .Files.Get "files/grafana/dashboards/litellm-stack/litellm-stack.json" | nindent 4 }}
+  litellm-team-cost.json: |-
+    {{- .Files.Get "files/grafana/dashboards/litellm-team-cost/litellm-team-cost.json" | nindent 4 }}
+---
+{{ if .Values.grafana.loki.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-loki
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "loki") | nindent 4 }}
+data:
+  config.yml: |-
+    {{- .Files.Get "files/alloy/loki-config.yml" | nindent 4 }}
+---
+{{ end }}
+{{- end }}
+
+{{/* Alloy collectors. */}}
+{{- if .Values.alloy.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-alloy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "alloy") | nindent 4 }}
+data:
+  config.alloy: |-
+    {{- .Files.Get "files/alloy/config.alloy" | nindent 4 }}
+  {{- if .Values.grafana.enabled }}
+  loki.alloy: |-
+    {{- .Files.Get "files/alloy/loki.alloy" | nindent 4 }}
+  {{- end }}
+---
+{{ end }}
+
+{{/* Prometheus scrape configuration. */}}
+{{- if .Values.prometheus.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-prometheus
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "prometheus") | nindent 4 }}
+data:
+  prometheus.yml: |-
+    {{- include "litellm-stack.prometheusConfig" . | nindent 4 }}
+---
+{{ end }}
+
+{{/* Langfuse ClickHouse tuning, applied through the clickhouse profile dirs. */}}
+{{- if .Values.langfuse.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-langfuse-clickhouse
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "langfuse-clickhouse") | nindent 4 }}
+data:
+  observability.xml: |-
+    {{- .Files.Get "files/langfuse/clickhouse/config.d/observability.xml" | nindent 4 }}
+  users-observability.xml: |-
+    {{- .Files.Get "files/langfuse/clickhouse/users.d/observability.xml" | nindent 4 }}
+  cleanup-system-logs.sql: |-
+    {{- .Files.Get "files/langfuse/clickhouse/cleanup-system-logs.sql" | nindent 4 }}
+---
+{{ end }}
+
+{{/* Lens ClickHouse Keeper and logging configuration. */}}
+{{- if .Values.lens.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-lens-clickhouse
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "lens-clickhouse") | nindent 4 }}
+data:
+  keeper.xml: |-
+    {{- .Files.Get "files/lens/clickhouse/config.d/keeper.xml" | nindent 4 }}
+  logging.xml: |-
+    {{- .Files.Get "files/lens/clickhouse/config.d/logging.xml" | nindent 4 }}
+---
+{{ end }}
+
+{{/* pgvector bootstrap schema and migration. */}}
+{{- if .Values.litellmDev.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-pgvector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "pgvector") | nindent 4 }}
+data:
+  # Bootstrap schema, mounted at docker-entrypoint-initdb.d by the vector store.
+  init.sql: |-
+    {{- .Files.Get "files/postgres/init.sql" | nindent 4 }}
+  # Idempotent migration the pgvector-migrate hook Job applies.
+  migrate.sql: |-
+    {{- .Files.Get "files/postgres/migrate.sql" | nindent 4 }}
+---
+{{ end -}}
+
+{{/* Branding assets served by the gateways from /app/branding. */}}
+{{- if .Values.litellmProd.branding.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}-branding
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "litellm") | nindent 4 }}
+binaryData:
+  logo.png: {{ .Files.Get "files/branding/logo.png" | b64enc }}
+  logo-dark.png: {{ .Files.Get "files/branding/logo-dark.png" | b64enc }}
+  favicon.png: {{ .Files.Get "files/branding/favicon.png" | b64enc }}
+{{- end }}

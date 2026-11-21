@@ -1,0 +1,22 @@
+---
+# Initial role mappings. opensearch-setup re-applies the service mappings on
+# every start; mappings for human users are managed in OpenSearch Dashboards.
+_meta:
+  type: "rolesmapping"
+  config_version: 2
+
+all_access:
+  reserved: false
+  users:
+    - "admin"
+  description: "Initial OpenSearch administrator"
+
+security_rest_api_access:
+  reserved: false
+  users:
+    - "admin"
+
+kibana_server:
+  reserved: true
+  users:
+    - "kibanaserver"

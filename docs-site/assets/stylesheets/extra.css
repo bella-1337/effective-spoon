@@ -1,0 +1,81 @@
+/* Documentation theme: a deep teal header, teal links, system fonts only.
+   Nothing here loads from a third party. */
+
+:root,
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #134e4a;
+  --md-primary-fg-color--light: #115e59;
+  --md-primary-fg-color--dark: #042f2e;
+  --md-primary-bg-color: #f0fdfa;
+  --md-primary-bg-color--light: #f0fdfab3;
+  --md-accent-fg-color: #0d9488;
+  --md-accent-fg-color--transparent: #0d94881a;
+  --md-typeset-a-color: #0f766e;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-hue: 200;
+  --md-primary-fg-color: #042f2e;
+  --md-primary-fg-color--light: #134e4a;
+  --md-primary-fg-color--dark: #021a19;
+  --md-accent-fg-color: #2dd4bf;
+  --md-accent-fg-color--transparent: #2dd4bf1a;
+  --md-typeset-a-color: #5eead4;
+}
+
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 1.6rem;
+}
+
+/* Tables: full width, quiet header, row hover. */
+.md-typeset table:not([class]) {
+  display: table;
+  width: 100%;
+  font-size: 0.72rem;
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+  border-radius: 0.2rem;
+}
+.md-typeset table:not([class]) th {
+  min-width: 6rem;
+  background-color: var(--md-code-bg-color);
+  font-weight: 600;
+}
+.md-typeset table:not([class]) tbody tr:hover {
+  background-color: var(--md-accent-fg-color--transparent);
+}
+
+/* Code blocks and inline code. */
+.md-typeset pre > code {
+  border-radius: 0.2rem;
+}
+.md-typeset :not(pre) > code {
+  padding: 0 0.3em;
+  border-radius: 0.15rem;
+}
+
+/* Local preview banner. */
+.md-banner {
+  background: linear-gradient(90deg, #3b0764, #5b21b6);
+  color: #fff;
+}
+.md-banner .md-banner__button {
+  color: #fff;
+}
+
+/* Footer notes. */
+.docs-licence-info,
+.docs-build-info {
+  margin-top: 0.2rem;
+  opacity: 0.8;
+}
+.docs-licence-info a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+@media print {
+  .md-banner {
+    display: none;
+  }
+}

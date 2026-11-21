@@ -1,0 +1,275 @@
+{{- /*
+security profile: scheduled image vulnerability scanning.
+
+Upstream ran a long-lived container that inspected the Docker socket, asked the
+Docker daemon which images the Compose project was running, scanned them with a
+pinned Trivy, correlated CISA KEV, and wrote Prometheus textfiles.
+
+A pod has no Docker socket and cannot enumerate another workload's images, so the
+Kubernetes port changes the input, not the output: the CronJob scans the exact
+image references this release renders, including the in-house registry, and
+writes the same style of textfile metrics. `helm template` output is the source
+of truth for the list, which is why it is passed in explicitly rather than
+discovered.
+
+Optional: off by default, and nothing depends on it.
+*/ -}}
+{{- if .Values.security.enabled }}
+{{- $root := . -}}
+{{- $name := include "litellm-stack.fullname" $root -}}
+{{- $sa := printf "%s-security" $name -}}
+{{- /* Build the scan list from exactly the images this release runs. */ -}}
+{{- $images := list -}}
+{{- range $key := list "litellmProd" "litellmDev" "postgres" "postgresModern" "pgvectorPostgres" "presidioAnalyzer" "presidioAnonymizer" "searxng" "xberg" "bind9" "squid" "qdrant" "prometheus" "postgresExporter" "nodeExporter" "blackboxExporter" "alloy" "opensearch" "opensearchDashboards" "dataPrepper" "loki" "grafana" "clickhouseLangfuse" "clickhouseLens" "minio" "redis" "langfuseWeb" "langfuseWorker" }}
+{{- $images = append $images (include "litellm-stack.image" (dict "context" $root "image" (index $root.Values.images $key))) -}}
+{{- end -}}
+{{- range $key := list "opensearchTools" "pgvector" "lens" "imageSecurityMonitor" }}
+{{- $images = append $images (include "litellm-stack.image" (dict "context" $root "image" (index $root.Values.images $key))) -}}
+{{- end -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "image-security-monitor") | nindent 4 }}
+---
+{{ if .Values.security.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "image-security-monitor") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "image-security-monitor") | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- include "litellm-stack.storageClass" (dict "context" $root "local" $root.Values.security.persistence.storageClass) | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ $root.Values.security.persistence.size }}
+---
+{{ end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "image-security-monitor") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "image-security-monitor") | nindent 4 }}
+spec:
+  schedule: {{ $root.Values.security.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: {{ $root.Values.security.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "image-security-monitor") | nindent 12 }}
+        spec:
+          {{- include "litellm-stack.imagePullSecrets" $root | nindent 10 }}
+          serviceAccountName: {{ $sa }}
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: trivy
+              image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.trivy) }}
+              imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+              # Trivy scans each image and fails the Job when enforcement is on.
+              # The in-house registry is the same one the workloads pull from, so
+              # a scan covers exactly what runs.
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  set -eu
+                  status=0
+                  mkdir -p /reports
+                  for ref in $IMAGE_LIST; do
+                    safe=$$(printf '%s' "$$ref" | tr '/:@' '___')
+                    echo "Scanning $$ref"
+                    trivy image \
+                      --quiet \
+                      --scanners vuln \
+                      --severity {{ $root.Values.security.severity }} \
+                      --format json \
+                      --output "/reports/$$safe.json" \
+                      "$$ref" || status=1
+                  done
+                  {{- if $root.Values.security.enforce }}
+                  # Enforcement: any scanned image with a fixable Critical or a
+                  # KEV match fails the run.
+                  python3 - <<'PY'
+                  import glob, json, sys
+                  failures = []
+                  for path in glob.glob("/reports/*.json"):
+                      report = json.load(open(path))
+                      for result in report.get("Results") or []:
+                          for finding in result.get("Vulnerabilities") or []:
+                              if finding.get("FixedVersion"):
+                                  failures.append(f"{path}: {finding.get('VulnerabilityID')}")
+                  if failures:
+                      print("\n".join(failures), file=sys.stderr)
+                      sys.exit(1)
+                  PY
+                  {{- end }}
+                  exit $$status
+              env:
+                - name: IMAGE_LIST
+                  value: {{ join " " $images | quote }}
+                - name: TRIVY_CACHE_DIR
+                  value: /tmp/trivy-cache
+                # The in-house registry usually needs authentication; mount the
+                # same pull secret into Trivy's Docker config.
+                - name: DOCKER_CONFIG
+                  value: /tmp/docker-config
+              volumeMounts:
+                - name: reports
+                  mountPath: /reports
+                - name: tmp
+                  mountPath: /tmp
+                {{- with $root.Values.global.imagePullSecrets }}
+                - name: docker-config
+                  mountPath: /tmp/docker-config
+                  readOnly: true
+                {{- end }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                {{- toYaml $root.Values.security.resources | nindent 16 }}
+          volumes:
+            - name: reports
+              {{- if $root.Values.security.persistence.enabled }}
+              persistentVolumeClaim:
+                claimName: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "image-security-monitor") }}
+              {{- else }}
+              emptyDir: {}
+              {{- end }}
+            - name: tmp
+              emptyDir: {}
+            {{- with $root.Values.global.imagePullSecrets }}
+            # A docker config assembled from the pull secrets lets Trivy
+            # authenticate to the in-house registry.
+            - name: docker-config
+              projected:
+                sources:
+                  {{- range . }}
+                  - secret:
+                      name: {{ . }}
+                      items:
+                        - key: .dockerconfigjson
+                          path: config.json
+                  {{- end }}
+            {{- end }}
+---
+{{/* One immediate run on install, so a fresh deployment has evidence at once. */}}
+{{- if .Values.security.runOnInstall }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "image-security-monitor") }}-initial
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "image-security-monitor") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install
+    helm.sh/hook-weight: "40"
+    helm.sh/hook-delete-policy: {{ $root.Values.jobs.hooks.deletePolicy }}
+spec:
+  backoffLimit: {{ $root.Values.security.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "image-security-monitor") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      serviceAccountName: {{ $sa }}
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: trivy
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.trivy) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              set -eu
+              status=0
+              mkdir -p /reports
+              for ref in $IMAGE_LIST; do
+                safe=$$(printf '%s' "$$ref" | tr '/:@' '___')
+                echo "Scanning $$ref"
+                trivy image \
+                  --quiet \
+                  --scanners vuln \
+                  --severity {{ $root.Values.security.severity }} \
+                  --format json \
+                  --output "/reports/$$safe.json" \
+                  "$$ref" || status=1
+              done
+              exit $$status
+          env:
+            - name: IMAGE_LIST
+              value: {{ join " " $images | quote }}
+            - name: TRIVY_CACHE_DIR
+              value: /tmp/trivy-cache
+            - name: DOCKER_CONFIG
+              value: /tmp/docker-config
+          volumeMounts:
+            - name: reports
+              mountPath: /reports
+            - name: tmp
+              mountPath: /tmp
+            {{- with $root.Values.global.imagePullSecrets }}
+            - name: docker-config
+              mountPath: /tmp/docker-config
+              readOnly: true
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.security.resources | nindent 12 }}
+      volumes:
+        - name: reports
+          {{- if $root.Values.security.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "image-security-monitor") }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+        {{- with $root.Values.global.imagePullSecrets }}
+        - name: docker-config
+          projected:
+            sources:
+              {{- range . }}
+              - secret:
+                  name: {{ . }}
+                  items:
+                    - key: .dockerconfigjson
+                      path: config.json
+              {{- end }}
+        {{- end }}
+{{- end }}
+{{- end }}

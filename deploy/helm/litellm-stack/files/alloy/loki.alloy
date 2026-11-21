@@ -1,0 +1,112 @@
+// Optional grafana profile: ship pod logs to Loki for Grafana Explore.
+// The default OpenSearch pipeline lives in config.alloy.
+//
+// Discovery is the Kubernetes pod log API rather than the Docker socket; the
+// log-processing stages are carried over unchanged from upstream.
+
+loki.write "default" {
+  endpoint {
+    url = sys.env("LOKI_PUSH_URL")
+  }
+}
+
+discovery.kubernetes "pods" {
+  role = "pod"
+  namespaces {
+    names = [sys.env("POD_NAMESPACE")]
+  }
+}
+
+discovery.relabel "pods" {
+  targets = discovery.kubernetes.pods.targets
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_instance"]
+    regex         = sys.env("RELEASE_NAME")
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_name"]
+    target_label  = "pod"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_component"]
+    target_label  = "compose_service"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_namespace"]
+    target_label  = "compose_project"
+  }
+}
+
+loki.source.kubernetes "pods" {
+  targets    = discovery.relabel.pods.output
+  forward_to = [loki.process.containers.receiver]
+  labels     = { job = "kubernetes-pods" }
+}
+
+// Shared parsing for both collectors: join multi-line entries (stack traces,
+// pretty-printed JSON) and attach a normalized "level" label.
+loki.process "containers" {
+  forward_to = [loki.write.default.receiver]
+
+  // Continuation lines start with whitespace or a closing bracket.
+  stage.multiline {
+    firstline     = "^[^\\s}\\]]"
+    max_wait_time = "3s"
+    max_lines     = 500
+  }
+
+  // Strip ANSI colour codes written by some services.
+  stage.replace {
+    expression = "(\\x1b\\[[0-9;]*m)"
+    replace    = ""
+  }
+
+  // Never persist search terms: redact q/query URL parameters (for example in
+  // SearXNG upstream errors) before logs leave the cluster.
+  stage.replace {
+    expression = "[?&](?:q|query)=([^&\\s\"']+)"
+    replace    = "REDACTED"
+  }
+
+  // First level-like token, e.g. "INFO:", "[WARN ]", "level=error", "\"level\":\"info\"".
+  stage.regex {
+    expression = "(?i)(?:^|[\\s\\[\"'=:|])(?P<level>trace|debug|info|notice|warn|warning|error|err|crit|critical|fatal|panic|emerg)(?:$|[\\s\\]\"',:|])"
+  }
+
+  stage.match {
+    selector = "{job=\"kubernetes-pods\"} |~ \"^Traceback \\\\(most recent call last\\\\)\""
+    stage.static_labels {
+      values = { tb = "1" }
+    }
+  }
+
+  stage.template {
+    source   = "level"
+    template = "{{ $v := ToUpper .Value }}{{ if eq $v \"WARNING\" }}WARN{{ else if eq $v \"ERR\" }}ERROR{{ else if eq $v \"CRIT\" }}CRITICAL{{ else }}{{ $v }}{{ end }}"
+  }
+
+  stage.labels {
+    values = { level = "" }
+  }
+
+  stage.match {
+    selector = "{tb=\"1\"}"
+    stage.static_labels {
+      values = { level = "ERROR" }
+    }
+  }
+
+  stage.label_drop {
+    values = ["tb"]
+  }
+}

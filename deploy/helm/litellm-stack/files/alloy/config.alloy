@@ -1,0 +1,146 @@
+// Default pipeline: Kubernetes pod logs -> OTLP -> Data Prepper -> OpenSearch.
+// The optional grafana profile runs alloy-loki with loki.alloy instead.
+//
+// Upstream discovered containers through the Docker socket. In Kubernetes the
+// same discovery is the pod log API, so the relabel rules key on the pod's
+// namespace and app labels; the shared log-processing stages are unchanged.
+
+discovery.kubernetes "pods" {
+  role = "pod"
+  // Only this release's namespace is scraped, which is the equivalent of the
+  // upstream COMPOSE_PROJECT_NAME keep rule.
+  namespaces {
+    names = [sys.env("POD_NAMESPACE")]
+  }
+}
+
+discovery.relabel "pods" {
+  targets = discovery.kubernetes.pods.targets
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_instance"]
+    regex         = sys.env("RELEASE_NAME")
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_name"]
+    target_label  = "pod"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
+    target_label  = "container"
+  }
+
+  rule {
+    // compose_service is kept as the label name so the upstream OpenSearch
+    // dashboards and saved searches keep working unchanged.
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_component"]
+    target_label  = "compose_service"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_namespace"]
+    target_label  = "compose_project"
+  }
+}
+
+loki.source.kubernetes "pods" {
+  targets    = discovery.relabel.pods.output
+  forward_to = [loki.process.containers.receiver]
+  labels     = { job = "kubernetes-pods" }
+}
+
+// Shared parsing: join multi-line entries (stack traces, pretty-printed JSON)
+// and attach a normalized "level" label. Carried over from the upstream
+// collector so dashboards and alerts see the same shape.
+loki.process "containers" {
+  forward_to = [otelcol.receiver.loki.containers.receiver]
+
+  // Continuation lines start with whitespace or a closing bracket.
+  stage.multiline {
+    firstline     = "^[^\\s}\\]]"
+    max_wait_time = "3s"
+    max_lines     = 500
+  }
+
+  // Strip ANSI colour codes written by some services.
+  stage.replace {
+    expression = "(\\x1b\\[[0-9;]*m)"
+    replace    = ""
+  }
+
+  // Never persist search terms: redact q/query URL parameters (for example in
+  // SearXNG upstream errors) before logs leave the cluster.
+  stage.replace {
+    expression = "[?&](?:q|query)=([^&\\s\"']+)"
+    replace    = "REDACTED"
+  }
+
+  // First level-like token, e.g. "INFO:", "[WARN ]", "level=error", "\"level\":\"info\"".
+  stage.regex {
+    expression = "(?i)(?:^|[\\s\\[\"'=:|])(?P<level>trace|debug|info|notice|warn|warning|error|err|crit|critical|fatal|panic|emerg)(?:$|[\\s\\]\"',:|])"
+  }
+
+  stage.match {
+    selector = "{job=\"kubernetes-pods\"} |~ \"^Traceback \\\\(most recent call last\\\\)\""
+    stage.static_labels {
+      values = { tb = "1" }
+    }
+  }
+
+  stage.template {
+    source   = "level"
+    template = "{{ $v := ToUpper .Value }}{{ if eq $v \"WARNING\" }}WARN{{ else if eq $v \"ERR\" }}ERROR{{ else if eq $v \"CRIT\" }}CRITICAL{{ else }}{{ $v }}{{ end }}"
+  }
+
+  stage.labels {
+    values = { level = "" }
+  }
+
+  stage.match {
+    selector = "{tb=\"1\"}"
+    stage.static_labels {
+      values = { level = "ERROR" }
+    }
+  }
+
+  stage.label_drop {
+    values = ["tb"]
+  }
+}
+
+otelcol.receiver.loki "containers" {
+  output {
+    logs = [otelcol.processor.batch.containers.input]
+  }
+}
+
+otelcol.processor.batch "containers" {
+  timeout         = "2s"
+  send_batch_size = 512
+
+  output {
+    logs = [otelcol.exporter.otlp.data_prepper.input]
+  }
+}
+
+otelcol.exporter.otlp "data_prepper" {
+  client {
+    endpoint = sys.env("DATA_PREPPER_ENDPOINT")
+    // Plain gRPC on a NetworkPolicy-restricted in-cluster path, matching the
+    // stack's other internal telemetry hops.
+    tls {
+      insecure = true
+    }
+  }
+
+  sending_queue {
+    queue_size = 5000
+  }
+
+  retry_on_failure {
+    max_elapsed_time = "10m"
+  }
+}

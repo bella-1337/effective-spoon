@@ -1,0 +1,402 @@
+{{- /*
+Prometheus and its exporters.
+
+Upstream scraped the LiteLLM metrics endpoint with a bearer token read from a
+secret file (`custom_metrics_token`), kept in a dedicated volume so the token
+never appeared in the Prometheus config. Here the same pattern is a Secret
+volume projected to a file, and the scrape config's credentials_file points at
+it, so the master key never lands in a ConfigMap.
+*/ -}}
+{{- if .Values.prometheus.enabled }}
+{{- $root := . -}}
+{{- $secret := include "litellm-stack.secretName" $root -}}
+{{- $promHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "prometheus") -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $promHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "prometheus") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "prometheus") | nindent 4 }}
+  ports:
+    - name: http
+      port: 9090
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $promHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "prometheus") | nindent 4 }}
+spec:
+  serviceName: {{ $promHost }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "prometheus") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "prometheus") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: prometheus
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.prometheus) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time={{ $root.Values.prometheus.retentionTime }}
+            - --storage.tsdb.retention.size={{ $root.Values.prometheus.retentionSize }}
+          ports:
+            - name: http
+              containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+              readOnly: true
+            # The scrape token is a file, never an env var or a config value.
+            - name: secrets
+              mountPath: /etc/prometheus/secrets
+              readOnly: true
+            - name: data
+              mountPath: /prometheus
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.prometheus.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-prometheus
+        - name: secrets
+          secret:
+            secretName: {{ $secret }}
+            defaultMode: 0400
+            items:
+              # The file name is the one prometheus.yml references.
+              - key: LITELLM_MASTER_KEY
+                path: litellm-master-key
+  {{- if not .Values.prometheus.persistence.existingClaim }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "prometheus") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "litellm-stack.storageClass" (dict "context" $root "local" $root.Values.prometheus.persistence.storageClass) | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ $root.Values.prometheus.persistence.size }}
+  {{- end }}
+---
+{{ if .Values.prometheus.exporters.postgres }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "postgres-exporter") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "postgres-exporter") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "postgres-exporter") | nindent 4 }}
+  ports:
+    - name: metrics
+      port: 9187
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "postgres-exporter") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "postgres-exporter") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "postgres-exporter") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "postgres-exporter") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres-exporter
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.postgresExporter) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            - name: PG_EXPORTER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_EXPORTER_PASSWORD
+            # The exporter role only sees pg_monitor and CONNECT, so a leaked
+            # DSN cannot read application data.
+            - name: DATA_SOURCE_NAME
+              value: postgresql://litellm_exporter:$(PG_EXPORTER_PASSWORD)@{{ include "litellm-stack.serviceHost" (dict "context" $root "component" "postgres") }}:5432/postgres?sslmode=disable
+          ports:
+            - name: metrics
+              containerPort: 9187
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+{{ end }}
+{{- if and .Values.prometheus.exporters.pgvector .Values.litellmDev.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "pgvector-exporter") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "pgvector-exporter") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "pgvector-exporter") | nindent 4 }}
+  ports:
+    - name: metrics
+      port: 9187
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "pgvector-exporter") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "pgvector-exporter") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "pgvector-exporter") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "pgvector-exporter") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pgvector-exporter
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.postgresExporter) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            - name: PG_VECTOR_EXPORTER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_VECTOR_EXPORTER_PASSWORD
+            - name: DATA_SOURCE_NAME
+              value: postgresql://vector_exporter:$(PG_VECTOR_EXPORTER_PASSWORD)@{{ include "litellm-stack.serviceHost" (dict "context" $root "component" "vector-postgres") }}:5432/vector_store?sslmode=disable
+          ports:
+            - name: metrics
+              containerPort: 9187
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+{{ end }}
+{{- if .Values.prometheus.exporters.blackbox }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "blackbox") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "blackbox") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "blackbox") | nindent 4 }}
+  ports:
+    - name: http
+      port: 9115
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "blackbox") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "blackbox") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "blackbox") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "blackbox") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: blackbox
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.blackboxExporter) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 9115
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Only the http_2xx module is used; ICMP probing is not required.
+            capabilities:
+              drop: ["ALL", "NET_RAW"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+{{- /* 
+{{ end }}
+{{- if .Values.prometheus.nodeExporter.enabled }}
+{{- /*
+node-exporter reads the node, so it needs a DaemonSet with host mounts. Upstream
+ran it beside the Compose stack; here it is opt-in because the cluster usually
+already runs one.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "node-exporter") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "node-exporter") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "node-exporter") | nindent 4 }}
+  ports:
+    - name: metrics
+      port: 9100
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "node-exporter") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "node-exporter") | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "node-exporter") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "node-exporter") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: node-exporter
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.nodeExporter) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          args:
+            - --path.rootfs=/host
+            - --collector.textfile.directory=/textfile
+          ports:
+            - name: metrics
+              containerPort: 9100
+          volumeMounts:
+            - name: rootfs
+              mountPath: /host
+              readOnly: true
+              mountPropagation: HostToContainer
+            - name: textfile
+              mountPath: /textfile
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.prometheus.nodeExporter.resources | nindent 12 }}
+      volumes:
+        - name: rootfs
+          hostPath:
+            path: /
+        - name: textfile
+          # Populated by the security profile's scanner, which writes Prometheus
+          # textfiles the way upstream wrote security-metrics/.
+          emptyDir: {}
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+{{- end }}
+{{- end }}

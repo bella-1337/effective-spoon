@@ -1,0 +1,20 @@
+{#-
+  Theme overrides for the documentation site. The banner reads extra.build,
+  which scripts/build-docs.py fills from the environment.
+-#}
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  {#- Keep the site out of search engines and caches. -#}
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+{% endblock %}
+
+{% block announce -%}
+  {%- if config.extra.build.kind == "local" -%}
+    <span class="docs-banner docs-banner--local">
+      <strong>Local preview</strong> of the working tree. This is not a published build.
+    </span>
+  {%- endif -%}
+{%- endblock %}

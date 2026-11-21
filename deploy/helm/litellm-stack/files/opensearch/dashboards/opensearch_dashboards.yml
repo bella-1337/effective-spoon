@@ -1,0 +1,35 @@
+---
+server.name: litellm-stack-dashboards
+server.host: "0.0.0.0"
+server.port: 5601
+# Traefik terminates TLS and is the only route to this service.
+server.ssl.enabled: false
+server.xsrf.disableProtection: false
+
+opensearch.hosts: ["https://opensearch:9200"]
+opensearch.ssl.verificationMode: full
+opensearch.ssl.certificateAuthorities: ["/usr/share/opensearch-dashboards/config/certs/ca.pem"]
+opensearch.username: "kibanaserver"
+opensearch.password: "${OPENSEARCH_DASHBOARDS_SERVER_PASSWORD}"
+opensearch.requestHeadersAllowlist: ["securitytenant", "Authorization"]
+
+opensearch_security.auth.type: "basicauth"
+opensearch_security.cookie.secure: true
+opensearch_security.cookie.password: "${OPENSEARCH_DASHBOARDS_COOKIE_PASSWORD}"
+opensearch_security.session.ttl: 28800000
+opensearch_security.session.keepalive: true
+opensearch_security.multitenancy.enabled: true
+opensearch_security.multitenancy.tenants.enable_global: true
+opensearch_security.multitenancy.tenants.enable_private: true
+opensearch_security.multitenancy.tenants.preferred: ["Global", "Private"]
+opensearch_security.readonly_mode.roles: ["litellm_dashboards_read_only"]
+
+# Observability log explorer, metrics, notebooks, and direct query for the
+# Prometheus data source registered by opensearch-setup.
+data_source.enabled: false
+home.disableWelcomeScreen: true
+
+# Dashboard filter controls list values from high-volume log indices; allow
+# enough time and documents for complete option lists.
+opensearchDashboards.autocompleteTimeout: 3000
+opensearchDashboards.autocompleteTerminateAfter: 2000000

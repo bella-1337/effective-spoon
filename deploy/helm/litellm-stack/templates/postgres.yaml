@@ -1,0 +1,278 @@
+{{- /*
+LiteLLM PostgreSQL.
+
+Upstream ran a single postgres container plus a postgres-init one-shot that
+created the prod and dev databases, the OpenSearch read-only and exporter roles,
+and seed the ROI configuration. Here the database is a StatefulSet and the init
+logic runs as a Helm hook Job, so it completes before the gateways roll.
+*/ -}}
+{{- $name := include "litellm-stack.fullname" . -}}
+{{- $secret := include "litellm-stack.secretName" . -}}
+{{- $component := "postgres" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" . "component" $component) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" $component) | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" . "component" $component) | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" . "component" $component) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" $component) | nindent 4 }}
+spec:
+  serviceName: {{ include "litellm-stack.serviceHost" (dict "context" . "component" $component) }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" . "component" $component) | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmaps.yaml") . | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: {{ include "litellm-stack.image" (dict "context" . "image" .Values.images.postgres) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          # A single host serves the prod and dev databases, matching upstream.
+          args: ["-c", "max_connections=200"]
+          env:
+            - name: POSTGRES_DB
+              value: litellm_prod
+            - name: POSTGRES_USER
+              value: litellm
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+  {{- if not .Values.postgres.persistence.existingClaim }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "litellm-stack.componentLabels" (dict "context" . "component" $component) | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "litellm-stack.storageClass" (dict "context" . "local" .Values.postgres.persistence.storageClass) | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.persistence.size }}
+  {{- end }}
+---
+{{/* Init Job: databases, roles, and ROI seed. Re-runs on every upgrade. */}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" . "component" "postgres-init") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" . "component" "postgres-init") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: {{ .Values.jobs.hooks.deletePolicy }}
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" . "component" "postgres-init") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" . | nindent 6 }}
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      # The init Job must not start before the database accepts connections.
+      initContainers:
+        - name: wait-for-postgres
+          image: {{ include "litellm-stack.image" (dict "context" . "image" .Values.images.postgres) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command:
+            - sh
+            - -ec
+            - |
+              until pg_isready -h "$PGHOST" -U "$PGUSER" -d postgres; do
+                echo "waiting for PostgreSQL at $PGHOST"
+                sleep 2
+              done
+          env:
+            - name: PGHOST
+              value: {{ include "litellm-stack.serviceHost" (dict "context" . "component" "postgres") }}
+            - name: PGUSER
+              value: litellm
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: postgres-init
+          image: {{ include "litellm-stack.image" (dict "context" . "image" .Values.images.postgres) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: PGHOST
+              value: {{ include "litellm-stack.serviceHost" (dict "context" . "component" "postgres") }}
+            - name: PGUSER
+              value: litellm
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_PASSWORD
+            - name: OPENSEARCH_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: OPENSEARCH_DATABASE_PASSWORD
+            - name: PG_EXPORTER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_EXPORTER_PASSWORD
+            - name: ROI_MINUTES_SAVED_PER_REQUEST
+              value: {{ .Values.postgres.roi.minutesSavedPerRequest | quote }}
+            - name: ROI_MINUTES_SAVED_PER_SESSION
+              value: {{ .Values.postgres.roi.minutesSavedPerSession | quote }}
+            - name: ROI_LOADED_HOURLY_COST
+              value: {{ .Values.postgres.roi.loadedHourlyCost | quote }}
+            - name: ROI_VALUE_REALIZATION_FACTOR
+              value: {{ .Values.postgres.roi.valueRealizationFactor | quote }}
+            - name: ROI_CURRENCY
+              value: {{ .Values.postgres.roi.currency | quote }}
+          # Carried over from the upstream postgres-init service: idempotent role
+          # creation, then the two databases plus the ROI singleton.
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              psql --dbname postgres --set ON_ERROR_STOP=1 <<'SQL'
+              \getenv opensearch_password OPENSEARCH_DATABASE_PASSWORD
+              \getenv exporter_password PG_EXPORTER_PASSWORD
+              SELECT format('CREATE ROLE opensearch_ro LOGIN PASSWORD %L', :'opensearch_password')
+              WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'opensearch_ro') \gexec
+              SELECT format('ALTER ROLE opensearch_ro PASSWORD %L', :'opensearch_password') \gexec
+              SELECT format('CREATE ROLE litellm_exporter LOGIN PASSWORD %L', :'exporter_password')
+              WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'litellm_exporter') \gexec
+              SELECT format('ALTER ROLE litellm_exporter PASSWORD %L', :'exporter_password') \gexec
+              GRANT pg_monitor TO litellm_exporter;
+              GRANT CONNECT ON DATABASE postgres TO litellm_exporter;
+              SQL
+              for db in litellm_prod litellm_dev; do
+                exists="$$(psql --dbname postgres --tuples-only --no-align --command "SELECT 1 FROM pg_database WHERE datname='$${db}'")"
+                if [ "$${exists}" != "1" ]; then
+                  psql --dbname postgres --command "CREATE DATABASE \"$${db}\""
+                fi
+                psql --dbname "$${db}" --set ON_ERROR_STOP=1 <<'SQL'
+              \getenv roi_request_minutes ROI_MINUTES_SAVED_PER_REQUEST
+              \getenv roi_session_minutes ROI_MINUTES_SAVED_PER_SESSION
+              \getenv roi_hourly_cost ROI_LOADED_HOURLY_COST
+              \getenv roi_realization ROI_VALUE_REALIZATION_FACTOR
+              \getenv roi_currency ROI_CURRENCY
+              CREATE TABLE IF NOT EXISTS "LiteLLM_ManagementROIConfig" (
+                singleton smallint PRIMARY KEY DEFAULT 1 CHECK (singleton = 1),
+                minutes_saved_per_request numeric NOT NULL CHECK (minutes_saved_per_request BETWEEN 0 AND 1440),
+                minutes_saved_per_session numeric NOT NULL CHECK (minutes_saved_per_session BETWEEN 0 AND 10080),
+                loaded_hourly_cost numeric NOT NULL CHECK (loaded_hourly_cost BETWEEN 0 AND 10000),
+                value_realization_factor numeric NOT NULL CHECK (value_realization_factor BETWEEN 0 AND 1),
+                currency varchar(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
+                updated_at timestamptz NOT NULL DEFAULT NOW()
+              );
+              REVOKE ALL ON TABLE "LiteLLM_ManagementROIConfig" FROM PUBLIC;
+              INSERT INTO "LiteLLM_ManagementROIConfig" (
+                singleton,
+                minutes_saved_per_request,
+                minutes_saved_per_session,
+                loaded_hourly_cost,
+                value_realization_factor,
+                currency,
+                updated_at
+              ) VALUES (
+                1,
+                :'roi_request_minutes'::numeric,
+                :'roi_session_minutes'::numeric,
+                :'roi_hourly_cost'::numeric,
+                :'roi_realization'::numeric,
+                :'roi_currency',
+                NOW()
+              )
+              ON CONFLICT (singleton) DO UPDATE SET
+                minutes_saved_per_request = EXCLUDED.minutes_saved_per_request,
+                minutes_saved_per_session = EXCLUDED.minutes_saved_per_session,
+                loaded_hourly_cost = EXCLUDED.loaded_hourly_cost,
+                value_realization_factor = EXCLUDED.value_realization_factor,
+                currency = EXCLUDED.currency,
+                updated_at = EXCLUDED.updated_at;
+              SQL
+                psql --dbname "$${db}" --set ON_ERROR_STOP=1 --set database_name="$${db}" <<'SQL'
+              GRANT CONNECT ON DATABASE :"database_name" TO opensearch_ro;
+              GRANT USAGE ON SCHEMA public TO opensearch_ro;
+              GRANT SELECT ON ALL TABLES IN SCHEMA public TO opensearch_ro;
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO opensearch_ro;
+              SQL
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1
+              memory: 512Mi

@@ -1,0 +1,14 @@
+# Enables the image's default engines, which are scraped without a licensed API
+# and may breach the engines' terms of service. Review the section
+# "Search-engine terms of use" in docs/search-extraction-and-caching.md before
+# production use.
+use_default_settings: true
+
+server:
+  secret_key: "${SEARXNG_SECRET}"
+  limiter: false
+
+search:
+  formats:
+    - html
+    - json

@@ -1,0 +1,21 @@
+{#-
+  Footer: the warranty disclaimer (copyright in mkdocs.yml), the licence
+  sentence, and the version and revision this site was built from.
+-#}
+{%- set build = config.extra.build -%}
+<div class="md-copyright">
+  {% if config.copyright %}
+    <div class="md-copyright__highlight">{{ config.copyright }}</div>
+  {% endif %}
+  <div class="docs-licence-info">
+    The chart and these pages are released under the Apache License 2.0; see the
+    <a href="{{ config.repo_url }}/blob/main/LICENSE">LICENSE file</a>.
+    Every third-party image the chart deploys keeps its own licence.
+  </div>
+  <div class="docs-build-info">
+    Build <strong>{{ build.version }}</strong>
+    {%- if build.source_ref %} · <code>{{ build.source_ref }}</code>{% endif %}
+    {%- if build.commit %} @ <code>{{ build.commit[:7] }}</code>{% endif %}
+    {%- if build.date %} · built {{ build.date }}{% endif %}
+  </div>
+</div>

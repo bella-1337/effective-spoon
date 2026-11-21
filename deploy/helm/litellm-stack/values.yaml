@@ -1,0 +1,823 @@
+# Default values for the litellm-stack chart.
+#
+# This chart is the Kubernetes port of the upstream Docker Compose stack
+# (https://github.com/bella-1337/effective-spoon). Every service in
+# docker-compose.yml and compose.optional.yml has a Kubernetes workload here;
+# the Compose profiles prod, dev, demo, grafana, langfuse, lens, and security
+# map to the *.enabled flags below.
+#
+# Two rules this chart keeps from upstream:
+#   1. Optional components stay off unless explicitly enabled, and nothing in
+#      the core depends on them (gateways start without Langfuse and Lens).
+#   2. No credential is ever committed. Provide an existing Secret or set
+#      secrets.values.* so the chart renders one, and review it before install.
+
+global:
+  # Prefix for every image reference, including the in-house images this chart
+  # expects. Set this to the additional registry, for example
+  # "registry.inhouse.example". An empty value uses each image's own registry.
+  imageRegistry: ""
+  imagePullSecrets: []
+  imagePullPolicy: IfNotPresent
+
+  # Storage class for every PVC. Empty uses the cluster default.
+  storageClass: ""
+
+  # Public DNS zone; hosts below default to <service>.<domain>.
+  domain: example.test
+
+  timezone: Europe/Berlin
+
+  # Appended to every workload for node selection, tolerations, and affinity
+  # defaults. Component-level values win.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# Images
+#
+# The four "own" images are built from this repository and must be published to
+# the additional in-house registry; see deploy/images/README.md. Upstream pins
+# digests; `useDigest` keeps that behavior. Set `useDigest: false` to fall back
+# to the mutable tag, which the upstream security notes advise against.
+# -----------------------------------------------------------------------------
+useDigest: true
+
+images:
+  # --- built from this repository, published to the in-house registry ---
+  opensearchTools:
+    registry: ""
+    repository: litellm/litellm-opensearch-tools
+    tag: "0.1.0"
+    digest: ""
+  pgvector:
+    registry: ""
+    repository: litellm/litellm-pgvector
+    tag: "5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24"
+    digest: ""
+  lens:
+    registry: ""
+    repository: litellm/litellm-lens
+    tag: "1.108.0-rc.1"
+    digest: ""
+  imageSecurityMonitor:
+    registry: ""
+    repository: litellm/litellm-image-security-monitor
+    tag: "0.1.0"
+    digest: ""
+
+  # --- third party; mirror these into the in-house registry as well ---
+  litellmProd:
+    registry: ghcr.io
+    repository: berriai/litellm
+    tag: v1.108.2
+    digest: sha256:d8b4ac356743d647a13bb93f45b941fcd5f5354122cfd205948a1b192790389d
+  litellmDev:
+    registry: ghcr.io
+    repository: berriai/litellm
+    tag: v1.110.0-dev.1
+    digest: sha256:cca06d5cfdbd4412633d96257b60b84882822418fc72f15296b261e7ddfdfac1
+  postgres:
+    registry: docker.io
+    repository: library/postgres
+    tag: 16.15-alpine3.24
+    digest: sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+  postgresModern:
+    registry: docker.io
+    repository: library/postgres
+    tag: "17.11"
+    digest: sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
+  pgvectorPostgres:
+    registry: docker.io
+    repository: pgvector/pgvector
+    tag: 0.8.7-pg16
+    digest: sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
+  presidioAnalyzer:
+    registry: mcr.microsoft.com
+    repository: presidio-analyzer
+    tag: "2.2.362"
+    digest: sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
+  presidioAnonymizer:
+    registry: mcr.microsoft.com
+    repository: presidio-anonymizer
+    tag: "2.2.362"
+    digest: sha256:a10a12a2a613d13cf29d3ad3641e3258444dd8c90403dd644a0a114c472c2483
+  searxng:
+    registry: docker.io
+    repository: searxng/searxng
+    tag: 2026.10.30-ffa88e3ba
+    digest: sha256:f4aa660c54d062dedb268be84e821ea24e39f48c7a496af8dd02cc9eedb93847
+  xberg:
+    registry: ghcr.io
+    repository: xberg-io/xberg
+    tag: 1.3.10-core
+    digest: sha256:f0a66d39f7322c273bb4ba2b53f5ca00dee9f2f1b3ebbec26a283017e07a865b
+  bind9:
+    registry: docker.io
+    repository: ubuntu/bind9
+    tag: 9.20-26.04_stable
+    digest: sha256:bce2d69f34f4dce93540118c1b05d2c8cd33817c1efc77bd82a8d75c3f722706
+  squid:
+    registry: docker.io
+    repository: ubuntu/squid
+    tag: 6.13-25.04_edge
+    digest: sha256:3de2e64f0ca6efdac3e98557607dc0f23050037f3885016d5d5bfcf9950501b8
+  qdrant:
+    registry: docker.io
+    repository: qdrant/qdrant
+    tag: v1.20.0
+    digest: sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
+  prometheus:
+    registry: docker.io
+    repository: prom/prometheus
+    tag: v3.15.1
+    digest: sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+  postgresExporter:
+    registry: docker.io
+    repository: prometheuscommunity/postgres-exporter
+    tag: v0.20.1
+    digest: sha256:ac5ec343104fae0e2d84a27bb8d69b38430a11910c5382cad85d478d2bab713e
+  nodeExporter:
+    registry: docker.io
+    repository: prom/node-exporter
+    tag: v1.12.1
+    digest: sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+  blackboxExporter:
+    registry: docker.io
+    repository: prom/blackbox-exporter
+    tag: v0.29.1
+    digest: sha256:ea1c7aa3ef3f307cd03e85f34abb604478ccb90b567fc690da0cd9776da76b13
+  alloy:
+    registry: docker.io
+    repository: grafana/alloy
+    tag: v1.21.3
+    digest: sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
+  opensearch:
+    registry: docker.io
+    repository: opensearchproject/opensearch
+    tag: 3.9.0
+    digest: sha256:3b55f6b6249cfdb92b52ee59adc8a266203ba9ef9f5d82544fad6f1af2f3609e
+  opensearchDashboards:
+    registry: docker.io
+    repository: opensearchproject/opensearch-dashboards
+    tag: 3.9.0
+    digest: sha256:256d4cea5928868ac09bca642a0ac8285a2b7e4b7fdd45c4ec06e75a5cf3184c
+  dataPrepper:
+    registry: docker.io
+    repository: opensearchproject/data-prepper
+    tag: 2.16.0
+    digest: sha256:6e74ebeddfd66549f623e6f3b8131111b34e85695f54bd68aac7563e80d6b546
+  loki:
+    registry: docker.io
+    repository: grafana/loki
+    tag: 3.7.9
+    digest: sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
+  grafana:
+    registry: docker.io
+    repository: grafana/grafana
+    tag: 13.3.0
+    digest: sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205
+  clickhouseLangfuse:
+    registry: docker.io
+    repository: clickhouse/clickhouse-server
+    tag: 26.3.62.3
+    digest: sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a
+  clickhouseLens:
+    registry: docker.io
+    repository: clickhouse/clickhouse-server
+    tag: 26.9.6.6
+    digest: sha256:eb4870e7ca7ed70c259eebfcfbee6cf797017f6b5436c2926bbbfe3d4d28486e
+  minio:
+    registry: cgr.dev
+    repository: chainguard/minio
+    tag: latest
+    digest: sha256:c47b1779bfd12cdf5a4fcd3bd50671b8d66465fdae45271babc2fb467958b712
+  redis:
+    registry: docker.io
+    repository: library/redis
+    tag: 7.4.12
+    digest: sha256:b6b6e3dc0c0952737748e55d5d885272840c7e42ba41ab1d5489f693419882f5
+  langfuseWeb:
+    registry: docker.langfuse.com
+    repository: langfuse/langfuse
+    tag: 4.72.0
+    digest: sha256:c311fd9db4b69f6514fdcb1b86a2a105d5a4ed51fbf0ded033ff2722459c804a
+  langfuseWorker:
+    registry: docker.langfuse.com
+    repository: langfuse/langfuse-worker
+    tag: 4.72.0
+    digest: sha256:aa1724b989a00f1e4ca9930709202489c73deaaf2f1116bbd3d71c77edb8fedb
+  trivy:
+    registry: docker.io
+    repository: aquasec/trivy
+    tag: 0.76.1
+    digest: sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+
+# -----------------------------------------------------------------------------
+# Secrets
+#
+# Leave existingSecret empty to let the chart render one Secret from
+# secrets.values. Values left blank are generated on first install and reused on
+# upgrade. A non-empty existingSecret wins and this block is ignored, which is
+# the recommended production path (External Secrets, Vault, SOPS).
+# -----------------------------------------------------------------------------
+secrets:
+  existingSecret: ""
+  generateMissing: true
+  values:
+    PG_PASSWORD: ""
+    OPENSEARCH_DATABASE_PASSWORD: ""
+    PG_EXPORTER_PASSWORD: ""
+    PG_VECTOR_PASSWORD: ""
+    PG_VECTOR_EXPORTER_PASSWORD: ""
+    PG_VECTOR_API_KEY: ""
+    QDRANT_API_KEY: ""
+    LITELLM_MASTER_KEY: ""
+    OPENAI_API_KEY: ""
+    D3_DECISION_API_KEY: ""
+    BGE_M3_API_KEY: ""
+    OPENSEARCH_ADMIN_PASSWORD: ""
+    OPENSEARCH_DASHBOARDS_SERVER_PASSWORD: ""
+    OPENSEARCH_DASHBOARDS_COOKIE_PASSWORD: ""
+    OPENSEARCH_INGEST_PASSWORD: ""
+    OPENSEARCH_BRIDGE_PASSWORD: ""
+    OPENSEARCH_DATASOURCES_MASTER_KEY: ""
+    OPENSEARCH_SESSION_ID_SALT: ""
+    SEARXNG_SECRET: ""
+    # Optional integrations; blank keeps them disabled.
+    LANGFUSE_PUBLIC_KEY: ""
+    LANGFUSE_SECRET_KEY: ""
+    LANGFUSE_USER_ID_SALT: ""
+    LITELLM_LENS_SERVICE_TOKEN: ""
+    LENS_GATEWAY_SECRET: ""
+    # grafana profile
+    GRAFANA_ADMIN_PASSWORD: ""
+    GRAFANA_SECURITY_SECRET_KEY: ""
+    GRAFANA_DATABASE_PASSWORD: ""
+    # langfuse profile
+    LANGFUSE_POSTGRES_PASSWORD: ""
+    LANGFUSE_CLICKHOUSE_PASSWORD: ""
+    LANGFUSE_REDIS_AUTH: ""
+    LANGFUSE_MINIO_PASSWORD: ""
+    LANGFUSE_NEXTAUTH_SECRET: ""
+    LANGFUSE_SALT: ""
+    LANGFUSE_ENCRYPTION_KEY: ""
+    LANGFUSE_INIT_USER_EMAIL: ""
+    LANGFUSE_INIT_USER_NAME: ""
+    LANGFUSE_INIT_USER_PASSWORD: ""
+    # lens profile
+    LENS_ADMIN_TOKEN: ""
+    LENS_CLICKHOUSE_PASSWORD: ""
+    LENS_GATEWAY_API_KEY: ""
+
+# -----------------------------------------------------------------------------
+# Ingress (replaces the upstream Traefik container)
+#
+# The chart does not deploy an edge proxy. It renders Ingress resources instead,
+# so the cluster's own ingress controller terminates TLS and applies the
+# security headers and rate limits through annotations.
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 10m
+    # Mirrors the upstream edge-security-headers middleware.
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+      more_set_headers "Strict-Transport-Security: max-age=86400";
+    # Mirrors the upstream edge-rate-limit middleware.
+    nginx.ingress.kubernetes.io/limit-rps: "500"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "4"
+  # TLS for every host below. Provide the certificate Secret out of band, or
+  # annotate the Ingress for cert-manager in ingress.annotations.
+  tls:
+    enabled: true
+    secretName: litellm-stack-tls
+  hosts:
+    litellmProd: ""
+    litellmDev: ""
+    opensearchDashboards: ""
+    grafana: ""
+    langfuse: ""
+    langfuseS3: ""
+    lens: ""
+
+# -----------------------------------------------------------------------------
+# prod profile: the production LiteLLM gateway (core, always on)
+# -----------------------------------------------------------------------------
+litellmProd:
+  enabled: true
+  replicaCount: 2
+  host: ""
+  # Upstream resource tier: one CPU and 4g per worker.
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  topologySpread: true
+  # Proxy behavior; mirrors .env.example.
+  storeModelInDB: true
+  useV2MigrationResolver: false
+  otelV2: true
+  otelTraceExporter: otlp_grpc
+  otelCaptureMessageContent: no_content
+  forwardedAllowIps: "*"
+  requestTimeout: 120
+  # Remote GPU host on the separate gpu-host stack (D3-mini decisions model).
+  d3DecisionApiBase: ""
+  # Branding assets served by the gateway; see files/branding.
+  branding:
+    enabled: true
+    companyName: Foo-Bar
+
+# -----------------------------------------------------------------------------
+# dev profile
+# -----------------------------------------------------------------------------
+litellmDev:
+  enabled: false
+  replicaCount: 1
+  host: ""
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+  requestTimeout: 60
+  bgeM3ApiBase: ""
+  # The dev gateway is a single replica, so neither an autoscaler nor a
+  # disruption budget adds anything; both stay off so the keys exist.
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 70
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+  topologySpread: false
+  storeModelInDB: true
+  useV2MigrationResolver: false
+  d3DecisionApiBase: ""
+
+# demo profile: one-shot seed jobs against the prod or dev database.
+demo:
+  enabled: false
+
+# -----------------------------------------------------------------------------
+# Guardrails and tools
+# -----------------------------------------------------------------------------
+presidio:
+  analyzer:
+    replicaCount: 1
+    nlpEngine: spacy
+    supportedLanguages: en
+    workers: 2
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2
+        memory: 2Gi
+  anonymizer:
+    replicaCount: 1
+    workers: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 1
+        memory: 1Gi
+
+searxng:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+
+xberg:
+  enabled: false
+  replicaCount: 1
+  logLevel: info
+  maxRequestBodyBytes: 10485760
+  maxMultipartFieldBytes: 10485760
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+  # Deny-by-default egress. In Compose this is a local BIND resolver plus a
+  # Squid proxy on a fixed subnet. In Kubernetes the NetworkPolicy plus the
+  # allowlisting proxy carry the guarantee; the resolver is optional because a
+  # pod cannot be given a ClusterIP that does not exist yet.
+  egress:
+    proxy:
+      enabled: true
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 1
+          memory: 1Gi
+    dns:
+      enabled: false
+      # Set to the xberg-dns Service ClusterIP after the first install, then
+      # set xberg.dnsPolicy to None via xberg.extraPodSpec if you want hard
+      # resolver pinning. NetworkPolicy is the primary control.
+      clusterIP: ""
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 250m
+          memory: 128Mi
+
+# -----------------------------------------------------------------------------
+# Data stores
+# -----------------------------------------------------------------------------
+postgres:
+  # Production LiteLLM database. One instance serves the litellm_prod and
+  # litellm_dev databases, matching upstream.
+  persistence:
+    size: 20Gi
+    storageClass: ""
+    # Set to reuse a pre-created PVC instead of a volumeClaimTemplate.
+    existingClaim: ""
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+  # ROI scenario inputs seeded by postgres-init.
+  roi:
+    minutesSavedPerRequest: 15
+    minutesSavedPerSession: 0
+    loadedHourlyCost: 75
+    valueRealizationFactor: 0.25
+    currency: USD
+
+pgvector:
+  # Shared vector store for the dev profile and auto-indexing.
+  persistence:
+    size: 20Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+  connector:
+    replicaCount: 1
+    embeddingModel: openai/bge-m3
+    embeddingDimensions: 1024
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 1
+        memory: 1Gi
+
+qdrant:
+  # Dev-profile semantic cache. Upstream keeps it in tmpfs; here it stays
+  # in-memory by default, which is why persistence is off unless enabled.
+  persistence:
+    enabled: false
+    size: 5Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1
+      memory: 2Gi
+
+# -----------------------------------------------------------------------------
+# Observability: metrics
+# -----------------------------------------------------------------------------
+prometheus:
+  enabled: true
+  persistence:
+    size: 20Gi
+    storageClass: ""
+    existingClaim: ""
+  retentionTime: 15d
+  retentionSize: 10GB
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 2
+      memory: 2Gi
+  exporters:
+    postgres: true
+    pgvector: true
+    blackbox: true
+  # node-exporter and cAdvisor in Compose read the host directly. In Kubernetes
+  # the kubelet already exposes cAdvisor metrics, so only node-exporter is
+  # optional here and cAdvisor is never deployed.
+  nodeExporter:
+    enabled: false
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 128Mi
+  # Scrape the cluster's kubelet and kube-state-metrics endpoints if present.
+  kubernetesTargets:
+    enabled: false
+
+# -----------------------------------------------------------------------------
+# Log and trace pipeline: Alloy -> Data Prepper -> OpenSearch
+# -----------------------------------------------------------------------------
+alloy:
+  enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 2
+      memory: 2Gi
+
+opensearch:
+  enabled: true
+  # Single node, matching upstream. The chart never disables TLS or the
+  # security plugin.
+  replicas: 1
+  javaHeap: 1g
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: 2
+      memory: 3Gi
+  persistence:
+    size: 30Gi
+    storageClass: ""
+  # Consumed by the vm.max_map_count prerequisite documented in the README.
+  ulimits:
+    nofile: 65536
+  retention:
+    logs: 7
+    metrics: 15
+    usage: 180
+    audit: 90
+    traces: 15
+  bridgeIntervalSeconds: 60
+  usageOverlapMinutes: 30
+  certificate:
+    validityDays: 397
+    renewBeforeDays: 30
+  alertChannelId: ""
+
+opensearchDashboards:
+  enabled: true
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 2
+      memory: 2Gi
+
+dataPrepper:
+  enabled: true
+  javaOpts: "-Xms256m -Xmx512m"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 2
+      memory: 2Gi
+
+# -----------------------------------------------------------------------------
+# grafana profile (optional): Grafana, Loki, and the Loki log collector
+# -----------------------------------------------------------------------------
+grafana:
+  enabled: false
+  host: ""
+  allowSignUp: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+  persistence:
+    size: 5Gi
+    storageClass: ""
+  database:
+    user: grafana_ro
+  loki:
+    enabled: true
+    persistence:
+      size: 10Gi
+      storageClass: ""
+    retention: 168h
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 2
+        memory: 2Gi
+
+# -----------------------------------------------------------------------------
+# langfuse profile (optional)
+# The preflight Job refuses to start the profile until every required value is
+# set, as upstream does.
+# -----------------------------------------------------------------------------
+langfuse:
+  enabled: false
+  webHost: ""
+  s3Host: ""
+  telemetryEnabled: false
+  enableExperimentalFeatures: false
+  s3BatchExportEnabled: false
+  redisTlsEnabled: false
+  trustedProxyCount: 1
+  disableSignupOnboarding: true
+  init:
+    orgId: litellm-stack
+    orgName: LiteLLM Stack
+    projectId: litellm
+    projectName: LiteLLM
+  postgres:
+    persistence:
+      size: 10Gi
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 2
+        memory: 4Gi
+  clickhouse:
+    persistence:
+      size: 20Gi
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 2
+        memory: 4Gi
+  minio:
+    persistence:
+      size: 10Gi
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 1
+        memory: 1Gi
+  redis:
+    persistence:
+      size: 1Gi
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 1
+        memory: 1Gi
+  web:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 2
+        memory: 2Gi
+  worker:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 2
+        memory: 2Gi
+
+# -----------------------------------------------------------------------------
+# lens profile (optional): agent-trace analysis with its own ClickHouse
+# -----------------------------------------------------------------------------
+lens:
+  enabled: false
+  host: ""
+  traceRetentionDays: 14
+  gatewayApiBase: ""
+  # Lens keeps its ClickHouse alone on an internal-only network.
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 2
+      memory: 2Gi
+  tmpSize: 1Gi
+  pidsLimit: 128
+  clickhouse:
+    persistence:
+      size: 20Gi
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 2
+        memory: 4Gi
+
+# -----------------------------------------------------------------------------
+# security profile (optional): scheduled image vulnerability scanning
+#
+# The upstream monitor inspects the Docker socket. Kubernetes has no such
+# socket, so this profile renders a CronJob that runs the same pinned Trivy
+# release against the images this release actually runs, and optionally fails
+# the Job on fixable Critical or KEV findings.
+# -----------------------------------------------------------------------------
+security:
+  enabled: false
+  schedule: "45 2 * * *"
+  runOnInstall: true
+  enforce: false
+  severity: CRITICAL
+  # Reports land in a PVC; mount it into your own collector if you need history.
+  persistence:
+    enabled: false
+    size: 1Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 2
+      memory: 2500Mi
+  backoffLimit: 2
+
+# -----------------------------------------------------------------------------
+# Network policies
+#
+# Reproduces the Compose network segmentation: internal-only services are
+# reachable only from the pods that need them, and the Xberg sandbox may only
+# reach its allowlisting proxy.
+# -----------------------------------------------------------------------------
+networkPolicies:
+  enabled: true
+
+# -----------------------------------------------------------------------------
+# Maintenance Jobs
+# -----------------------------------------------------------------------------
+jobs:
+  # Helm hooks: these run before the workloads on install and upgrade.
+  hooks:
+    enabled: true
+    deletePolicy: before-hook-creation

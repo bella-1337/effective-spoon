@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Foo-Bar">
+  <defs>
+    <linearGradient id="fb-icon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1f6feb"/>
+      <stop offset="1" stop-color="#0b3d91"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#fb-icon)"/>
+  <path fill="#ffffff" d="M28 34h38v14H44v12h19v14H44v20H28z"/>
+  <path fill="#ffffff" d="M70 34h18c13 0 20 6 20 15 0 6-3 10-8 12 7 2 10 7 10 13 0 11-8 20-22 20H70zm16 24h3c4 0 6-2 6-5s-2-5-6-5h-3zm0 22h4c5 0 7-2 7-6s-2-6-7-6h-4z"/>
+</svg>

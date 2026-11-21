@@ -1,0 +1,395 @@
+{{- /*
+LiteLLM gateways (prod and dev profiles).
+
+The upstream container wrapped the proxy in prepare_runtime_config.py, which
+probes for Langfuse and Lens on the Compose network and enables or drops those
+integrations before exec'ing the proxy. A Kubernetes pod cannot probe a peer at
+startup and then mutate its own environment reliably, so the same decision is
+made once, at render time:
+
+  - The integration is enabled only when the profile is enabled AND its
+    credentials are present.
+  - When it is off, the callbacks and tracing keys are removed from the config
+    by the prep init container, which runs the unmodified upstream script in
+    "no command" mode against the rendered ConfigMap.
+
+That keeps the upstream fail-closed behavior (a half-configured Langfuse or
+Lens refuses to start) without a runtime network probe.
+*/ -}}
+{{- $root := . -}}
+{{- range $profile := list "prod" "dev" }}
+{{- $config := index $root.Values (printf "litellm%s" (title $profile)) -}}
+{{- if $config.enabled }}
+{{- $component := printf "litellm-%s" $profile -}}
+{{- $name := include "litellm-stack.serviceHost" (dict "context" $root "component" $component) -}}
+{{- $secret := include "litellm-stack.secretName" $root -}}
+{{- $langfuseOn := and $root.Values.langfuse.enabled (index $root.Values.secrets.values "LANGFUSE_PUBLIC_KEY") -}}
+{{- $lensOn := and $root.Values.lens.enabled (index $root.Values.secrets.values "LITELLM_LENS_SERVICE_TOKEN") -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" $component) | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: 4000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" $component) | nindent 4 }}
+spec:
+  {{- if not $config.autoscaling.enabled }}
+  replicas: {{ $config.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" $component) | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+        checksum/secret: {{ include (print $root.Template.BasePath "/secret.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      {{- include "litellm-stack.topologySpread" (dict "context" $root "component" $component "enable" $config.topologySpread "replicas" $config.replicaCount) | nindent 6 }}
+      # The prep container writes the runtime config to a shared emptyDir; the
+      # gateway then reads it read-only. Both run as the same non-root user.
+      initContainers:
+        - name: prepare-runtime-config
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.litellmProd) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command:
+            - python
+            - /app/modules/prepare_runtime_config.py
+            - /app/config/config.{{ $profile }}.yaml
+            - /app/runtime/runtime-config.yaml
+          env:
+            {{- if $langfuseOn }}
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_PUBLIC_KEY
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_SECRET_KEY
+            - name: LANGFUSE_USER_ID_SALT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_USER_ID_SALT
+            {{- end }}
+            {{- if $lensOn }}
+            - name: LITELLM_LENS_URL
+              value: http://{{ include "litellm-stack.serviceHost" (dict "context" $root "component" "lens") }}:4318
+            - name: LITELLM_LENS_PUBLIC_URL
+              value: https://{{ include "litellm-stack.host" (dict "context" $root "service" "lens" "override" $root.Values.lens.host) }}
+            - name: LITELLM_LENS_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LITELLM_LENS_SERVICE_TOKEN
+            - name: LENS_GATEWAY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LENS_GATEWAY_SECRET
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: modules
+              mountPath: /app/modules
+              readOnly: true
+            - name: runtime
+              mountPath: /app/runtime
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      containers:
+        - name: litellm
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" (ternary $root.Values.images.litellmProd $root.Values.images.litellmDev (eq $profile "prod"))) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          # Same launcher the upstream Compose service used: prod_entrypoint.sh
+          # runs the Prisma migrations and then the proxy, on the config the
+          # init container finalized.
+          command:
+            - /bin/sh
+            - -ec
+            - exec /app/docker/prod_entrypoint.sh --config=/app/runtime/runtime-config.yaml --port=4000
+          env:
+            - name: UI_LOGO_PATH
+              value: /app/branding/logo.png
+            - name: UI_LOGO_PATH_DARK
+              value: /app/branding/logo-dark.png
+            - name: LITELLM_FAVICON_URL
+              value: /app/branding/favicon.png
+            # Composed from the password at pod start so the Secret needs no
+            # pre-built DSN; $(PG_PASSWORD) expands from the entry above.
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_PASSWORD
+            - name: DATABASE_URL
+              value: postgresql://litellm:$(PG_PASSWORD)@{{ include "litellm-stack.serviceHost" (dict "context" $root "component" "postgres") }}:5432/litellm_{{ $profile }}
+            - name: STORE_MODEL_IN_DB
+              value: {{ $config.storeModelInDB | default $root.Values.litellmProd.storeModelInDB | quote }}
+            - name: USE_V2_MIGRATION_RESOLVER
+              value: {{ $config.useV2MigrationResolver | default $root.Values.litellmProd.useV2MigrationResolver | quote }}
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LITELLM_MASTER_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: OPENAI_API_KEY
+            - name: D3_DECISION_API_BASE
+              value: {{ $config.d3DecisionApiBase | default $root.Values.litellmProd.d3DecisionApiBase | quote }}
+            - name: D3_DECISION_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: D3_DECISION_API_KEY
+            - name: LITELLM_OTEL_V2
+              value: {{ $root.Values.litellmProd.otelV2 | quote }}
+            - name: OTEL_EXPORTER
+              value: {{ $root.Values.litellmProd.otelTraceExporter | quote }}
+            - name: OTEL_ENDPOINT
+              value: http://{{ include "litellm-stack.serviceHost" (dict "context" $root "component" "data-prepper") }}:21890
+            - name: OTEL_SERVICE_NAME
+              value: {{ $component }}
+            - name: OTEL_ENVIRONMENT_NAME
+              value: {{ ternary "production" "development" (eq $profile "prod") }}
+            - name: OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
+              value: {{ $root.Values.litellmProd.otelCaptureMessageContent | quote }}
+            - name: OTEL_PYTHON_FASTAPI_EXCLUDED_URLS
+              value: ".*"
+            - name: LANGFUSE_HOST
+              value: http://{{ include "litellm-stack.serviceHost" (dict "context" $root "component" "langfuse-web") }}:3000
+            - name: PROXY_BASE_URL
+              value: https://{{ include "litellm-stack.host" (dict "context" $root "service" (printf "llm%s" (ternary "" "-dev" (eq $profile "prod"))) "override" $config.host) }}
+            - name: FORWARDED_ALLOW_IPS
+              value: {{ $root.Values.litellmProd.forwardedAllowIps | quote }}
+            {{- if $langfuseOn }}
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_PUBLIC_KEY
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_SECRET_KEY
+            - name: LANGFUSE_USER_ID_SALT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LANGFUSE_USER_ID_SALT
+            {{- end }}
+            {{- if $lensOn }}
+            - name: LITELLM_LENS_URL
+              value: http://{{ include "litellm-stack.serviceHost" (dict "context" $root "component" "lens") }}:4318
+            - name: LITELLM_LENS_PUBLIC_URL
+              value: https://{{ include "litellm-stack.host" (dict "context" $root "service" "lens" "override" $root.Values.lens.host) }}
+            - name: LITELLM_LENS_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LITELLM_LENS_SERVICE_TOKEN
+            - name: LENS_GATEWAY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LENS_GATEWAY_SECRET
+            {{- end }}
+            {{- if eq $profile "dev" }}
+            - name: PG_VECTOR_API_BASE
+              value: http://{{ include "litellm-stack.serviceHost" (dict "context" $root "component" "litellm-pgvector") }}:8000
+            - name: PG_VECTOR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_VECTOR_API_KEY
+            - name: QDRANT_API_BASE
+              value: http://{{ include "litellm-stack.serviceHost" (dict "context" $root "component" "qdrant") }}:6333
+            - name: QDRANT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: QDRANT_API_KEY
+            - name: BGE_M3_API_BASE
+              value: {{ $config.bgeM3ApiBase | quote }}
+            - name: BGE_M3_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: BGE_M3_API_KEY
+            - name: XBERG_INDEX_EMBEDDING_MODEL
+              value: hosted_vllm/bge-m3
+            - name: XBERG_INDEX_EMBEDDING_API_BASE
+              value: {{ $config.bgeM3ApiBase | quote }}
+            - name: XBERG_INDEX_EMBEDDING_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: BGE_M3_API_KEY
+            - name: PRESIDIO_ANALYZER_API_BASE
+              value: http://{{ include "litellm-stack.serviceHost" (dict "context" $root "component" "presidio-analyzer") }}:3000
+            - name: PRESIDIO_ANONYMIZER_API_BASE
+              value: http://{{ include "litellm-stack.serviceHost" (dict "context" $root "component" "presidio-anonymizer") }}:3000
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 4000
+          volumeMounts:
+            - name: runtime
+              mountPath: /app/runtime
+              readOnly: true
+            {{- if $root.Values.litellmProd.branding.enabled }}
+            - name: branding
+              mountPath: /app/branding
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+          # Mirrors the upstream healthcheck on /health/liveliness.
+          startupProbe:
+            httpGet:
+              path: /health/liveliness
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /health/liveliness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/liveliness
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $config.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-litellm-config
+        - name: modules
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-litellm-config
+            items:
+              - key: prepare_runtime_config.py
+                path: prepare_runtime_config.py
+              - key: langfuse_user_attribution.py
+                path: langfuse_user_attribution.py
+              - key: xberg_auto_index.py
+                path: xberg_auto_index.py
+              # Guardrails, policies, and search tools are include:-ed by name
+              # from config.<profile>.yaml, so they sit beside it.
+              - key: search.yaml
+                path: modules/search.yaml
+              - key: presidio.yaml
+                path: modules/guardrails/presidio.yaml
+              - key: prompt-injection.yaml
+                path: modules/guardrails/prompt-injection.yaml
+              - key: eu-data-protection.yaml
+                path: modules/policies/eu-data-protection.yaml
+        - name: runtime
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        {{- if $root.Values.litellmProd.branding.enabled }}
+        - name: branding
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-branding
+        {{- end }}
+      {{- include "litellm-stack.nodeSelector" (dict "context" $root "component" $config) | nindent 6 }}
+      {{- include "litellm-stack.tolerations" (dict "context" $root "component" $config) | nindent 6 }}
+      {{- include "litellm-stack.affinity" (dict "context" $root "component" $config) | nindent 6 }}
+---
+{{ if $config.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" $component) | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $name }}
+  minReplicas: {{ $config.autoscaling.minReplicas }}
+  maxReplicas: {{ $config.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $config.autoscaling.targetCPUUtilizationPercentage }}
+---
+{{ end }}
+{{- if $config.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" $component) | nindent 4 }}
+spec:
+  minAvailable: {{ $config.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" $component) | nindent 6 }}
+---
+{{ end }}
+{{- end }}
+{{- end }}

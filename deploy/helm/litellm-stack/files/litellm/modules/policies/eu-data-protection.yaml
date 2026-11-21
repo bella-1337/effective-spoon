@@ -1,0 +1,10 @@
+policies:
+  eu-data-protection:
+    description: Mask supported personal and organization data before and after every model call.
+    guardrails:
+      add:
+        - presidio-pii
+
+policy_attachments:
+  - policy: eu-data-protection
+    scope: "*"

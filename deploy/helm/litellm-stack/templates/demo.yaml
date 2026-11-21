@@ -1,0 +1,130 @@
+{{- /*
+demo profile: one-shot seed Jobs.
+
+Upstream ran litellm-demo-data-prod under the demo profile and
+litellm-demo-data-dev under dev, both replaying litellm/demo-data.sql against the
+matching database after the proxy became healthy.
+
+Off by default. Seeding changes real dashboard numbers, so it is a deliberate opt
+in, and each Job is a Helm hook so it runs once per install rather than on every
+upgrade.
+*/ -}}
+{{- if .Values.demo.enabled }}
+{{- $root := . -}}
+{{- $secret := include "litellm-stack.secretName" $root -}}
+{{- $dbHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "postgres") -}}
+{{- if not (or .Values.litellmProd.enabled .Values.litellmDev.enabled) }}
+{{- fail "demo.enabled requires litellmProd.enabled or litellmDev.enabled" }}
+{{- end }}
+{{- range $profile := list "prod" "dev" }}
+{{- $gateway := index $root.Values (printf "litellm%s" (title $profile)) }}
+{{- /*
+The dev seed upstream only ran under the dev profile, so keep that: a dev seed
+needs litellmDev.enabled, and a prod seed needs litellmProd.enabled.
+*/}}
+{{- if and $gateway.enabled (or (eq $profile "dev") $root.Values.litellmProd.enabled) }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" (printf "litellm-demo-data-%s" $profile)) }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" (printf "litellm-demo-data-%s" $profile)) | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install
+    helm.sh/hook-weight: "35"
+    helm.sh/hook-delete-policy: {{ $root.Values.jobs.hooks.deletePolicy }}
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" (printf "litellm-demo-data-%s" $profile)) | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # The upstream service waited for the gateway to report healthy, because
+        # LiteLLM creates the tables the seed inserts into.
+        - name: wait-for-gateway
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.postgres) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command:
+            - sh
+            - -ec
+            - |
+              until pg_isready -h "$PGHOST" -U "$PGUSER" -d "litellm_{{ $profile }}"; do
+                echo "waiting for the litellm_{{ $profile }} database"
+                sleep 3
+              done
+              until psql --dbname "litellm_{{ $profile }}" --tuples-only --no-align \
+                --command "SELECT 1 FROM information_schema.tables WHERE table_name = 'LiteLLM_SpendLogs'" | grep -q 1; do
+                echo "waiting for LiteLLM to create its schema"
+                sleep 5
+              done
+          env:
+            - name: PGHOST
+              value: {{ $dbHost }}
+            - name: PGUSER
+              value: litellm
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: seed
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.postgres) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          args:
+            - psql
+            - --no-psqlrc
+            - --set
+            - ON_ERROR_STOP=1
+            - --file
+            - /seed/demo-data.sql
+          env:
+            - name: PGHOST
+              value: {{ $dbHost }}
+            - name: PGDATABASE
+              value: litellm_{{ $profile }}
+            - name: PGUSER
+              value: litellm
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_PASSWORD
+          volumeMounts:
+            - name: seed
+              mountPath: /seed
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1
+              memory: 512Mi
+      volumes:
+        - name: seed
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-demo-data
+{{- end }}
+{{- end }}
+{{- end }}

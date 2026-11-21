@@ -1,0 +1,35 @@
+# Enables every optional component so the chart checks render all templates.
+# For linting and schema checks only; not a deployable configuration.
+litellmDev:
+  enabled: true
+  host: llm-dev.example.test
+demo:
+  enabled: true
+xberg:
+  enabled: true
+  egress:
+    dns:
+      enabled: true
+      # Only satisfies the guard that requires it; a real release reads the
+      # address from the xberg-dns Service after the first install.
+      clusterIP: 10.96.0.53
+grafana:
+  enabled: true
+  host: grafana.example.test
+langfuse:
+  enabled: true
+  webHost: langfuse.example.test
+  s3Host: s3.example.test
+lens:
+  enabled: true
+  host: lens.example.test
+security:
+  enabled: true
+prometheus:
+  nodeExporter:
+    enabled: true
+  kubernetesTargets:
+    enabled: true
+qdrant:
+  persistence:
+    enabled: true

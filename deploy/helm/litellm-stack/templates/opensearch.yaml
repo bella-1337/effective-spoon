@@ -1,0 +1,806 @@
+{{- /*
+OpenSearch, its certificate material, the setup and bridge Jobs, Dashboards, and
+Data Prepper.
+
+The upstream stack created a private CA in a one-shot container and shared four
+named volumes (CA private key, public CA, node certs, admin certs) between the
+services that needed each. Kubernetes has no equivalent of a volume several
+single-writer containers can reliably mount across nodes, so the same split is
+carried in a Secret instead: one key per file, and each consumer mounts only the
+files it is allowed to see. publish-certs.py in files/opensearch keeps the
+upstream generate-certs.sh unchanged and adds the Secret round-trip.
+
+TLS and the security plugin stay on. Neither is configurable here by design.
+*/ -}}
+{{- if .Values.opensearch.enabled }}
+{{- $root := . -}}
+{{- $secret := include "litellm-stack.secretName" $root -}}
+{{- $certsSecret := printf "%s-opensearch-certs" (include "litellm-stack.fullname" $root) -}}
+{{- $osHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "opensearch") -}}
+{{- $tools := include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.opensearchTools) -}}
+{{- $dashboardsHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "opensearch-dashboards") -}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $certsSecret }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-certs") | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $certsSecret }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-certs") | nindent 4 }}
+rules:
+  # create cannot be limited by resourceNames, so it is its own rule.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ $certsSecret | quote }}]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $certsSecret }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-certs") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $certsSecret }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $certsSecret }}
+    namespace: {{ $root.Release.Namespace }}
+---
+{{- /*
+Certificate Job. Re-runs on every install and upgrade. The upstream script
+reissues a leaf only when it is missing or inside the renewal window, so this is
+idempotent and doubles as the rotation path.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "opensearch-certs") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-certs") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: {{ $root.Values.jobs.hooks.deletePolicy }}
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-certs") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      restartPolicy: Never
+      serviceAccountName: {{ $certsSecret }}
+      # The upstream script chowns its output to the OpenSearch and tools UIDs
+      # and sets 0400 modes, so it runs as root and drops everything else.
+      securityContext:
+        runAsUser: 0
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: publish-certs
+          image: {{ $tools }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command: ["python", "/app/publish-certs.py"]
+          env:
+            - name: OPENSEARCH_CERT_VALIDITY_DAYS
+              value: {{ $root.Values.opensearch.certificate.validityDays | quote }}
+            - name: OPENSEARCH_CERT_RENEW_BEFORE_DAYS
+              value: {{ $root.Values.opensearch.certificate.renewBeforeDays | quote }}
+            - name: CERT_SECRET_NAME
+              value: {{ $certsSecret }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # OpenSearch runs as 1000 in its official image; the tools image runs
+            # as 65532. Both need their own keys readable.
+            - name: OPENSEARCH_UID
+              value: "1000"
+            - name: OPENSEARCH_TOOLS_UID
+              value: "65532"
+          volumeMounts:
+            # A scratch directory the wrapper hydrates from the Secret, runs the
+            # upstream script against, and then publishes from.
+            - name: certs
+              mountPath: /certs
+            - name: scripts
+              mountPath: /app
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # The upstream script chowns and chmods its output.
+              add: ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1
+              memory: 256Mi
+      volumes:
+        - name: certs
+          emptyDir: {}
+        - name: scripts
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-opensearch-certs
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $osHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "opensearch") | nindent 4 }}
+  ports:
+    - name: https
+      port: 9200
+      targetPort: https
+    - name: transport
+      port: 9300
+      targetPort: transport
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $osHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch") | nindent 4 }}
+spec:
+  serviceName: {{ $osHost }}
+  replicas: {{ $root.Values.opensearch.replicas }}
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "opensearch") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # OpenSearch cannot start before its node certificate is published.
+        - name: wait-for-certs
+          image: {{ $tools }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command:
+            - sh
+            - -ec
+            - |
+              until [ -s /certs/node.pem ] && [ -s /certs/node-key.pem ]; do
+                echo "waiting for the OpenSearch node certificate"
+                sleep 3
+              done
+          volumeMounts:
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: opensearch
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.opensearch) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            - name: DISABLE_INSTALL_DEMO_CONFIG
+              value: "true"
+            - name: DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI
+              value: "true"
+            - name: OPENSEARCH_JAVA_OPTS
+              value: "-Xms{{ $root.Values.opensearch.javaHeap }} -Xmx{{ $root.Values.opensearch.javaHeap }}"
+            - name: OPENSEARCH_DATASOURCES_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: OPENSEARCH_DATASOURCES_MASTER_KEY
+          ports:
+            - name: https
+              containerPort: 9200
+            - name: transport
+              containerPort: 9300
+          volumeMounts:
+            - name: config
+              mountPath: /usr/share/opensearch/config/opensearch.yml
+              subPath: opensearch.yml
+              readOnly: true
+            - name: config
+              mountPath: /usr/share/opensearch/config/opensearch-security/internal_users.yml
+              subPath: internal_users.yml
+              readOnly: true
+            - name: config
+              mountPath: /usr/share/opensearch/config/opensearch-security/roles_mapping.yml
+              subPath: roles_mapping.yml
+              readOnly: true
+            # The upstream opensearch.yml expects certs/{node,node-key,ca}.pem
+            # beside each other, so each key is projected to its own path.
+            - name: certs
+              mountPath: /usr/share/opensearch/config/certs
+              readOnly: true
+            - name: data
+              mountPath: /usr/share/opensearch/data
+          # 401 proves TLS is up and the security index is initialized.
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - test "$(curl -s -o /dev/null -w '%{http_code}' --cacert /usr/share/opensearch/config/certs/ca.pem https://localhost:9200/)" = 401
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - test "$(curl -s -o /dev/null -w '%{http_code}' --cacert /usr/share/opensearch/config/certs/ca.pem https://localhost:9200/)" = 401
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.opensearch.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-opensearch
+        - name: certs
+          secret:
+            secretName: {{ $certsSecret }}
+            items:
+              - key: node.pem
+                path: node.pem
+              - key: node-key.pem
+                path: node-key.pem
+              - key: ca.pem
+                path: ca.pem
+        - name: data
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "litellm-stack.storageClass" (dict "context" $root "local" $root.Values.opensearch.persistence.storageClass) | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ $root.Values.opensearch.persistence.size }}
+---
+{{- /* 
+Cluster setup. Creates the service users, index templates, dashboards, and
+monitors through the Security REST API with the private admin certificate.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "opensearch-setup") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-setup") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "20"
+    helm.sh/hook-delete-policy: {{ $root.Values.jobs.hooks.deletePolicy }}
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-setup") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-for-opensearch
+          image: {{ $tools }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command:
+            - sh
+            - -ec
+            - |
+              until [ "$(curl -s -o /dev/null -w '%{http_code}' --cacert /certs/ca.pem https://{{ $osHost }}:9200/)" = 401 ]; do
+                echo "waiting for OpenSearch"
+                sleep 5
+              done
+          volumeMounts:
+            - name: admin-certs
+              mountPath: /certs
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: setup-cluster
+          image: {{ $tools }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command: ["setup-cluster"]
+          env:
+            - name: OPENSEARCH_URL
+              value: https://{{ $osHost }}:9200
+            - name: OPENSEARCH_CA_FILE
+              value: /certs/ca.pem
+            - name: OPENSEARCH_LOG_RETENTION_DAYS
+              value: {{ $root.Values.opensearch.retention.logs | quote }}
+            - name: OPENSEARCH_METRICS_RETENTION_DAYS
+              value: {{ $root.Values.opensearch.retention.metrics | quote }}
+            - name: OPENSEARCH_AUDIT_RETENTION_DAYS
+              value: {{ $root.Values.opensearch.retention.audit | quote }}
+            - name: OPENSEARCH_TRACE_RETENTION_DAYS
+              value: {{ $root.Values.opensearch.retention.traces | quote }}
+            - name: OPENSEARCH_BRIDGE_INTERVAL_SECONDS
+              value: {{ $root.Values.opensearch.bridgeIntervalSeconds | quote }}
+            - name: OPENSEARCH_ALERT_CHANNEL_ID
+              value: {{ $root.Values.opensearch.alertChannelId | quote }}
+            - name: PROMETHEUS_URL
+              value: http://{{ include "litellm-stack.serviceHost" (dict "context" $root "component" "prometheus") }}:9090
+            {{- range $key := list "OPENSEARCH_ADMIN_PASSWORD" "OPENSEARCH_DASHBOARDS_SERVER_PASSWORD" "OPENSEARCH_INGEST_PASSWORD" "OPENSEARCH_BRIDGE_PASSWORD" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ $key }}
+            {{- end }}
+          volumeMounts:
+            - name: admin-certs
+              mountPath: /certs
+              readOnly: true
+            - name: alerting
+              mountPath: /app/alerting
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1
+              memory: 1Gi
+      volumes:
+        - name: admin-certs
+          secret:
+            secretName: {{ $certsSecret }}
+            items:
+              # The tools image authenticates with the admin certificate and
+              # verifies OpenSearch with the public CA.
+              - key: admin.pem
+                path: admin.pem
+              - key: admin-key.pem
+                path: admin-key.pem
+              - key: ca.pem
+                path: ca.pem
+        - name: alerting
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-grafana-alerting
+---
+{{/* Continuous LiteLLM usage bridge into OpenSearch. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "opensearch-bridge") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-bridge") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "opensearch-bridge") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-bridge") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bridge
+          image: {{ $tools }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command: ["bridge"]
+          env:
+            - name: OPENSEARCH_URL
+              value: https://{{ $osHost }}:9200
+            - name: OPENSEARCH_CA_FILE
+              value: /certs/ca.pem
+            - name: OPENSEARCH_USERNAME
+              value: litellm_bridge
+            - name: LITELLM_DATABASE_HOST
+              value: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "postgres") }}
+            - name: LITELLM_DATABASE_USER
+              value: opensearch_ro
+            - name: PROMETHEUS_URL
+              value: http://{{ include "litellm-stack.serviceHost" (dict "context" $root "component" "prometheus") }}:9090
+            - name: OPENSEARCH_BRIDGE_INTERVAL_SECONDS
+              value: {{ $root.Values.opensearch.bridgeIntervalSeconds | quote }}
+            - name: OPENSEARCH_USAGE_RETENTION_DAYS
+              value: {{ $root.Values.opensearch.retention.usage | quote }}
+            - name: OPENSEARCH_USAGE_OVERLAP_MINUTES
+              value: {{ $root.Values.opensearch.usageOverlapMinutes | quote }}
+            - name: OPENSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: OPENSEARCH_BRIDGE_PASSWORD
+            - name: LITELLM_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: OPENSEARCH_DATABASE_PASSWORD
+            # The session salt pseudonymizes per-user identifiers in usage data.
+            - name: OPENSEARCH_SESSION_ID_SALT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: OPENSEARCH_SESSION_ID_SALT
+          volumeMounts:
+            - name: ca
+              mountPath: /certs
+              readOnly: true
+            - name: alerting
+              mountPath: /app/alerting
+              readOnly: true
+            - name: metrics
+              mountPath: /app/metrics.yml
+              subPath: metrics.yml
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            exec:
+              command: ["python", "-m", "litellm_opensearch", "healthcheck"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1
+              memory: 1Gi
+      volumes:
+        - name: ca
+          secret:
+            secretName: {{ $certsSecret }}
+            items:
+              - key: ca.pem
+                path: ca.pem
+        - name: alerting
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-grafana-alerting
+        - name: metrics
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-opensearch-metrics
+        - name: tmp
+          emptyDir: {}
+---
+{{/* OpenSearch Dashboards: the default multi-user observability UI. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $dashboardsHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-dashboards") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "opensearch-dashboards") | nindent 4 }}
+  ports:
+    - name: http
+      port: 5601
+      targetPort: http
+---
+{{ if .Values.opensearchDashboards.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $dashboardsHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-dashboards") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "opensearch-dashboards") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-dashboards") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: dashboards
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.opensearchDashboards) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            - name: OPENSEARCH_DASHBOARDS_SERVER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: OPENSEARCH_DASHBOARDS_SERVER_PASSWORD
+            - name: OPENSEARCH_DASHBOARDS_COOKIE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: OPENSEARCH_DASHBOARDS_COOKIE_PASSWORD
+          ports:
+            - name: http
+              containerPort: 5601
+          volumeMounts:
+            # The upstream opensearch_dashboards.yml reads the TLS CA from
+            # config/certs/ca.pem and the credentials from the environment.
+            - name: config
+              mountPath: /usr/share/opensearch-dashboards/config/opensearch_dashboards.yml
+              subPath: opensearch_dashboards.yml
+              readOnly: true
+            - name: ca
+              mountPath: /usr/share/opensearch-dashboards/config/certs
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /api/status
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          # 200 or 401 both mean the process is serving.
+          livenessProbe:
+            httpGet:
+              path: /api/status
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.opensearchDashboards.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-opensearch-dashboards
+        - name: ca
+          secret:
+            secretName: {{ $certsSecret }}
+            items:
+              - key: ca.pem
+                path: ca.pem
+---
+{{/* Dashboards import: saved objects, index patterns, and dashboards. */}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "opensearch-dashboards-setup") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-dashboards-setup") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "30"
+    helm.sh/hook-delete-policy: {{ $root.Values.jobs.hooks.deletePolicy }}
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "opensearch-dashboards-setup") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: setup-dashboards
+          image: {{ $tools }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command: ["setup-dashboards"]
+          env:
+            - name: OPENSEARCH_DASHBOARDS_URL
+              value: http://{{ $dashboardsHost }}:5601
+            - name: ROI_MINUTES_SAVED_PER_REQUEST
+              value: {{ $root.Values.postgres.roi.minutesSavedPerRequest | quote }}
+            - name: ROI_MINUTES_SAVED_PER_SESSION
+              value: {{ $root.Values.postgres.roi.minutesSavedPerSession | quote }}
+            - name: ROI_LOADED_HOURLY_COST
+              value: {{ $root.Values.postgres.roi.loadedHourlyCost | quote }}
+            - name: ROI_VALUE_REALIZATION_FACTOR
+              value: {{ $root.Values.postgres.roi.valueRealizationFactor | quote }}
+            - name: ROI_CURRENCY
+              value: {{ $root.Values.postgres.roi.currency | quote }}
+            - name: OPENSEARCH_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: OPENSEARCH_ADMIN_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1
+              memory: 1Gi
+---
+{{ end }}
+{{- if .Values.dataPrepper.enabled }}
+{{- /* Data Prepper: container logs and OTLP traces into OpenSearch. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "data-prepper") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "data-prepper") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "data-prepper") | nindent 4 }}
+  ports:
+    - name: otlp-traces
+      port: 21890
+      targetPort: otlp-traces
+    - name: otlp-logs
+      port: 21892
+      targetPort: otlp-logs
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "data-prepper") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "data-prepper") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "data-prepper") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "data-prepper") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: data-prepper
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.dataPrepper) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          # The upstream entrypoint renders the password into a private copy of
+          # pipelines.yaml, then starts Data Prepper on the rendered pair.
+          command: ["/bin/bash", "/etc/data-prepper/entrypoint.sh"]
+          env:
+            - name: OPENSEARCH_INGEST_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: OPENSEARCH_INGEST_PASSWORD
+            - name: JAVA_OPTS
+              value: {{ $root.Values.dataPrepper.javaOpts | quote }}
+          ports:
+            - name: otlp-traces
+              containerPort: 21890
+            - name: otlp-logs
+              containerPort: 21892
+          volumeMounts:
+            - name: config
+              mountPath: /etc/data-prepper
+              readOnly: true
+            # pipelines.yaml points at /usr/share/data-prepper/certs/ca.pem.
+            - name: ca
+              mountPath: /usr/share/data-prepper/certs
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            tcpSocket:
+              port: otlp-logs
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.dataPrepper.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-data-prepper
+        - name: ca
+          secret:
+            secretName: {{ $certsSecret }}
+            items:
+              - key: ca.pem
+                path: ca.pem
+        - name: tmp
+          emptyDir: {}
+{{- end }}
+{{- end }}

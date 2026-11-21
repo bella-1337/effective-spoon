@@ -1,0 +1,117 @@
+include:
+  - modules/search.yaml
+  - modules/guardrails/presidio.yaml
+  - modules/guardrails/prompt-injection.yaml
+  - modules/policies/eu-data-protection.yaml
+
+model_list:
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: test-model
+    litellm_params:
+      model: openai/test-model
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: d3-mini
+    litellm_params:
+      model: hosted_vllm/vllm-sr/d3-mini
+      api_base: os.environ/D3_DECISION_API_BASE
+      api_key: os.environ/D3_DECISION_API_KEY
+    model_info:
+      mode: decisions
+  - model_name: coding-router
+    litellm_params:
+      model: auto_router/complexity_router
+      complexity_router_default_model: gpt-4o
+      complexity_router_config:
+        classifier_type: oss_classifier
+        opensource_classifier_config:
+          deployment_name: d3-mini
+          timeout_ms: 15000
+        tiers:
+          SIMPLE: gpt-4o-mini
+          MEDIUM: gpt-4o-mini
+          COMPLEX: gpt-4o
+          REASONING: gpt-4o
+        classifier_fallback: default_model
+  - model_name: bge-m3
+    litellm_params:
+      model: hosted_vllm/bge-m3
+      api_base: os.environ/BGE_M3_API_BASE
+      api_key: os.environ/BGE_M3_API_KEY
+
+vector_store_registry:
+  - vector_store_name: SME shared knowledge
+    litellm_params:
+      vector_store_id: sme-knowledge
+      custom_llm_provider: pg_vector
+      api_base: os.environ/PG_VECTOR_API_BASE
+      api_key: os.environ/PG_VECTOR_API_KEY
+      vector_store_description: Shared development knowledge store backed by pgvector
+      vector_store_metadata:
+        embedding_model: bge-m3
+        embedding_dimensions: 1024
+
+mcp_servers:
+  xberg:
+    url: http://xberg:8001/mcp
+    transport: http
+    description: Internal Xberg document and website extraction server
+    allowed_tools:
+      - extract
+      - detect_mime_type
+      - get_version
+      - list_formats
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 60
+  turn_off_message_logging: true
+  store_audit_logs: true
+  # Safety net for keys created without explicit limits, so a runaway script
+  # cannot monopolize the proxy. Sized well above a busy coding agent; set
+  # explicit per-key or team values for shared service keys. Spend is
+  # governed by budgets, so no default token limit is applied.
+  default_key_generate_params:
+    max_parallel_requests: 32
+    rpm_limit: 1200
+  callbacks:
+    - modules.langfuse_user_attribution.proxy_handler_instance
+    - langfuse_otel
+  cache: true
+  cache_params:
+    type: qdrant-semantic
+    mode: default_off
+    supported_call_types: ["acompletion"]
+    qdrant_api_base: os.environ/QDRANT_API_BASE
+    qdrant_api_key: os.environ/QDRANT_API_KEY
+    qdrant_collection_name: litellm_dev_semantic_cache
+    qdrant_semantic_cache_embedding_model: bge-m3
+    qdrant_semantic_cache_vector_size: 1024
+    similarity_threshold: 0.92
+    semantic_cache_scope: end_user
+  success_callback:
+    - prometheus
+    - modules.xberg_auto_index.proxy_handler_instance
+  failure_callback: ["prometheus"]
+  mcp_semantic_tool_filter:
+    enabled: true
+    embedding_model: bge-m3
+    top_k: 3
+    similarity_threshold: 0.3
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
+  disable_spend_logs: false
+  store_prompts_in_spend_logs: false
+  maximum_spend_logs_retention_period: 180d
+  maximum_health_check_retention_period: 7d
+  maximum_spend_logs_cleanup_cron: "0 4 * * *"
+  enable_chat_ui: true

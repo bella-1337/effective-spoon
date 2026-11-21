@@ -1,0 +1,213 @@
+{{- /*
+Grafana Alloy log collector.
+
+Upstream discovered containers through a Docker socket proxy and read their log
+files. In Kubernetes the equivalent is the pod log API, which needs RBAC to read
+pods and their logs in this namespace. Two collectors are deployed from the same
+image, matching upstream:
+
+  - alloy: default pipeline, pod logs -> Data Prepper -> OpenSearch
+  - alloy-loki: grafana profile only, pod logs -> Loki
+
+Neither reads secrets: the Role grants get/list/watch on pods and get on
+pods/log, nothing more.
+*/ -}}
+{{- if .Values.alloy.enabled }}
+{{- $root := . -}}
+{{- $name := include "litellm-stack.fullname" $root -}}
+{{- $sa := printf "%s-alloy" $name -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "alloy") | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $sa }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "alloy") | nindent 4 }}
+rules:
+  # Exactly what discovery.kubernetes and loki.source.kubernetes need.
+  - apiGroups: [""]
+    resources: ["pods", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $sa }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "alloy") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $sa }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ $root.Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "alloy") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "alloy") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "alloy") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "alloy") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      serviceAccountName: {{ $sa }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 473
+        runAsGroup: 473
+        fsGroup: 473
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: alloy
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.alloy) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/var/lib/alloy/data
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: RELEASE_NAME
+              value: {{ $root.Release.Name }}
+            - name: DATA_PREPPER_ENDPOINT
+              value: {{ printf "%s:21892" (include "litellm-stack.serviceHost" (dict "context" $root "component" "data-prepper")) }}
+          ports:
+            - name: http
+              containerPort: 12345
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/alloy/data
+          # Alloy exposes its own UI and health endpoints on 12345.
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.alloy.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}-alloy
+        - name: data
+          emptyDir: {}
+---
+{{ if .Values.grafana.enabled }}
+{{- if .Values.grafana.loki.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "alloy-loki") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "alloy-loki") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "alloy-loki") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "alloy-loki") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      serviceAccountName: {{ $sa }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 473
+        runAsGroup: 473
+        fsGroup: 473
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: alloy-loki
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.alloy) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          args:
+            - run
+            - /etc/alloy/loki.alloy
+            - --storage.path=/var/lib/alloy/data
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: RELEASE_NAME
+              value: {{ $root.Release.Name }}
+            - name: LOKI_PUSH_URL
+              value: {{ printf "http://%s:3100/loki/api/v1/push" (include "litellm-stack.serviceHost" (dict "context" $root "component" "loki")) }}
+          ports:
+            - name: http
+              containerPort: 12345
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/alloy/data
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.alloy.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}-alloy
+        - name: data
+          emptyDir: {}
+{{- end }}
+{{- end }}
+{{- end }}

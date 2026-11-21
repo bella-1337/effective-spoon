@@ -1,0 +1,80 @@
+{{- /*
+Ingress for every publicly routed service.
+
+Upstream put Traefik in front and attached a security-headers and rate-limit
+middleware to the entrypoint, so every router inherited them. Here that is the
+Ingress annotation set in values.yaml (nginx by default), applied to each host
+block identically.
+
+The upstream Traefik also stripped ClientAddr, ClientHost, and request headers
+from its access log. Most ingress controllers have an equivalent; set
+ingress.annotations accordingly for your controller.
+*/ -}}
+{{- if .Values.ingress.enabled }}
+{{- $root := . -}}
+{{- $prodHost := include "litellm-stack.host" (dict "context" $root "service" "llm" "override" $root.Values.litellmProd.host) -}}
+{{- $devHost := include "litellm-stack.host" (dict "context" $root "service" "llm-dev" "override" $root.Values.litellmDev.host) -}}
+{{- $dashboardsHost := include "litellm-stack.host" (dict "context" $root "service" "opensearch" "override" $root.Values.ingress.hosts.opensearchDashboards) -}}
+{{- $grafanaHost := include "litellm-stack.host" (dict "context" $root "service" "grafana" "override" (default $root.Values.grafana.host $root.Values.ingress.hosts.grafana)) -}}
+{{- $langfuseHost := include "litellm-stack.host" (dict "context" $root "service" "langfuse" "override" (default $root.Values.langfuse.webHost $root.Values.ingress.hosts.langfuse)) -}}
+{{- $langfuseS3Host := include "litellm-stack.host" (dict "context" $root "service" "langfuse-s3" "override" (default $root.Values.langfuse.s3Host $root.Values.ingress.hosts.langfuseS3)) -}}
+{{- $lensHost := include "litellm-stack.host" (dict "context" $root "service" "lens" "override" (default $root.Values.lens.host $root.Values.ingress.hosts.lens)) -}}
+
+{{- /* Collect one path list per host from the components that are enabled. */ -}}
+{{- $hosts := dict -}}
+{{- if $root.Values.litellmProd.enabled -}}
+{{- $_ := set $hosts $prodHost (list (dict "component" "litellm-prod" "port" 4000)) -}}
+{{- end -}}
+{{- if $root.Values.litellmDev.enabled -}}
+{{- $_ := set $hosts $devHost (list (dict "component" "litellm-dev" "port" 4000)) -}}
+{{- end -}}
+{{- if $root.Values.opensearchDashboards.enabled -}}
+{{- $_ := set $hosts $dashboardsHost (list (dict "component" "opensearch-dashboards" "port" 5601)) -}}
+{{- end -}}
+{{- if $root.Values.grafana.enabled -}}
+{{- $_ := set $hosts $grafanaHost (list (dict "component" "grafana" "port" 3000)) -}}
+{{- end -}}
+{{- if $root.Values.langfuse.enabled -}}
+{{- $_ := set $hosts $langfuseHost (list (dict "component" "langfuse-web" "port" 3000)) -}}
+{{- $_ := set $hosts $langfuseS3Host (list (dict "component" "langfuse-minio" "port" 9000)) -}}
+{{- end -}}
+{{- if $root.Values.lens.enabled -}}
+{{- $_ := set $hosts $lensHost (list (dict "component" "lens" "port" 4318)) -}}
+{{- end -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "litellm-stack.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.labels" . | nindent 4 }}
+  annotations:
+    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        {{- range $host, $_ := $hosts }}
+        - {{ $host | quote }}
+        {{- end }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    {{- range $host, $backends := $hosts }}
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          {{- range $backends }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" .component) }}
+                port:
+                  number: {{ .port }}
+          {{- end }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,320 @@
+{{- /*
+grafana profile: Grafana, Loki, and the Loki log collector.
+
+Off by default. OpenSearch Dashboards stays the default observability UI, exactly
+as upstream. Grafana reads the LiteLLM databases through a dedicated read-only
+role that grafana-db-init created, so the dashboard credentials cannot write.
+*/ -}}
+{{- if .Values.grafana.enabled }}
+{{- $root := . -}}
+{{- $secret := include "litellm-stack.secretName" $root -}}
+{{- $lokiHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "loki") -}}
+{{- $grafanaHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "grafana") -}}
+{{- $publicHost := include "litellm-stack.host" (dict "context" $root "service" "grafana" "override" (default $root.Values.grafana.host $root.Values.ingress.hosts.grafana)) -}}
+---
+{{/* Read-only role for the PostgreSQL datasources. */}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "grafana-db-init") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "grafana-db-init") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "15"
+    helm.sh/hook-delete-policy: {{ $root.Values.jobs.hooks.deletePolicy }}
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "grafana-db-init") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      restartPolicy: Never
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: db-init
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.postgresModern) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            - name: PGHOST
+              value: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "postgres") }}
+            - name: PGUSER
+              value: litellm
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_PASSWORD
+            - name: GRAFANA_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: GRAFANA_DATABASE_PASSWORD
+          # The upstream grafana-db-init service, unchanged in behavior: refuse to
+          # continue without the password, then grant read-only access to every
+          # database Grafana reads.
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              test -n "$$GRAFANA_DATABASE_PASSWORD" || { echo "Set secrets.values.GRAFANA_DATABASE_PASSWORD to use the grafana profile" >&2; exit 64; }
+              psql --dbname postgres --set ON_ERROR_STOP=1 <<'SQL'
+              \getenv grafana_password GRAFANA_DATABASE_PASSWORD
+              SELECT format('CREATE ROLE grafana_ro LOGIN PASSWORD %L', :'grafana_password')
+              WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'grafana_ro') \gexec
+              SELECT format('ALTER ROLE grafana_ro PASSWORD %L', :'grafana_password') \gexec
+              SQL
+              for db in litellm_prod litellm_dev; do
+                psql --dbname "$${db}" --set ON_ERROR_STOP=1 --set database_name="$${db}" <<'SQL'
+              GRANT CONNECT ON DATABASE :"database_name" TO grafana_ro;
+              GRANT USAGE ON SCHEMA public TO grafana_ro;
+              GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafana_ro;
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO grafana_ro;
+              SQL
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1
+              memory: 512Mi
+---
+{{ if .Values.grafana.loki.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $lokiHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "loki") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "loki") | nindent 4 }}
+  ports:
+    - name: http
+      port: 3100
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $lokiHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "loki") | nindent 4 }}
+spec:
+  serviceName: {{ $lokiHost }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "loki") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "loki") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: loki
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.loki) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          args: ["-config.file=/etc/loki/config.yml"]
+          ports:
+            - name: http
+              containerPort: 3100
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki/config.yml
+              subPath: config.yml
+              readOnly: true
+            - name: data
+              mountPath: /loki
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.grafana.loki.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-loki
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "loki") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "litellm-stack.storageClass" (dict "context" $root "local" $root.Values.grafana.loki.persistence.storageClass) | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ $root.Values.grafana.loki.persistence.size }}
+---
+{{ end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $grafanaHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "grafana") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "grafana") | nindent 4 }}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $grafanaHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "grafana") | nindent 4 }}
+spec:
+  serviceName: {{ $grafanaHost }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "grafana") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "grafana") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: grafana
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.grafana) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          # The upstream service refused to start with a blank admin password or
+          # secret key; the same guard stays, because Grafana would otherwise boot
+          # with its defaults.
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              test -n "$${GF_SECURITY_ADMIN_PASSWORD}" || { echo "Set secrets.values.GRAFANA_ADMIN_PASSWORD to use the grafana profile" >&2; exit 64; }
+              test -n "$${GF_SECURITY_SECRET_KEY}" || { echo "Set secrets.values.GRAFANA_SECURITY_SECRET_KEY to use the grafana profile" >&2; exit 64; }
+              test -n "$${GRAFANA_DATABASE_PASSWORD}" || { echo "Set secrets.values.GRAFANA_DATABASE_PASSWORD to use the grafana profile" >&2; exit 64; }
+              exec /run.sh
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: GRAFANA_ADMIN_PASSWORD
+            - name: GF_SECURITY_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: GRAFANA_SECURITY_SECRET_KEY
+            - name: GF_SERVER_ROOT_URL
+              value: https://{{ $publicHost }}
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: {{ $root.Values.grafana.allowSignUp | quote }}
+            - name: GRAFANA_DATABASE_USER
+              value: {{ $root.Values.grafana.database.user | quote }}
+            - name: GRAFANA_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: GRAFANA_DATABASE_PASSWORD
+          ports:
+            - name: http
+              containerPort: 3000
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/grafana
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: dashboards-provider
+              mountPath: /etc/grafana/provisioning/dashboards/dashboards.yml
+              subPath: dashboards.yml
+              readOnly: true
+            - name: dashboards
+              mountPath: /etc/grafana/provisioning/dashboards/litellm
+              readOnly: true
+            - name: alerting
+              mountPath: /etc/grafana/provisioning/alerting
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.grafana.resources | nindent 12 }}
+      volumes:
+        - name: datasources
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-grafana-datasources
+        - name: dashboards-provider
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-grafana-dashboards-provider
+        - name: dashboards
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-grafana-dashboards
+        - name: alerting
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-grafana-alerting
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "grafana") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "litellm-stack.storageClass" (dict "context" $root "local" $root.Values.grafana.persistence.storageClass) | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ $root.Values.grafana.persistence.size }}
+{{- end }}

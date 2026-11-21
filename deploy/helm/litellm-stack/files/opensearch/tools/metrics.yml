@@ -1,0 +1,232 @@
+# PromQL catalog evaluated by opensearch-bridge once per interval.
+#
+# Each "expressions" entry is an instant query. Every returned series becomes a
+# document in litellm-metrics-YYYY.MM.dd with:
+#   metric: <name>, kind: expression, value: <sample>, labels.<label>: <value>,
+#   series: "<label>=<value>,..." (useful as a single split field)
+# The expressions reproduce every Prometheus panel in the repository's own
+# Grafana dashboards and the core panels of the upstream Traefik, PostgreSQL,
+# Node Exporter Full, and LiteLLM dashboards.
+#
+# "raw" selectors mirror every matching series unchanged (kind: raw, metric:
+# <__name__>) so any exported metric can be explored and alerted on in
+# OpenSearch. Histogram buckets are excluded to bound volume; use the
+# quantile expressions instead, or the Prometheus direct-query data source in
+# OpenSearch Dashboards for ad hoc PromQL over every series.
+#
+# Rate windows use 5m to match the Grafana dashboards. Keep names stable: the
+# OpenSearch Dashboards visualizations filter on them.
+
+max_series_per_query: 5000
+
+raw:
+  - name: litellm
+    selector: '{__name__=~"litellm_.+", __name__!~".+_(bucket|created)"}'
+  - name: scrape-health
+    selector: '{__name__=~"scrape_duration_seconds|scrape_samples_scraped"}'
+  - name: traefik
+    selector: '{__name__=~"traefik_.+", __name__!~".+_(bucket|created)"}'
+  - name: postgres
+    # Settings and per-table catalog series are omitted to bound volume.
+    selector: '{__name__=~"pg_up|pg_postmaster_start_time_seconds|pg_database_size_bytes|pg_locks_count|pg_stat_database_.+|pg_stat_activity_.+|pg_stat_bgwriter_.+|pg_wal_.+", job=~"postgres|pgvector"}'
+  - name: blackbox
+    selector: '{__name__=~"probe_.+"}'
+  - name: security-and-backup
+    selector: '{__name__=~"image_security_.+|litellm_backup_.+|node_textfile_.+"}'
+  - name: langfuse-clickhouse-capacity
+    selector: '{__name__=~"ClickHouseAsyncMetrics_(FilesystemMainPathAvailableBytes|FilesystemMainPathTotalBytes|FilesystemLogsPathAvailableBytes|FilesystemLogsPathTotalBytes)|ClickHouseProfileEvents_(AsyncLoggingTextLogTotalMessages|AsyncLoggingErrorFileLogTotalMessages)"}'
+
+expressions:
+  # --- LiteLLM Stack (dev/prod) -------------------------------------------
+  - name: litellm_requests_per_minute
+    title: LiteLLM requests per minute by model
+    query: sum by (job, model) (rate(litellm_requests_metric_total{job=~"litellm-(prod|dev)"}[5m])) * 60
+  - name: litellm_latency_p95_seconds
+    title: LiteLLM end-to-end latency p95
+    query: histogram_quantile(0.95, sum by (le, job) (rate(litellm_request_total_latency_metric_bucket{job=~"litellm-(prod|dev)"}[5m])))
+  - name: litellm_latency_p99_seconds
+    title: LiteLLM end-to-end latency p99
+    query: histogram_quantile(0.99, sum by (le, job) (rate(litellm_request_total_latency_metric_bucket{job=~"litellm-(prod|dev)"}[5m])))
+  - name: litellm_llm_api_latency_p95_seconds
+    title: Provider API latency p95 by model
+    query: histogram_quantile(0.95, sum by (le, job, model) (rate(litellm_llm_api_latency_metric_bucket{job=~"litellm-(prod|dev)"}[5m])))
+  - name: litellm_time_to_first_token_p95_seconds
+    title: Time to first token p95 by model
+    query: histogram_quantile(0.95, sum by (le, job, model) (rate(litellm_llm_api_time_to_first_token_metric_bucket{job=~"litellm-(prod|dev)"}[5m])))
+  - name: litellm_overhead_latency_p95_seconds
+    title: LiteLLM proxy overhead p95
+    query: histogram_quantile(0.95, sum by (le, job) (rate(litellm_overhead_latency_metric_bucket{job=~"litellm-(prod|dev)"}[5m])))
+  - name: litellm_failed_requests_per_second
+    title: LiteLLM failed provider requests per second
+    query: sum by (job) (rate(litellm_llm_api_failed_requests_metric_total{job=~"litellm-(prod|dev)"}[5m]))
+  - name: litellm_proxy_requests_per_second
+    title: LiteLLM proxy requests per second by status code
+    query: sum by (job, status_code) (rate(litellm_proxy_total_requests_metric_total{job=~"litellm-(prod|dev)"}[5m]))
+  - name: litellm_proxy_failures_per_second
+    title: LiteLLM proxy failures per second by exception class
+    query: sum by (job, exception_class) (rate(litellm_proxy_failed_requests_metric_total{job=~"litellm-(prod|dev)"}[5m]))
+  - name: litellm_spend_per_hour
+    title: LiteLLM spend per hour
+    query: sum by (job) (increase(litellm_spend_metric_total{job=~"litellm-(prod|dev)"}[1h]))
+  - name: litellm_spend_per_hour_by_model
+    title: LiteLLM spend per hour by model
+    query: sum by (job, model) (increase(litellm_spend_metric_total{job=~"litellm-(prod|dev)"}[1h]))
+  - name: litellm_tokens_per_minute
+    title: LiteLLM tokens per minute by direction
+    query: label_replace(sum by (job) (rate(litellm_input_tokens_metric_total{job=~"litellm-(prod|dev)"}[5m])) * 60, "direction", "input", "", "") or label_replace(sum by (job) (rate(litellm_output_tokens_metric_total{job=~"litellm-(prod|dev)"}[5m])) * 60, "direction", "output", "", "")
+  - name: litellm_deployment_success_per_second
+    title: Deployment successful responses per second
+    query: sum by (job) (rate(litellm_deployment_success_responses_total{job=~"litellm-(prod|dev)"}[5m]))
+  - name: litellm_deployment_failure_per_second
+    title: Deployment failed responses per second
+    query: sum by (job) (rate(litellm_deployment_failure_responses_total{job=~"litellm-(prod|dev)"}[5m]))
+  - name: litellm_deployment_state
+    title: Deployment state (0 healthy, 1 partial outage, 2 complete outage)
+    query: max by (job, litellm_model_name, api_provider) (litellm_deployment_state{job=~"litellm-(prod|dev)"})
+  - name: litellm_presidio_guardrail_requests_24h
+    title: Presidio guardrail requests (24h)
+    query: sum by (job) (increase(litellm_guardrail_requests_total{job=~"litellm-(prod|dev)", guardrail_name=~"[Pp]residio.*"}[24h]))
+  - name: litellm_guardrail_errors_per_second
+    title: Guardrail errors per second
+    query: sum by (job, guardrail_name) (rate(litellm_guardrail_errors_total{job=~"litellm-(prod|dev)"}[5m]))
+  - name: litellm_cache_hit_ratio
+    title: LiteLLM cache hit ratio
+    query: sum by (job) (rate(litellm_cache_hits_metric_total{job=~"litellm-(prod|dev)"}[5m])) / clamp_min(sum by (job) (rate(litellm_cache_hits_metric_total{job=~"litellm-(prod|dev)"}[5m])) + sum by (job) (rate(litellm_cache_misses_metric_total{job=~"litellm-(prod|dev)"}[5m])), 1e-9)
+  - name: litellm_in_flight_requests
+    title: LiteLLM in-flight requests
+    query: sum by (job) (litellm_in_flight_requests{job=~"litellm-(prod|dev)"})
+
+  # --- Scrape targets and probes -----------------------------------------
+  - name: target_up
+    title: Prometheus target up (1) or down (0)
+    query: up
+  - name: probe_success
+    title: Blackbox probe success
+    query: probe_success{job="blackbox-http"}
+  - name: probe_duration_seconds
+    title: Blackbox probe duration
+    query: probe_duration_seconds{job="blackbox-http"}
+  - name: langfuse_clickhouse_data_free_ratio
+    title: Langfuse ClickHouse data filesystem free ratio
+    query: ClickHouseAsyncMetrics_FilesystemMainPathAvailableBytes{job="langfuse-clickhouse"} / ClickHouseAsyncMetrics_FilesystemMainPathTotalBytes{job="langfuse-clickhouse"}
+  - name: langfuse_clickhouse_log_messages_per_second
+    title: Langfuse ClickHouse retained log messages per second
+    query: rate(ClickHouseProfileEvents_AsyncLoggingTextLogTotalMessages{job="langfuse-clickhouse"}[5m])
+
+  # --- Host (Node Exporter Full core panels) -----------------------------
+  - name: node_cpu_busy_percent
+    title: Host CPU busy
+    query: 100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{job="node", mode="idle"}[5m])))
+  - name: node_cpu_mode_percent
+    title: Host CPU by mode
+    query: 100 * avg by (instance, mode) (rate(node_cpu_seconds_total{job="node", mode!="idle"}[5m]))
+  - name: node_load
+    title: Host load average
+    query: label_replace(node_load1{job="node"}, "window", "1m", "", "") or label_replace(node_load5{job="node"}, "window", "5m", "", "") or label_replace(node_load15{job="node"}, "window", "15m", "", "")
+  - name: node_memory_used_percent
+    title: Host memory used
+    query: 100 * (1 - node_memory_MemAvailable_bytes{job="node"} / node_memory_MemTotal_bytes{job="node"})
+  - name: node_memory_available_bytes
+    title: Host memory available
+    query: node_memory_MemAvailable_bytes{job="node"}
+  - name: node_swap_used_percent
+    title: Host swap used
+    query: 100 * (1 - node_memory_SwapFree_bytes{job="node"} / clamp_min(node_memory_SwapTotal_bytes{job="node"}, 1))
+  - name: node_filesystem_used_percent
+    title: Host filesystem used
+    query: 100 * (1 - node_filesystem_avail_bytes{job="node", fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{job="node", fstype!~"tmpfs|overlay|squashfs"})
+  - name: node_filesystem_free_ratio_min
+    title: Lowest host filesystem free ratio
+    query: min(node_filesystem_avail_bytes{job="node", fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{job="node", fstype!~"tmpfs|overlay|squashfs"})
+  - name: node_disk_io_bytes_per_second
+    title: Host disk throughput
+    query: label_replace(sum by (device) (rate(node_disk_read_bytes_total{job="node"}[5m])), "direction", "read", "", "") or label_replace(sum by (device) (rate(node_disk_written_bytes_total{job="node"}[5m])), "direction", "write", "", "")
+  - name: node_network_bytes_per_second
+    title: Host network throughput
+    query: label_replace(sum by (device) (rate(node_network_receive_bytes_total{job="node", device!~"lo|veth.*|docker.*|br-.*"}[5m])), "direction", "receive", "", "") or label_replace(sum by (device) (rate(node_network_transmit_bytes_total{job="node", device!~"lo|veth.*|docker.*|br-.*"}[5m])), "direction", "transmit", "", "")
+  - name: node_uptime_seconds
+    title: Host uptime
+    query: time() - node_boot_time_seconds{job="node"}
+
+  # --- Containers (cAdvisor) ----------------------------------------------
+  - name: container_cpu_cores
+    title: Container CPU usage by Compose service
+    query: sum by (service) (label_replace(rate(container_cpu_usage_seconds_total{job="cadvisor", container_label_com_docker_compose_service!=""}[5m]), "service", "$1", "container_label_com_docker_compose_service", "(.+)"))
+  - name: container_memory_bytes
+    title: Container working-set memory by Compose service
+    query: sum by (service) (label_replace(container_memory_working_set_bytes{job="cadvisor", container_label_com_docker_compose_service!=""}, "service", "$1", "container_label_com_docker_compose_service", "(.+)"))
+  - name: container_network_bytes_per_second
+    title: Container network throughput by Compose service
+    query: label_replace(sum by (service) (label_replace(rate(container_network_receive_bytes_total{job="cadvisor", container_label_com_docker_compose_service!=""}[5m]), "service", "$1", "container_label_com_docker_compose_service", "(.+)")), "direction", "receive", "", "") or label_replace(sum by (service) (label_replace(rate(container_network_transmit_bytes_total{job="cadvisor", container_label_com_docker_compose_service!=""}[5m]), "service", "$1", "container_label_com_docker_compose_service", "(.+)")), "direction", "transmit", "", "")
+  - name: container_restarts_1h
+    title: Container restarts in the last hour
+    query: sum by (service) (label_replace(changes(container_start_time_seconds{job="cadvisor", container_label_com_docker_compose_service!=""}[1h]), "service", "$1", "container_label_com_docker_compose_service", "(.+)"))
+
+  # --- PostgreSQL and pgvector -------------------------------------------
+  - name: pg_up
+    title: PostgreSQL exporter connectivity
+    query: pg_up{job=~"postgres|pgvector"}
+  - name: pg_connections
+    title: PostgreSQL connections by database and state
+    query: sum by (job, datname, state) (pg_stat_activity_count{job=~"postgres|pgvector"})
+  - name: pg_max_connections
+    title: PostgreSQL max connections
+    query: max by (job) (pg_settings_max_connections{job=~"postgres|pgvector"})
+  - name: pg_transactions_per_second
+    title: PostgreSQL commits and rollbacks per second
+    query: label_replace(sum by (job, datname) (rate(pg_stat_database_xact_commit{job=~"postgres|pgvector", datname!~"template.*"}[5m])), "kind", "commit", "", "") or label_replace(sum by (job, datname) (rate(pg_stat_database_xact_rollback{job=~"postgres|pgvector", datname!~"template.*"}[5m])), "kind", "rollback", "", "")
+  - name: pg_rows_per_second
+    title: PostgreSQL tuple operations per second
+    query: label_replace(sum by (job) (rate(pg_stat_database_tup_fetched{job=~"postgres|pgvector"}[5m])), "operation", "fetched", "", "") or label_replace(sum by (job) (rate(pg_stat_database_tup_inserted{job=~"postgres|pgvector"}[5m])), "operation", "inserted", "", "") or label_replace(sum by (job) (rate(pg_stat_database_tup_updated{job=~"postgres|pgvector"}[5m])), "operation", "updated", "", "") or label_replace(sum by (job) (rate(pg_stat_database_tup_deleted{job=~"postgres|pgvector"}[5m])), "operation", "deleted", "", "")
+  - name: pg_cache_hit_ratio
+    title: PostgreSQL buffer cache hit ratio
+    query: sum by (job, datname) (rate(pg_stat_database_blks_hit{job=~"postgres|pgvector", datname!~"template.*"}[5m])) / clamp_min(sum by (job, datname) (rate(pg_stat_database_blks_hit{job=~"postgres|pgvector", datname!~"template.*"}[5m])) + sum by (job, datname) (rate(pg_stat_database_blks_read{job=~"postgres|pgvector", datname!~"template.*"}[5m])), 1e-9)
+  - name: pg_database_size_bytes
+    title: PostgreSQL database size
+    query: pg_database_size_bytes{job=~"postgres|pgvector", datname!~"template.*"}
+  - name: pg_deadlocks_1h
+    title: PostgreSQL deadlocks in the last hour
+    query: sum by (job, datname) (increase(pg_stat_database_deadlocks{job=~"postgres|pgvector"}[1h]))
+  - name: pg_locks
+    title: PostgreSQL locks by mode
+    query: sum by (job, mode) (pg_locks_count{job=~"postgres|pgvector"})
+
+  # --- Traefik ------------------------------------------------------------
+  - name: traefik_requests_per_second
+    title: Traefik requests per second by service and code
+    query: sum by (service, code) (rate(traefik_service_requests_total{job="traefik"}[5m]))
+  - name: traefik_error_ratio
+    title: Traefik 5xx ratio by service
+    query: sum by (service) (rate(traefik_service_requests_total{job="traefik", code=~"5.."}[5m])) / clamp_min(sum by (service) (rate(traefik_service_requests_total{job="traefik"}[5m])), 1e-9)
+  - name: traefik_latency_p95_seconds
+    title: Traefik service latency p95
+    query: histogram_quantile(0.95, sum by (le, service) (rate(traefik_service_request_duration_seconds_bucket{job="traefik"}[5m])))
+  - name: traefik_entrypoint_requests_per_second
+    title: Traefik entry point requests per second
+    query: sum by (entrypoint, code) (rate(traefik_entrypoint_requests_total{job="traefik"}[5m]))
+  - name: traefik_open_connections
+    title: Traefik open connections by entry point
+    query: sum by (entrypoint) (traefik_open_connections{job="traefik"})
+  - name: traefik_tls_cert_days_remaining
+    title: TLS certificate days remaining
+    query: (max by (cn, sans) (traefik_tls_certs_not_after{job="traefik"}) - time()) / 86400
+
+  # --- Security monitoring and backups -----------------------------------
+  - name: image_security_unexcepted_fixable_critical
+    title: Unexcepted fixable Critical vulnerabilities by service
+    query: sum by (service) (image_security_unexcepted_fixable_critical{job="node"})
+  - name: image_security_unexcepted_kev
+    title: Unexcepted known-exploited vulnerabilities by service
+    query: sum by (service) (image_security_unexcepted_kev{job="node"})
+  - name: image_security_scan_success
+    title: Image scan success by service
+    query: min by (service) (image_security_scan_success{job="node"})
+  - name: image_security_scan_age_hours
+    title: Hours since last successful image scan
+    query: (time() - max by (service) (image_security_scan_last_success_timestamp_seconds{job="node"})) / 3600
+  - name: image_security_run_age_hours
+    title: Hours since the last scheduled image-security run
+    query: (time() - image_security_scan_run_timestamp_seconds{job="node"}) / 3600
+  - name: backup_age_hours
+    title: Hours since the last complete database backup
+    query: (time() - litellm_backup_last_success_timestamp_seconds) / 3600

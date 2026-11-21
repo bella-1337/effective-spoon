@@ -1,0 +1,487 @@
+{{- /*
+Development data plane: the shared pgvector store, its connector, and Qdrant.
+
+These only exist for the dev profile upstream (qdrant, litellm-pgvector carry
+profiles: [dev]); the vector database itself was always on because prod also uses
+it through the OpenSearch bridge and auto-indexing. The chart follows that: the
+database and its migration run whenever the dev profile is enabled, which is when
+anything can reach them.
+*/ -}}
+{{- if .Values.litellmDev.enabled }}
+{{- $root := . -}}
+{{- $secret := include "litellm-stack.secretName" $root -}}
+{{- $vectorHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "vector-postgres") -}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $vectorHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "vector-postgres") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "vector-postgres") | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $vectorHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "vector-postgres") | nindent 4 }}
+spec:
+  serviceName: {{ $vectorHost }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "vector-postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "vector-postgres") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vector-postgres
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.pgvectorPostgres) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            - name: POSTGRES_DB
+              value: vector_store
+            - name: POSTGRES_USER
+              value: vector
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_VECTOR_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          volumeMounts:
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d/10-init.sql
+              subPath: init.sql
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.pgvector.resources | nindent 12 }}
+      volumes:
+        - name: init
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-pgvector
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "vector-postgres") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "litellm-stack.storageClass" (dict "context" $root "local" $root.Values.pgvector.persistence.storageClass) | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ $root.Values.pgvector.persistence.size }}
+---
+{{/* Schema migration. Idempotent; runs before the connector starts. */}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "pgvector-migrate") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "pgvector-migrate") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "15"
+    helm.sh/hook-delete-policy: {{ $root.Values.jobs.hooks.deletePolicy }}
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "pgvector-migrate") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      restartPolicy: Never
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-for-vector-postgres
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.postgres) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command:
+            - sh
+            - -ec
+            - |
+              until pg_isready -h "$PGHOST" -U "$PGUSER" -d vector_store; do
+                echo "waiting for vector PostgreSQL"
+                sleep 2
+              done
+          env:
+            - name: PGHOST
+              value: {{ $vectorHost }}
+            - name: PGUSER
+              value: vector
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: migrate
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.postgres) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          args:
+            - psql
+            - --no-psqlrc
+            - --set
+            - ON_ERROR_STOP=1
+            - --file
+            - /migrations/20-litellm-pgvector.sql
+          env:
+            - name: PGHOST
+              value: {{ $vectorHost }}
+            - name: PGDATABASE
+              value: vector_store
+            - name: PGUSER
+              value: vector
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_VECTOR_PASSWORD
+            - name: PG_VECTOR_EXPORTER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_VECTOR_EXPORTER_PASSWORD
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations/20-litellm-pgvector.sql
+              subPath: migrate.sql
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1
+              memory: 512Mi
+      volumes:
+        - name: migrations
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-pgvector
+---
+{{/* Read-only exporter role for the pgvector store. */}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "pgvector-access-init") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "pgvector-access-init") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "18"
+    helm.sh/hook-delete-policy: {{ $root.Values.jobs.hooks.deletePolicy }}
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "pgvector-access-init") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      restartPolicy: Never
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: access-init
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.postgres) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            - name: PGHOST
+              value: {{ $vectorHost }}
+            - name: PGDATABASE
+              value: vector_store
+            - name: PGUSER
+              value: vector
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_VECTOR_PASSWORD
+            - name: PG_VECTOR_EXPORTER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_VECTOR_EXPORTER_PASSWORD
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              psql --set ON_ERROR_STOP=1 <<'SQL'
+              \getenv exporter_password PG_VECTOR_EXPORTER_PASSWORD
+              SELECT format('CREATE ROLE vector_exporter LOGIN PASSWORD %L', :'exporter_password')
+              WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'vector_exporter') \gexec
+              SELECT format('ALTER ROLE vector_exporter PASSWORD %L', :'exporter_password') \gexec
+              GRANT pg_monitor TO vector_exporter;
+              GRANT CONNECT ON DATABASE vector_store TO vector_exporter;
+              SQL
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1
+              memory: 512Mi
+---
+{{/* pgvector connector: the LiteLLM vector-store API over the database. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "litellm-pgvector") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "litellm-pgvector") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "litellm-pgvector") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "litellm-pgvector") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "litellm-pgvector") | nindent 4 }}
+spec:
+  replicas: {{ $root.Values.pgvector.connector.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "litellm-pgvector") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "litellm-pgvector") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: litellm-pgvector
+          # Built from the pinned upstream commit and published to the in-house
+          # registry; see deploy/images.
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.pgvector) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            - name: PG_VECTOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_VECTOR_PASSWORD
+            - name: DATABASE_URL
+              value: postgresql://vector:$(PG_VECTOR_PASSWORD)@{{ $vectorHost }}:5432/vector_store?schema=public
+            - name: SERVER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: PG_VECTOR_API_KEY
+            - name: HOST
+              value: 0.0.0.0
+            - name: PORT
+              value: "8000"
+            - name: EMBEDDING__MODEL
+              value: {{ $root.Values.pgvector.connector.embeddingModel | quote }}
+            - name: EMBEDDING__BASE_URL
+              value: http://{{ include "litellm-stack.serviceHost" (dict "context" $root "component" "litellm-dev") }}:4000
+            - name: EMBEDDING__API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: LITELLM_MASTER_KEY
+            - name: EMBEDDING__DIMENSIONS
+              value: {{ $root.Values.pgvector.connector.embeddingDimensions | quote }}
+          ports:
+            - name: http
+              containerPort: 8000
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.pgvector.connector.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- /* Qdrant semantic cache for the dev profile. */}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "qdrant") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "qdrant") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "qdrant") | nindent 4 }}
+  ports:
+    - name: http
+      port: 6333
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "qdrant") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "qdrant") | nindent 4 }}
+spec:
+  replicas: 1
+  # The cache is disposable: tmpfs upstream, and an emptyDir here unless
+  # persistence is enabled, which is why the strategy can be Recreate.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "qdrant") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "qdrant") | nindent 8 }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: qdrant
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.qdrant) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          env:
+            # The upstream naming convention is doubled, matching the Compose env.
+            - name: QDRANT__SERVICE__API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: QDRANT_API_KEY
+            - name: QDRANT__TELEMETRY_DISABLED
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 6333
+          volumeMounts:
+            - name: storage
+              mountPath: /qdrant/storage
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.qdrant.resources | nindent 12 }}
+      volumes:
+        - name: storage
+          {{- if .Values.qdrant.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "qdrant") }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+{{ if .Values.qdrant.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "litellm-stack.serviceHost" (dict "context" $root "component" "qdrant") }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "qdrant") | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- include "litellm-stack.storageClass" (dict "context" $root "local" $root.Values.qdrant.persistence.storageClass) | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ $root.Values.qdrant.persistence.size }}
+{{- end }}
+{{- end }}

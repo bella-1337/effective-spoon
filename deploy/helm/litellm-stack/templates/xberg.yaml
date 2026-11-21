@@ -1,0 +1,361 @@
+{{- /*
+Xberg MCP extraction sandbox.
+
+Upstream isolated this service three ways, and each has a Kubernetes analogue:
+
+  1. An internal Compose network (xberg-sandbox) with no route out.
+     -> A NetworkPolicy that admits the gateways inbound and allows the pod to
+        talk only to the egress proxy.
+  2. A pinned deny-by-default DNS resolver at a fixed sandbox IP.
+     -> Optional: the resolver Service plus a dnsPolicy option. It cannot be
+        pinned by IP at render time because the ClusterIP does not exist yet,
+        so NetworkPolicy is the primary control and the resolver is defense in
+        depth. See xberg.egress.dns in values.yaml.
+  3. A Squid proxy limited to an HTTPS allowlist, with private ranges denied.
+     -> Deployed here unchanged; the pod reaches the internet only through it.
+*/ -}}
+{{- if .Values.xberg.enabled }}
+{{- $root := . -}}
+{{- $secret := include "litellm-stack.secretName" $root -}}
+{{- $serviceHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "xberg") -}}
+{{- $proxyHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "xberg-egress-proxy") -}}
+{{- $dnsHost := include "litellm-stack.serviceHost" (dict "context" $root "component" "xberg-dns") -}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $serviceHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "xberg") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "xberg") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8001
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $serviceHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "xberg") | nindent 4 }}
+spec:
+  replicas: {{ $root.Values.xberg.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "xberg") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "xberg") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      {{- /*
+      A deny-by-default resolver: the pod sends every lookup to xberg-dns, which
+      answers NXDOMAIN locally for anything outside the delegated allowlist.
+      Only rendered when the resolver is enabled; a ClusterIP cannot be
+      referenced by name in dnsConfig, so a ClusterIP service is resolved
+      through the cluster DNS.
+*/}}
+      {{- if $root.Values.xberg.egress.dns.enabled }}
+      dnsPolicy: None
+      dnsConfig:
+        nameservers:
+          - {{ required "xberg.egress.dns.clusterIP is required when xberg.egress.dns.enabled is true; install the chart once, then set it from `kubectl get svc`" $root.Values.xberg.egress.dns.clusterIP }}
+        searches:
+          - {{ $root.Release.Namespace }}.svc.cluster.local
+          - svc.cluster.local
+          - cluster.local
+        options:
+          - name: ndots
+            value: "5"
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: xberg
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.xberg) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          args:
+            - mcp
+            - --transport
+            - http
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8001"
+            - --allowed-host
+            - xberg
+            - --allowed-host
+            - {{ printf "%s:8001" $serviceHost }}
+            - --config
+            - /etc/xberg/xberg.toml
+          env:
+            - name: RUST_LOG
+              value: {{ $root.Values.xberg.logLevel | quote }}
+            - name: XBERG_CACHE_DIR
+              value: /tmp/xberg-cache
+            - name: HF_HOME
+              value: /tmp/huggingface
+            - name: XBERG_MAX_REQUEST_BODY_BYTES
+              value: {{ $root.Values.xberg.maxRequestBodyBytes | quote }}
+            - name: XBERG_MAX_MULTIPART_FIELD_BYTES
+              value: {{ $root.Values.xberg.maxMultipartFieldBytes | quote }}
+            {{- if $root.Values.xberg.egress.proxy.enabled }}
+            # Every outbound request goes through the allowlisting proxy.
+            - name: HTTP_PROXY
+              value: http://{{ $proxyHost }}:3128
+            - name: HTTPS_PROXY
+              value: http://{{ $proxyHost }}:3128
+            - name: ALL_PROXY
+              value: http://{{ $proxyHost }}:3128
+            - name: NO_PROXY
+              value: 127.0.0.1,localhost
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8001
+          volumeMounts:
+            - name: config
+              mountPath: /etc/xberg/xberg.toml
+              subPath: xberg.toml
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /mcp
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /mcp
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $root.Values.xberg.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-xberg
+        - name: tmp
+          emptyDir: {}
+      {{- include "litellm-stack.nodeSelector" (dict "context" $root "component" $root.Values.xberg) | nindent 6 }}
+      {{- include "litellm-stack.tolerations" (dict "context" $root "component" $root.Values.xberg) | nindent 6 }}
+      {{- include "litellm-stack.affinity" (dict "context" $root "component" $root.Values.xberg) | nindent 6 }}
+---
+{{ if .Values.xberg.egress.proxy.enabled }}
+{{- /* Squid: HTTPS-only, allowlisted destinations, private ranges denied. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $proxyHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "xberg-egress-proxy") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "xberg-egress-proxy") | nindent 4 }}
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: proxy
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $proxyHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "xberg-egress-proxy") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "xberg-egress-proxy") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "xberg-egress-proxy") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: squid
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.squid) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          command: ["-f", "/etc/squid/xberg-egress-squid.conf", "-NYC"]
+          ports:
+            - name: proxy
+              containerPort: 3128
+          volumeMounts:
+            - name: config
+              mountPath: /etc/squid/xberg-egress-squid.conf
+              subPath: xberg-egress-squid.conf
+              readOnly: true
+            - name: config
+              mountPath: /etc/squid/xberg-egress-allowlist.txt
+              subPath: xberg-egress-allowlist.txt
+              readOnly: true
+            - name: run
+              mountPath: /run
+            - name: log
+              mountPath: /var/log/squid
+            - name: spool
+              mountPath: /var/spool/squid
+          readinessProbe:
+            # Squid has no health endpoint; an accepted TCP connection is the
+            # same check the upstream Compose healthcheck used.
+            tcpSocket:
+              port: proxy
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            # The ICMP pinger is disabled in squid.conf, so raw sockets are unused.
+            capabilities:
+              drop: ["ALL", "NET_RAW"]
+          resources:
+            {{- toYaml $root.Values.xberg.egress.proxy.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-xberg
+        - name: run
+          emptyDir: {}
+        - name: log
+          emptyDir: {}
+        - name: spool
+          emptyDir: {}
+---
+{{- /* 
+{{ end }}
+{{- if .Values.xberg.egress.dns.enabled }}
+{{- /*
+Deny-by-default resolver. The empty authoritative root answers NXDOMAIN locally
+and only the delegated allowlist zones are forwarded, so an injected URL cannot
+exfiltrate data through DNS lookups.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $dnsHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "xberg-dns") | nindent 4 }}
+spec:
+  selector:
+    {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "xberg-dns") | nindent 4 }}
+  ports:
+    - name: dns-tcp
+      port: 53
+      targetPort: dns-tcp
+      protocol: TCP
+    - name: dns-udp
+      port: 53
+      targetPort: dns-udp
+      protocol: UDP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $dnsHost }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "xberg-dns") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "litellm-stack.componentSelectorLabels" (dict "context" $root "component" "xberg-dns") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "litellm-stack.componentLabels" (dict "context" $root "component" "xberg-dns") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmaps.yaml") $root | sha256sum }}
+    spec:
+      {{- include "litellm-stack.imagePullSecrets" $root | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 584792
+        runAsGroup: 584792
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bind
+          image: {{ include "litellm-stack.image" (dict "context" $root "image" $root.Values.images.bind9) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          args: ["-g", "-c", "/etc/bind/xberg-named.conf"]
+          ports:
+            - name: dns-tcp
+              containerPort: 53
+              protocol: TCP
+            - name: dns-udp
+              containerPort: 53
+              protocol: UDP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/bind/named.conf.options
+              subPath: xberg-dns.conf
+              readOnly: true
+            - name: config
+              mountPath: /etc/bind/xberg-named.conf
+              subPath: xberg-dns-zones.conf
+              readOnly: true
+            - name: config
+              mountPath: /etc/bind/xberg-deny-root.zone
+              subPath: xberg-dns-deny-root.zone
+              readOnly: true
+            - name: cache
+              mountPath: /var/cache/bind
+            - name: run
+              mountPath: /run/named
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              # BIND binds port 53, which needs NET_BIND_SERVICE unless the
+              # container is given a high port; the upstream image does the same.
+              add: ["NET_BIND_SERVICE"]
+          resources:
+            {{- toYaml $root.Values.xberg.egress.dns.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "litellm-stack.fullname" $root }}-xberg
+        - name: cache
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+---
+{{ end }}
+{{- end }}

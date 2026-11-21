@@ -1,0 +1,2 @@
+# One destination suffix per line. Keep this list narrow and review additions.
+.docs.xberg.io

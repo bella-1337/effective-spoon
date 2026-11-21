@@ -1,0 +1,27 @@
+apiVersion: v2
+name: litellm-stack
+description: >-
+  Distributed Kubernetes deployment of the LiteLLM gateway stack: production and
+  development proxies behind an ingress, Presidio guardrails, SearXNG, the Xberg
+  MCP sandbox, PostgreSQL and pgvector stores, OpenSearch observability, and the
+  optional Grafana/Loki, Langfuse, LiteLLM Lens, and image-security components.
+type: application
+version: 0.1.0
+# Tracks the upstream Compose stack release this chart was ported from.
+appVersion: "0.3.0"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/bella-1337/effective-spoon
+sources:
+  - https://github.com/bella-1337/effective-spoon
+keywords:
+  - litellm
+  - llm-gateway
+  - opensearch
+  - observability
+  - presidio
+maintainers:
+  - name: stack maintainers
+annotations:
+  # Upstream repository commit the manifests and files/ were taken from.
+  litellm-stack/upstream-commit: 603f17897d166f388a5c36356b1367ce4b53a316
+  litellm-stack/upstream-path: docker-compose.yml, compose.optional.yml
