@@ -51,23 +51,29 @@ run() {
 run "helm lint (default values)" helm lint "$CHART" || true
 run "helm lint (values-full.yaml)" helm lint "$CHART" -f "$FULL_VALUES" || true
 
-render_default=false
-render_full=false
-if run "helm template (default values)" \
-  sh -c 'helm template ci "$1" --namespace stack > "$2"' sh "$CHART" "$WORK/default.yaml"; then
-  render_default=true
+render_default() {
+  helm template ci "$CHART" --namespace stack >"$WORK/default.yaml"
+}
+
+render_full() {
+  helm template ci "$CHART" --namespace stack -f "$FULL_VALUES" >"$WORK/full.yaml"
+}
+
+rendered_default=false
+rendered_full=false
+if run "helm template (default values)" render_default; then
+  rendered_default=true
 fi
-if run "helm template (values-full.yaml)" \
-  sh -c 'helm template ci "$1" --namespace stack -f "$2" > "$3"' sh "$CHART" "$FULL_VALUES" "$WORK/full.yaml"; then
-  render_full=true
+if run "helm template (values-full.yaml)" render_full; then
+  rendered_full=true
 fi
 
 for version in $K8S_VERSIONS; do
-  if [ "$render_default" = true ]; then
+  if [ "$rendered_default" = true ]; then
     run "kubeconform $version (default values)" \
       kubeconform -strict -summary -kubernetes-version "$version" "$WORK/default.yaml" || true
   fi
-  if [ "$render_full" = true ]; then
+  if [ "$rendered_full" = true ]; then
     run "kubeconform $version (values-full.yaml)" \
       kubeconform -strict -summary -kubernetes-version "$version" "$WORK/full.yaml" || true
   fi

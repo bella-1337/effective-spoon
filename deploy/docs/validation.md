@@ -9,75 +9,71 @@ a cluster. They do not replace an install on a test cluster.
 export CHART=deploy/helm/litellm-stack
 ```
 
-## 1. Lint
+## 1. Chart checks
+
+One script runs the static checks. The Validate workflow runs the same script as
+its `chart` job on every pull request and every push to `main`:
 
 ```sh
-helm lint "$CHART"
-helm lint "$CHART" -f my-values.yaml
+scripts/ci/chart-checks.sh
 ```
 
-`icon is recommended` is informational. Anything else should be fixed.
-`values.schema.json` is applied here and by `helm template`; it rejects unknown
-top-level keys.
+It needs `helm`, [`kubeconform`](https://github.com/yannh/kubeconform), and
+[`uv`](https://docs.astral.sh/uv/) (for `uvx yamllint`) on `PATH`, and network
+access: `kubeconform` fetches the Kubernetes schemas from
+`raw.githubusercontent.com`. It runs every check even when an earlier one fails,
+prints which ones failed, and exits non-zero if any did. It checks:
 
-## 2. Render the default and the full configuration
+| Check | What it catches |
+| --- | --- |
+| `helm lint`, default values and `deploy/ci/values-full.yaml` | Template errors, and values that `values.schema.json` rejects, including unknown top-level keys |
+| `helm template`, same two value sets | Templates that fail to render. The full set enables every optional component, so templates that are only reached then are rendered too |
+| `kubeconform -strict`, Kubernetes 1.27.0 and 1.30.0, on both renders | Objects that do not match the API schema. 1.27 is the `kubeVersion` floor in `Chart.yaml` |
+| `yamllint` with only `key-duplicates` enabled, on `values.yaml` and `values-full.yaml` | A key repeated in a mapping. Helm silently keeps the last one, which hides mistakes such as a repeated secret name |
 
-The default render covers the core. A second render with every optional component
-enabled covers the rest, and catches templates that are only reached then.
-Save this as `full.yaml`:
+`helm lint` prints `icon is recommended` for `Chart.yaml`; that is informational.
 
-```yaml
-litellmDev: {enabled: true, host: llm-dev.example.test}
-demo: {enabled: true}
-xberg:
-  enabled: true
-  egress:
-    dns: {enabled: true, clusterIP: 10.96.0.53}
-grafana: {enabled: true, host: grafana.example.test}
-langfuse: {enabled: true, webHost: langfuse.example.test, s3Host: s3.example.test}
-lens: {enabled: true, host: lens.example.test}
-security: {enabled: true}
-prometheus:
-  nodeExporter: {enabled: true}
-  kubernetesTargets: {enabled: true}
-qdrant:
-  persistence: {enabled: true}
-```
+The full set is the file
+[`deploy/ci/values-full.yaml`](https://github.com/bella-1337/symmetrical-engine/blob/main/deploy/ci/values-full.yaml).
+It enables the development gateway, the demo seed jobs, Xberg with its DNS
+egress, Grafana, Langfuse, Lens, the security components, the node exporter, the
+Kubernetes scrape targets, and Qdrant persistence, with example hostnames. It is
+for these checks only. `xberg.egress.dns.clusterIP` is set only to satisfy the
+guard that requires it; in a real release, install once and read the address
+from the `xberg-dns` Service.
 
-```sh
-helm template t "$CHART" --namespace stack > default.yaml
-helm template t "$CHART" --namespace stack -f full.yaml > full-render.yaml
-```
+To check your own values as well, run `helm lint "$CHART" -f my-values.yaml`,
+and pipe `helm template t "$CHART" --namespace stack -f my-values.yaml` into
+`kubeconform -strict -summary -kubernetes-version 1.30.0 -`. Use the oldest
+Kubernetes version you run.
 
-`xberg.egress.dns.clusterIP` is set only to satisfy the guard that requires it.
-In a real release, install once and read the address from the `xberg-dns` Service.
+### Tool versions
 
-## 3. Validate the manifests against the Kubernetes API
+The script does not pin `helm`; it uses the one on `PATH`. It has passed with
+Helm 3.16.4 and 3.22.1, the version listed for the `ubuntu-24.04` runner image
+at the time of writing. The rest is pinned:
 
-[`kubeconform`](https://github.com/yannh/kubeconform) checks every rendered
-object against the API schema for a Kubernetes version:
+- `kubeconform` v0.8.0, downloaded in the `chart` job and checked against the
+  SHA-256 from the release's `CHECKSUMS` file before use;
+- `yamllint` 1.38.0, in the script, run with `uvx`;
+- `uv` 0.9.30 through `astral-sh/setup-uv`, with its checksum.
 
-```sh
-kubeconform -strict -summary -kubernetes-version 1.30.0 default.yaml full-render.yaml
-```
+When you raise one of them, change it in `.github/workflows/validate.yml` or
+`scripts/ci/chart-checks.sh` and take the new checksum from the release.
 
-Use the minimum version you support (`kubeVersion` in `Chart.yaml` is 1.27).
-
-## 4. Check duplicate keys in values
-
-Helm silently keeps the last of two identical keys in a mapping, which hides
-mistakes such as a repeated secret name:
-
-```sh
-uvx yamllint -d '{rules: {key-duplicates: enable}}' \
-  deploy/helm/litellm-stack/values.yaml
-```
-
-## 5. Check references between objects
+## 2. Check references between objects
 
 Linting and schema validation do not notice a Deployment that mounts a ConfigMap
 the chart never renders. That kind of mistake only shows up as a pod stuck in
-`ContainerCreating`. For each rendered pod template, confirm that:
+`ContainerCreating`. The script does not check this; do it by hand when you add
+or rename an object. Render both value sets:
+
+```sh
+helm template t "$CHART" --namespace stack > default.yaml
+helm template t "$CHART" --namespace stack -f deploy/ci/values-full.yaml > full-render.yaml
+```
+
+For each rendered pod template, confirm that:
 
 - every ConfigMap, Secret, and PersistentVolumeClaim it mounts or reads exists in
   the render;
@@ -94,7 +90,7 @@ A past run of this check found a `grafana-alerting` ConfigMap rendered only when
 Grafana was enabled while the OpenSearch setup Job also mounted it; see the
 [changelog](../CHANGELOG.md).
 
-## 6. Compare bundled files with upstream
+## 3. Compare bundled files with upstream
 
 The files under `files/` come from the upstream repository at the commit in
 `Chart.yaml`. Compare them with a checkout of that commit when you change one
@@ -108,6 +104,24 @@ diff -r deploy/helm/litellm-stack/files/litellm /path/to/effective-spoon/litellm
 The two Alloy files are expected to differ. They discover Kubernetes pods
 instead of Docker containers and use `POD_NAMESPACE` and `RELEASE_NAME` for the
 namespace and release filters.
+
+## Continuous integration
+
+The Validate workflow (`.github/workflows/validate.yml`) runs on pull requests,
+on pushes to `main`, and on demand. Its jobs:
+
+| Job | Runs |
+| --- | --- |
+| `chart` | `scripts/ci/chart-checks.sh`, section 1 |
+| `docs-tests` | The unit tests of the documentation build: `uv run --no-project --with pyyaml python -m unittest discover -s scripts/tests -p "test_*.py" -v` |
+| `workflows` | actionlint 1.7.12 and zizmor 1.32.0 on `.github/`, with `.github/zizmor.yml` |
+
+The [Documentation workflow](documentation-site.md#publishing) builds the site in
+strict mode on every pull request.
+
+Neither workflow has run in GitHub Actions yet. The chart script, the unit
+tests, actionlint, and zizmor have been run on a workstation, not through a
+workflow.
 
 ## What these checks do not cover
 
