@@ -378,9 +378,14 @@ def start_validation_mcp_server(network: str) -> str:
     command = [
         "docker", "run", "-d", "--name", name, "--network", network, "--network-alias", "xberg",
         "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
-        "--pids-limit", "256", "--memory", "1g", "--tmpfs", "/tmp:mode=1777", xberg_image,
+        "--pids-limit", "256", "--memory", "1g", "--tmpfs", "/tmp:mode=1777",
+        # Load the operator's SSRF policy as Compose does, so the candidate is
+        # validated against the Xberg configuration that actually runs.
+        "--volume", f"{ROOT / 'security' / 'xberg-config.toml'}:/etc/xberg/xberg.toml:ro",
+        xberg_image,
         "mcp", "--transport", "http", "--host", "0.0.0.0", "--port", "8001",
         "--allowed-host", "xberg", "--allowed-host", "xberg:8001",
+        "--config", "/etc/xberg/xberg.toml",
     ]
     if run(command, check=False).returncode:
         fail("could not start the isolated Xberg MCP validator", 2)

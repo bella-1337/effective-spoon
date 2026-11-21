@@ -121,14 +121,30 @@ stack's `internal` network:
   injection phrases, such as "ignore all previous instructions", from tool
   results.
 
-The secure default permits only the documented Xberg documentation host. To add
-a destination, update all of `security/xberg-egress-allowlist.txt`,
-`security/xberg-config.toml`, the forward zones in
-`security/xberg-dns-zones.conf`, and the delegations in
-`security/xberg-dns-deny-root.zone`, including every CNAME target (check with
-`dig +noall +answer <host>`). `python3 scripts/maintenance.py doctor` rejects
-lists that are out of step. See
-[Edge and abuse protection](edge-and-abuse-protection.md).
+The secure default permits only the documented Xberg documentation host.
+Xberg's SSRF policy, its DNS resolver, and the Squid proxy each check the
+destination, and each needs it in its own file. All four files are generated
+from `security/xberg-destinations.toml`, so that is the only file to edit:
+
+```toml
+[[destination]]
+host = "docs.example.com"
+subdomains = false            # true also allows every name below the host
+dns_aliases = ["example.cdn.net"]  # CNAME targets: dig +noall +answer <host>
+```
+
+Then apply it. A plain `docker compose up -d` does not restart the sandbox
+services after a configuration file changes, and they read it only at start:
+
+```sh
+python3 scripts/maintenance.py xberg-allowlist apply
+```
+
+A host that redirects elsewhere needs the redirect target as its own
+destination. `python3 scripts/maintenance.py doctor` rejects hand-edited or
+stale allowlist files. If you remove `docs.xberg.io`, set
+`XBERG_HEALTHCHECK_DOMAIN` to a remaining destination, or the Xberg healthcheck
+fails. See [Edge and abuse protection](edge-and-abuse-protection.md).
 
 The development gateway uses `BAAI/bge-m3` on the remote GPU host (see
 [Remote BGE-M3 embeddings](#remote-bge-m3-embeddings)) to semantically select up
