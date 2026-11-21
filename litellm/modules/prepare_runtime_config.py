@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-"""Prepare a LiteLLM config with optional Langfuse callbacks and Lens tracing.
+"""Prepare a LiteLLM config with region-locked models, Langfuse, and Lens.
 
 Usage: prepare_runtime_config.py SOURCE DESTINATION [-- COMMAND [ARGUMENT...]]
+
+Cloud models come only from the environment: sovereign_models.py turns the
+provider variables into model entries locked to DATA_SOVEREIGNTY_REGION and
+appends them to the source config's static model list. With no provider models
+set, the gateway starts with only its static self-hosted models.
 
 Each optional integration is enabled only while its profile's service resolves
 on the Compose network, and then fails closed when its credentials are
@@ -20,6 +25,7 @@ from typing import Any, Mapping, MutableMapping, Sequence
 from urllib.parse import urlsplit
 
 import yaml
+from sovereign_models import sovereign_model_list
 
 LANGFUSE_CALLBACKS = {
     "langfuse_otel",
@@ -138,6 +144,29 @@ def validate_lens_environment(environ: Mapping[str, str] = os.environ) -> None:
             )
 
 
+def with_sovereign_models(config: dict[str, Any], environ: Mapping[str, str]) -> tuple[str, list[str]]:
+    """Append the environment's provider models; return (region, model names)."""
+    region, entries = sovereign_model_list(environ)
+    for entry in entries:
+        credentials = entry["litellm_params"].get("vertex_credentials")
+        if credentials and not Path(credentials).is_file():
+            raise ValueError(
+                f"Vertex AI credentials file {credentials} is missing; put "
+                "VERTEX_CREDENTIALS_FILE in PROVIDER_SECRETS_DIR"
+            )
+    static = config.get("model_list") or []
+    if not isinstance(static, list):
+        raise ValueError("model_list must be a list")
+    clashes = sorted(
+        {item.get("model_name") for item in static if isinstance(item, dict)}
+        & {entry["model_name"] for entry in entries}
+    )
+    if clashes:
+        raise ValueError(f"model names already defined in the static config: {', '.join(clashes)}")
+    config["model_list"] = [*entries, *static]
+    return region, [entry["model_name"] for entry in entries]
+
+
 def prepare_config(
     source: Path,
     destination: Path,
@@ -153,6 +182,7 @@ def prepare_config(
     if not isinstance(config, dict):
         raise ValueError("LiteLLM config must be a YAML mapping")
     current = os.environ if environ is None else environ
+    region, models = with_sovereign_models(config, current)
 
     langfuse_enabled = langfuse_is_available()
     if langfuse_enabled:
@@ -172,6 +202,10 @@ def prepare_config(
 
     with destination.open("w", encoding="utf-8") as stream:
         yaml.safe_dump(config, stream, sort_keys=False)
+    print(
+        f"Data sovereignty region: {region}; provider models: "
+        + (", ".join(models) if models else "none")
+    )
     return langfuse_enabled, lens_enabled
 
 

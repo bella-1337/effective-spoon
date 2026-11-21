@@ -26,7 +26,9 @@ def load_module() -> Any:
     if spec is None or spec.loader is None:
         raise RuntimeError(f"could not load {MODULE_PATH}")
     module = importlib.util.module_from_spec(spec)
-    with patch.dict(sys.modules, {"yaml": yaml_stub}):
+    with patch.dict(sys.modules, {"yaml": yaml_stub}), patch.object(
+        sys, "path", [str(MODULE_PATH.parent), *sys.path]
+    ):
         spec.loader.exec_module(module)
     return module
 
@@ -35,6 +37,12 @@ class PrepareRuntimeConfigTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.module = load_module()
+
+    def setUp(self) -> None:
+        # Every gateway start needs a region; tests that pass their own
+        # environment add it there.
+        self.enterContext(patch.dict(os.environ, {"DATA_SOVEREIGNTY_REGION": "eu"}))
+        self.enterContext(patch("sys.stdout"))
 
     def write_config(self, directory: str) -> tuple[Path, Path]:
         source = Path(directory) / "config.yaml"
@@ -128,6 +136,7 @@ class PrepareRuntimeConfigTests(unittest.TestCase):
             "LITELLM_LENS_PUBLIC_URL": "https://lens.example.test",
             "LITELLM_LENS_SERVICE_TOKEN": "s" * 64,
             "LENS_GATEWAY_SECRET": "g" * 64,
+            "DATA_SOVEREIGNTY_REGION": "eu",
             "UNRELATED": "kept",
         }
         environment.update(overrides)
@@ -151,7 +160,7 @@ class PrepareRuntimeConfigTests(unittest.TestCase):
 
         self.assertFalse(lens_enabled)
         self.assertNotIn("general_settings", config)
-        self.assertEqual(environment, {"UNRELATED": "kept"})
+        self.assertEqual(environment, {"DATA_SOVEREIGNTY_REGION": "eu", "UNRELATED": "kept"})
 
     def test_removes_configured_lens_store_when_service_is_absent(self) -> None:
         environment = self.lens_environment()
