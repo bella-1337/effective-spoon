@@ -40,6 +40,11 @@ Commands:
   doctor
       Validate required scripts, Python syntax, Docker Compose, and both profiles.
 
+  up [--profile NAME]... [UP_OPTIONS]
+      Run doctor, then start the stack with `docker compose up`. Each
+      --profile is passed to Compose; every other option goes to `up`
+      unchanged, for example: up --profile prod -d --wait
+
   status
       Show all Compose containers and their current state.
 
@@ -183,6 +188,45 @@ def doctor() -> None:
     LOG.info("PASS: all Compose profiles and game-day safety contracts are valid")
 
 
+def split_up_arguments(arguments: list[str]) -> tuple[list[str], list[str]]:
+    """Return (Compose global options, `up` options) for the up command."""
+    profiles: list[str] = []
+    options: list[str] = []
+    index = 0
+    while index < len(arguments):
+        arg = arguments[index]
+        if arg == "--profile":
+            if index + 1 >= len(arguments) or not arguments[index + 1] or arguments[index + 1].startswith("-"):
+                usage_error("--profile requires a profile name")
+            profiles.extend(("--profile", arguments[index + 1]))
+            index += 2
+            continue
+        if arg.startswith("--profile="):
+            name = arg.partition("=")[2]
+            if not name:
+                usage_error("--profile requires a profile name")
+            profiles.extend(("--profile", name))
+        elif arg in {"--env-file", "-f", "--file", "--project-directory"} or arg.startswith(
+            ("--env-file=", "--file=", "--project-directory=")
+        ):
+            # doctor validates .env and .env.optional; starting with other
+            # files would deploy something it never checked.
+            usage_error(f"up does not accept {arg.partition('=')[0]}; doctor validates only .env and .env.optional")
+        else:
+            options.append(arg)
+        index += 1
+    return profiles, options
+
+
+def up(arguments: list[str]) -> None:
+    profiles, options = split_up_arguments(arguments)
+    doctor()
+    LOG.info("\n== Starting the stack ==")
+    result = compose([*profiles, "up", *options], check=False)
+    if result.returncode:
+        raise SystemExit(result.returncode)
+
+
 def pre_upgrade(arguments: list[str]) -> None:
     candidate = ""
     pull = False
@@ -269,6 +313,8 @@ def main() -> None:
         if args:
             usage_error("doctor accepts no additional arguments")
         doctor()
+    elif command == "up":
+        up(args)
     elif command == "status":
         if args:
             usage_error("status accepts no additional arguments")

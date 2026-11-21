@@ -31,6 +31,14 @@ All notable changes to this stack are recorded here. The format follows
 - The upgrade compatibility check starts its Xberg validator with the
   stack's `security/xberg-config.toml`, as Compose does, instead of Xberg's
   built-in defaults.
+- The upgrade compatibility check now validates the runtime config the
+  gateways actually load. It starts the candidate through
+  `prepare_runtime_config.py` with Langfuse and Lens enabled, instead of
+  validating the raw YAML. Lens tracing, which only the launcher adds, is now
+  validated too.
+- `scripts/maintenance.py up` runs `doctor` and starts the stack only when it
+  passes, so contract failures such as Xberg allowlist drift stop a deployment
+  instead of surfacing at runtime. The getting-started guide uses it.
 - Production LiteLLM moves from `v1.108.2` to the `v1.108.9` LTS patch
   release, still pinned by digest. The 1.108.x LTS line needs no migration or
   configuration change: production already sets `drop_params: true`, which

@@ -21,6 +21,7 @@ The single maintenance entry point exposes the routine operational workflows:
 ```bash
 ./scripts/maintenance.py help
 ./scripts/maintenance.py doctor
+./scripts/maintenance.py up --profile prod -d
 ./scripts/maintenance.py status
 ./scripts/maintenance.py game-day-preflight
 ./scripts/maintenance.py backup
@@ -66,6 +67,14 @@ or changes running services. It performs static configuration checks, confirms
 that the candidate image provides a launcher the gateway start commands use,
 and runs the candidate's own configuration validator in network-isolated,
 read-only, capability-dropped containers with placeholder credentials.
+
+The validator starts the way the gateways do, through
+`litellm/modules/prepare_runtime_config.py`, so it checks the generated runtime
+config rather than the raw YAML. It makes `langfuse-web` and `lens` resolve to
+an unreachable loopback address, so the launcher keeps the Langfuse callbacks
+and adds Lens tracing: the fullest config a gateway can run. Every other start
+only removes settings from it. The check fails if the launcher does not report
+both integrations as enabled.
 
 Immediately before changing the image digest, capture the deployed images,
 configuration checksums, and a fresh database backup:
