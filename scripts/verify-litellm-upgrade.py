@@ -33,6 +33,7 @@ from maintenance_common import (
     container_http_request,
     container_environment,
     env_or_dotenv,
+    verification_chat_model,
     fail,
     public_host,
     require_docker,
@@ -615,7 +616,7 @@ WHERE vector_store_id = 'sme-knowledge'
                     continue
                 _, resolution = self.request(f"{url}/policies/resolve", "POST",
                                               {"Authorization": headers["Authorization"], "Content-Type": "application/json"},
-                                              {"model": "gpt-4o-mini"})
+                                              {"model": verification_chat_model() or "d3-mini"})
                 guards = resolution.get("effective_guardrails", []) if isinstance(resolution, dict) else []
                 if "presidio-pii" in guards:
                     self.pass_(f"presidio: {profile} policy resolution includes the presidio-pii guardrail")
@@ -789,12 +790,16 @@ WHERE vector_store_id = 'sme-knowledge'
                 else:
                     self.fail_("xberg-mcp: automatically indexed Docker guide content was not searchable")
                     bad = True
+                chat_model = verification_chat_model()
+                if chat_model is None:
+                    self.skip("xberg-mcp: no provider model is configured, so the semantic filter chat check was skipped")
+                    continue
                 semantic_status, semantic_headers, semantic_response = self.request_with_headers(
                     f"{url}/v1/chat/completions",
                     "POST",
                     {"x-litellm-api-key": headers["x-litellm-api-key"], "Content-Type": "application/json"},
                     {
-                        "model": "gpt-4o-mini",
+                        "model": chat_model,
                         "messages": [{"role": "user", "content": "Use the appropriate tool to report the installed Xberg version."}],
                         "tools": [{"type": "mcp", "server_url": "litellm_proxy"}],
                         "tool_choice": "required",

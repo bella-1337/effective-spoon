@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -33,6 +34,10 @@ from maintenance_contracts import load_compose_config
 COMPOSE_FILE = ROOT / "docker-compose.yml"
 LITELLM_DIR = ROOT / "litellm"
 MODULES = LITELLM_DIR / "modules"
+SOVEREIGN_MODELS = MODULES / "sovereign_models.py"
+LAUNCHER = MODULES / "prepare_runtime_config.py"
+# Placeholder (non-secret) Vertex credentials the validator mounts at /app/secrets.
+VALIDATION_SECRETS = ROOT / "scripts" / "tests" / "fixtures" / "provider-secrets"
 PROD = LITELLM_DIR / "config.prod.yaml"
 DEV = LITELLM_DIR / "config.dev.yaml"
 SEARCH = MODULES / "search.yaml"
@@ -240,10 +245,14 @@ def static_checks(report: Reporter) -> None:
             "api_base: os.environ/D3_DECISION_API_BASE",
             "api_key: os.environ/D3_DECISION_API_KEY",
             "mode: decisions",
-            "model_name: coding-router",
-            "model: auto_router/complexity_router",
-            "deployment_name: d3-mini",
-            "classifier_fallback: default_model",
+        )
+    ) and all(
+        item in SOVEREIGN_MODELS.read_text(encoding="utf-8")
+        for item in (
+            '"model_name": "coding-router"',
+            '"model": "auto_router/complexity_router"',
+            '"deployment_name": "d3-mini"',
+            '"classifier_fallback": "default_model"',
         )
     ) and all(
         stale not in compose_text + prometheus + dev_text + prod_text
@@ -318,6 +327,82 @@ def static_checks(report: Reporter) -> None:
         "envoyproxy/envoy" not in compose_text,
     ))
     (report.pass_ if isolation_ok else report.fail_)("Development and production services, databases, hostnames, and model lists remain isolated in the rendered Compose model")
+    (report.pass_ if region_lock_ok(prod_text, dev_text, compose_text) else report.fail_)(
+        "Cloud models come only from the region-locked environment wiring, and no direct OpenAI credential remains"
+    )
+
+
+# Model routes allowed in the static configs: self-hosted models only. Every
+# cloud model must come from sovereign_models.py, which locks it to
+# DATA_SOVEREIGNTY_REGION.
+STATIC_MODEL_PREFIXES = ("hosted_vllm/",)
+
+
+def load_sovereign_models() -> Any:
+    spec = importlib.util.spec_from_file_location("sovereign_models_under_check", SOVEREIGN_MODELS)
+    if spec is None or spec.loader is None:
+        raise ScriptError(f"could not load {SOVEREIGN_MODELS}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def region_policies_stay_in_region(module: Any) -> bool:
+    """Each region's provider locations must belong to that region."""
+    vertex_prefixes = {"eu": ("eu", "europe-"), "us": ("us",)}
+    azure_excluded = {"eu": ("uk", "switzerland", "norway"), "us": ()}
+    for region, policy in module.REGION_POLICIES.items():
+        if region not in vertex_prefixes or policy.bedrock_profile != region:
+            return False
+        if any(not source.startswith(f"{region}-") for source in policy.bedrock_source_regions):
+            return False
+        if region == "eu" and {"eu-west-2", "eu-central-2"} & policy.bedrock_source_regions:
+            return False
+        if any(location == "global" or not location.startswith(vertex_prefixes[region])
+               for location in policy.vertex_locations):
+            return False
+        if region == "eu" and {"europe-west2", "europe-west6"} & policy.vertex_locations:
+            return False
+        if any(name.startswith(azure_excluded[region]) for name in policy.azure_regions):
+            return False
+    return True
+
+
+def region_lock_ok(prod_text: str, dev_text: str, compose_text: str) -> bool:
+    """Check that no cloud model can bypass the region lock."""
+    def static_config_ok(text: str, allow_mock_test_model: bool) -> bool:
+        models = re.findall(r"^\s+model:\s*(\S+)\s*$", text, re.M)
+        allowed = all(
+            model.startswith(STATIC_MODEL_PREFIXES)
+            or (allow_mock_test_model and model == "openai/test-model")
+            for model in models
+        )
+        mock_ok = "openai/test-model" not in text or re.search(
+            r"model: openai/test-model\n\s+mock_response: \S", text
+        ) is not None
+        return allowed and mock_ok
+    try:
+        module = load_sovereign_models()
+        empty_region, empty_models = module.sovereign_model_list({"DATA_SOVEREIGNTY_REGION": "eu"})
+    except (ScriptError, OSError, ValueError, AttributeError):
+        return False
+    launcher = LAUNCHER.read_text(encoding="utf-8")
+    return all((
+        static_config_ok(prod_text, allow_mock_test_model=False),
+        static_config_ok(dev_text, allow_mock_test_model=True),
+        (empty_region, empty_models) == ("eu", []),
+        region_policies_stay_in_region(module),
+        "from sovereign_models import sovereign_model_list" in launcher,
+        "with_sovereign_models(config, current)" in launcher,
+        "${DATA_SOVEREIGNTY_REGION:?" in (ROOT / "docker-compose.yml").read_text(encoding="utf-8"),
+        all(
+            service_environment(proxy).get("DATA_SOVEREIGNTY_REGION")
+            for proxy in ("litellm-prod", "litellm-dev")
+        ),
+        # A direct OpenAI credential, not AZURE_OPENAI_API_KEY.
+        re.search(r"(?<![A-Z_])OPENAI_API_KEY", compose_text + prod_text + dev_text) is None,
+    ))
 
 
 # Loading a full config peaks near 1 GiB from LiteLLM 1.111; below that the
@@ -332,7 +417,38 @@ VALIDATOR_MEMORY_LIMIT = "2g"
 # it. The hosts are unreachable on the internal network, and the throwaway
 # credentials only satisfy the launcher's checks.
 PREPARED_CONFIG = "/tmp/runtime-config.yaml"
-PREPARED_CONFIG_MARKERS = ("Langfuse callbacks are enabled", "LiteLLM Lens tracing is enabled")
+# The validator configures one model per provider plus coding-router, so the
+# validated config holds every kind of generated entry.
+VALIDATION_MODELS_MARKER = (
+    "Data sovereignty region: eu; provider models: "
+    "claude-sonnet-5-5, gpt-5.5, gemini-3.5-flash, coding-router"
+)
+PREPARED_CONFIG_MARKERS = (
+    "Langfuse callbacks are enabled", "LiteLLM Lens tracing is enabled", VALIDATION_MODELS_MARKER,
+)
+
+
+def sovereign_validation_environment() -> list[str]:
+    """Placeholder provider settings that exercise every generated model kind."""
+    return [
+        "-v", f"{VALIDATION_SECRETS}:/app/secrets:ro",
+        "-e", "DATA_SOVEREIGNTY_REGION=eu",
+        "-e", "BEDROCK_MODELS=anthropic.claude-sonnet-5-5",
+        "-e", "BEDROCK_AWS_REGION=eu-central-1",
+        "-e", "BEDROCK_ACCESS_KEY_ID=upgrade-check-placeholder",
+        "-e", "BEDROCK_SECRET_ACCESS_KEY=upgrade-check-placeholder",
+        "-e", "AZURE_OPENAI_DEPLOYMENTS=gpt-5.5",
+        "-e", "AZURE_OPENAI_REGION=swedencentral",
+        "-e", "AZURE_OPENAI_API_BASE=https://upgrade-check-placeholder.openai.azure.com",
+        "-e", "AZURE_OPENAI_API_KEY=upgrade-check-placeholder",
+        "-e", "VERTEX_MODELS=gemini-3.5-flash",
+        "-e", "VERTEX_LOCATION=eu",
+        "-e", "VERTEX_PROJECT=upgrade-check-placeholder",
+        "-e", "VERTEX_CREDENTIALS_FILE=vertex-placeholder.json",
+        "-e", "CODING_ROUTER_DEFAULT_MODEL=claude-sonnet-5-5",
+        "-e", "CODING_ROUTER_SIMPLE_MODEL=gpt-5.5",
+        "-e", "CODING_ROUTER_MEDIUM_MODEL=gemini-3.5-flash",
+    ]
 
 
 def optional_integration_environment() -> list[str]:
@@ -362,8 +478,8 @@ def docker_run_validation(image: str, config: Path, network: str, extra_environm
         "-v", f"{MODULES}:{PurePosixPath(PREPARED_CONFIG).parent / 'modules'}:ro",
         "-e", "DATABASE_URL=postgresql://upgrade-check-placeholder@127.0.0.1:5432/upgrade-check",
         "-e", "LITELLM_MASTER_KEY=sk-upgrade-check-placeholder",
-        "-e", "OPENAI_API_KEY=sk-upgrade-check-placeholder",
-        "-e", "LITELLM_LOCAL_MODEL_COST_MAP=True", *optional_integration_environment(), *extra_environment,
+        "-e", "LITELLM_LOCAL_MODEL_COST_MAP=True", *sovereign_validation_environment(),
+        *optional_integration_environment(), *extra_environment,
         "--entrypoint", "python", image,
         "/app/modules/prepare_runtime_config.py", "/app/config.yaml", PREPARED_CONFIG,
         "--", "litellm", "--config", PREPARED_CONFIG, "--validate_config",
@@ -401,7 +517,7 @@ def docker_run_validation(image: str, config: Path, network: str, extra_environm
 
 
 def prepared_status(output: str) -> int:
-    """0 only when the launcher enabled both integrations, so the full config was validated."""
+    """0 only when the launcher enabled both integrations and wired every model kind."""
     return 0 if all(marker in output for marker in PREPARED_CONFIG_MARKERS) else 125
 
 

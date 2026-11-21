@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import base64
 import http.client
+import importlib.util
 import json
 import logging
 import logging.handlers
@@ -716,6 +717,43 @@ def env_or_dotenv(name: str, default: str) -> str:
     if not _ENV_NAME_RE.fullmatch(name):
         fail(f"invalid environment variable name: {name}")
     return _resolve_env(name) or default
+
+
+# Variables sovereign_models.py reads. Secret values are replaced with a marker
+# before validation, so this process never holds provider credentials.
+PROVIDER_MODEL_SETTINGS = (
+    "DATA_SOVEREIGNTY_REGION", "BEDROCK_MODELS", "BEDROCK_AWS_REGION",
+    "AZURE_OPENAI_DEPLOYMENTS", "AZURE_OPENAI_REGION", "AZURE_OPENAI_API_BASE",
+    "AZURE_OPENAI_API_VERSION", "VERTEX_MODELS", "VERTEX_LOCATION", "VERTEX_PROJECT",
+    "VERTEX_CREDENTIALS_FILE",
+)
+PROVIDER_MODEL_SECRETS = ("BEDROCK_ACCESS_KEY_ID", "BEDROCK_SECRET_ACCESS_KEY", "AZURE_OPENAI_API_KEY")
+
+
+def verification_chat_model() -> str | None:
+    """Return the chat model verification requests use, or None when none is configured.
+
+    VERIFY_CHAT_MODEL wins; otherwise the first provider model the gateways
+    wire from the environment, named exactly as sovereign_models.py names it.
+    """
+    override = env_or_dotenv("VERIFY_CHAT_MODEL", "").strip()
+    if override:
+        return override
+    environ = {name: env_or_dotenv(name, "") for name in PROVIDER_MODEL_SETTINGS}
+    environ.update({name: "set" if env_or_dotenv(name, "") else "" for name in PROVIDER_MODEL_SECRETS})
+    path = ROOT / "litellm" / "modules" / "sovereign_models.py"
+    spec = importlib.util.spec_from_file_location("sovereign_models_for_verification", path)
+    if spec is None or spec.loader is None:
+        fail(f"could not load {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    try:
+        _, entries = module.sovereign_model_list(environ)
+    except ValueError as error:
+        fail(f"provider model settings are invalid: {error}")
+    names = [entry["model_name"] for entry in entries if entry["model_name"] != "coding-router"]
+    return names[0] if names else None
 
 
 def public_host(name: str) -> str:
