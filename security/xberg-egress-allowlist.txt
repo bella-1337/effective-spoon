@@ -1,2 +1,7 @@
-# One destination suffix per line. Keep this list narrow and review additions.
-.docs.xberg.io
+# GENERATED from security/xberg-destinations.toml by
+# `python3 scripts/maintenance.py xberg-allowlist render`. Do not edit:
+# change the source file and run `xberg-allowlist apply`.
+#
+# Squid dstdomain entries: "host" matches only that host; ".host" also
+# matches its subdomains.
+docs.xberg.io

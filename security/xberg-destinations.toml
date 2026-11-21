@@ -1,0 +1,31 @@
+# Xberg outbound destinations: the single source for every Xberg allowlist.
+#
+# Xberg checks a URL in three places, and each reads its own file:
+#   - Xberg's SSRF policy           security/xberg-config.toml
+#   - the deny-by-default resolver  security/xberg-dns-zones.conf and
+#                                   security/xberg-dns-deny-root.zone
+#   - the Squid egress proxy        security/xberg-egress-allowlist.txt
+# Those four files are generated from this one. Never edit them by hand.
+#
+# After editing this file, render the four files and restart the three
+# sandbox services, which only read their configuration at startup:
+#
+#   python3 scripts/maintenance.py xberg-allowlist apply
+#
+# Each [[destination]] accepts:
+#   host         Lowercase DNS name, no scheme, port, path, or wildcard.
+#   subdomains   false (default): only this exact host.
+#                true: this host and every name below it.
+#   dns_aliases  Every CNAME target in the host's resolution chain. Xberg's
+#                SSRF check resolves the name itself, so the resolver must
+#                forward the CNAME targets too. Find them with
+#                  dig +noall +answer <host>
+#                Aliases are resolvable only; they are not fetchable.
+#
+# A host that redirects elsewhere needs the redirect target as its own
+# destination. Keep this list narrow and review every addition.
+
+[[destination]]
+host = "docs.xberg.io"
+subdomains = false
+dns_aliases = ["xberg-io.github.io"] # GitHub Pages

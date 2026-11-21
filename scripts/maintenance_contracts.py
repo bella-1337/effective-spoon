@@ -20,6 +20,7 @@ from maintenance_common import (
     compose_command,
     env_file_is_present,
 )
+import xberg_allowlist
 
 COMPOSE_PROFILES = ("prod", "dev", "demo", "security", "grafana", "langfuse", "lens")
 EXPECTED_ALERT_UIDS = {
@@ -280,8 +281,20 @@ def validate_compose_contracts(config: Mapping[str, Any]) -> list[str]:
             failures.append("Xberg loopback health traffic is not excluded from its proxy")
         if "--fail" not in health_command:
             failures.append("Xberg healthcheck does not fail on HTTP error responses")
-        if "getent hosts docs.xberg.io" not in health_command:
+        probe = re.search(r"getent hosts ['\"]?([^'\"\s]+)", health_command)
+        if not probe:
             failures.append("Xberg healthcheck does not validate sandbox DNS resolution")
+        else:
+            try:
+                destinations = xberg_allowlist.load_destinations(ROOT)
+            except xberg_allowlist.DestinationError:
+                destinations = ()  # reported by the repository contracts
+            if destinations and not xberg_allowlist.host_allowed(destinations, probe.group(1)):
+                failures.append(
+                    f"Xberg healthcheck probes {probe.group(1)}, which is not an allowed "
+                    "destination in security/xberg-destinations.toml; set "
+                    "XBERG_HEALTHCHECK_DOMAIN to one that is"
+                )
         xberg_dns = xberg.get("dns", [])
         if not isinstance(xberg_dns, list) or len(xberg_dns) != 1:
             failures.append("Xberg does not use the sandbox DNS relay")
@@ -1144,17 +1157,10 @@ def xberg_sandbox_policy_failures(root: Path) -> list[str]:
     }
     if forward_zones != delegated:
         failures.append("Xberg DNS forward zones and root delegations are not aligned")
-    proxy_allowlist = {
-        line.strip().lstrip(".")
-        for line in (security / "xberg-egress-allowlist.txt").read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.startswith("#")
-    }
-    unresolvable = proxy_allowlist - forward_zones
-    if unresolvable:
-        failures.append(
-            "Xberg egress allowlist entries have no DNS forward zone: "
-            + ", ".join(sorted(unresolvable))
-        )
+    # The SSRF policy, both DNS files, and the Squid allowlist are generated
+    # from one source; comparing the rendered text also catches mismatched
+    # exact/subdomain semantics, which a name-only comparison cannot.
+    failures.extend(xberg_allowlist.drift_failures(root))
     return failures
 
 
@@ -1350,29 +1356,6 @@ def validate_repository_contracts(root: Path = ROOT) -> list[str]:
     gitignore = (root / ".gitignore").read_text(encoding="utf-8").splitlines()
     if ACTIVE_ROLLBACK_OVERRIDE.name not in gitignore:
         failures.append("The persistent rollback override is not ignored by Git")
-
-    proxy_allowlist = {
-        line.lstrip(".")
-        for line in (
-            root / "security" / "xberg-egress-allowlist.txt"
-        ).read_text(encoding="utf-8").splitlines()
-        if line and not line.startswith("#")
-    }
-    with (root / "security" / "xberg-config.toml").open("rb") as handle:
-        xberg_config = tomllib.load(handle)
-    ssrf_allowlist = {
-        str(matcher.get("value", "")).lstrip(".")
-        for matcher in xberg_config.get("url", {})
-        .get("crawl", {})
-        .get("ssrf", {})
-        .get("allowlist", [])
-        if isinstance(matcher, dict)
-        and matcher.get("type") in {"exact", "suffix"}
-    }
-    if not proxy_allowlist or ssrf_allowlist != proxy_allowlist:
-        failures.append(
-            "Xberg SSRF and egress-proxy destination allowlists are not aligned"
-        )
 
     workflow_bindings = {
         "backup-databases.py": {

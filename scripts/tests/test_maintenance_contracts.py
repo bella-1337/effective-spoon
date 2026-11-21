@@ -704,6 +704,7 @@ class EdgeAndAbuseContractTests(unittest.TestCase):
 
     def _copy_policy_files(self, root: Path) -> None:
         for relative in (
+            "security/xberg-destinations.toml",
             "security/xberg-config.toml",
             "security/xberg-egress-squid.conf",
             "security/xberg-egress-allowlist.txt",
@@ -791,8 +792,10 @@ class EdgeAndAbuseContractTests(unittest.TestCase):
                 "",
             )
             self._replace(security / "xberg-dns-zones.conf", "type primary;", "type hint;")
+            # A hand edit to one generated allowlist is drift, even when the
+            # name matches: the leading dot widens Squid to every subdomain.
             (security / "xberg-egress-allowlist.txt").write_text(
-                ".docs.xberg.io\n.example.org\n", encoding="utf-8"
+                ".docs.xberg.io\n", encoding="utf-8"
             )
 
             failures = contracts.xberg_sandbox_policy_failures(root)
@@ -802,7 +805,7 @@ class EdgeAndAbuseContractTests(unittest.TestCase):
             "plaintext port 80",
             "before resolving",
             "authoritative empty root",
-            "no DNS forward zone: example.org",
+            "differ from security/xberg-destinations.toml",
         ):
             self.assertTrue(any(expected in failure for failure in failures), (expected, failures))
 

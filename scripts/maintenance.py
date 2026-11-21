@@ -30,6 +30,7 @@ from maintenance_contracts import (
     validate_compose_contracts,
     validate_repository_contracts,
 )
+import xberg_allowlist as xberg_allowlist_module
 
 USAGE = """Usage: scripts/maintenance.py COMMAND [OPTIONS]
 
@@ -93,6 +94,13 @@ Commands:
   rollback --confirm-rollback --mode image-only|restore-db [OPTIONS]
       Run the validated rollback workflow. All confirmation, state, backup,
       drift, and service-selection options are delegated unchanged.
+
+  xberg-allowlist render|check|apply
+      Manage Xberg's outbound destinations from the single source
+      security/xberg-destinations.toml. render rewrites the SSRF policy, DNS
+      zones, and Squid allowlist from it; check fails when they differ; apply
+      renders, then recreates the running xberg-dns, xberg-egress-proxy, and
+      xberg containers, which read their configuration only at startup.
 
   lens secrets|status|smoke [OPTIONS]
       Operate the optional LiteLLM Lens profile: generate missing secrets,
@@ -216,6 +224,40 @@ def pre_upgrade(arguments: list[str]) -> None:
            [*(["--skip-backup"] if skip_backup else []), *(["--services", services] if services else [])])
 
 
+def xberg_allowlist(arguments: list[str]) -> None:
+    if len(arguments) != 1 or arguments[0] not in {"render", "check", "apply"}:
+        usage_error("xberg-allowlist requires exactly one of: render, check, apply")
+    action = arguments[0]
+    if action == "check":
+        failures = xberg_allowlist_module.drift_failures(ROOT)
+        if failures:
+            fail("\n".join(failures))
+        LOG.info("PASS: Xberg allowlists match security/xberg-destinations.toml")
+        return
+    try:
+        changed = xberg_allowlist_module.write_rendered(ROOT)
+    except xberg_allowlist_module.DestinationError as error:
+        fail(f"Xberg destinations are invalid: {error}")
+    for relative in changed:
+        LOG.info(f"Rendered {relative}")
+    if not changed:
+        LOG.info("PASS: Xberg allowlists were already up to date")
+    if action == "render":
+        return
+    require_docker()
+    running = compose(["ps", "--services", "--status", "running"], capture_output=True)
+    assert isinstance(running.stdout, str)
+    active = set(running.stdout.splitlines())
+    services = [name for name in xberg_allowlist_module.SANDBOX_SERVICES if name in active]
+    if not services:
+        LOG.info("No Xberg sandbox service is running; the next start uses the new allowlists")
+        return
+    # A changed bind-mounted file does not change the Compose model, so a plain
+    # `up -d` would keep the old containers and their startup-time config.
+    compose(["up", "-d", "--no-deps", "--force-recreate", "--wait", "--wait-timeout", "150", *services])
+    LOG.info("PASS: recreated " + ", ".join(services) + " with the new Xberg allowlists")
+
+
 def main() -> None:
     args = sys.argv[1:]
     command = args.pop(0) if args else "help"
@@ -262,6 +304,8 @@ def main() -> None:
         invoke("rollback-litellm-upgrade.py", args)
     elif command == "lens":
         invoke("lens.py", args)
+    elif command == "xberg-allowlist":
+        xberg_allowlist(args)
     else:
         usage_error(f"unknown command: {command}")
 

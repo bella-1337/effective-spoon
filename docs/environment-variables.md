@@ -336,6 +336,7 @@ see [Remote BGE-M3 embeddings](search-extraction-and-caching.md#remote-bge-m3-em
 | `XBERG_CPU_LIMIT` | `1`; positive decimal CPUs | CPU limit for Xberg. |
 | `XBERG_MEMORY_LIMIT` | `1g`; Docker size | Memory limit for Xberg. Consider request-size limits when tuning it. |
 | `XBERG_SANDBOX_SUBNET` | `172.29.0.0/24`; private IPv4 CIDR | Dedicated internal subnet for Xberg and its restricted egress helpers. Change it if the default overlaps another Docker or host network. |
+| `XBERG_HEALTHCHECK_DOMAIN` | `docs.xberg.io`; DNS name | Name the Xberg healthcheck resolves through the sandbox resolver. It must be an allowed destination in `security/xberg-destinations.toml`, so change it when you remove `docs.xberg.io` from that list; `python3 scripts/maintenance.py doctor` rejects any other value. |
 | `XBERG_DNS_IP` | `172.29.0.53`; IPv4 address within `XBERG_SANDBOX_SUBNET` | Fixed address of the DNS-only relay that lets Xberg's SSRF validator resolve public names without giving Xberg direct Internet access. |
 | `PGVECTOR_EMBEDDING_MODEL` | `openai/bge-m3`; connector model identifier | Model the pgvector connector requests from LiteLLM development. Keep aligned with LiteLLM model configuration. |
 | `PGVECTOR_EMBEDDING_DIMENSIONS` | `1024`; positive integer | Stored vector width. It must match model output and the database schema. Changing it requires a planned schema migration and re-index. |
