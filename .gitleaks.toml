@@ -12,3 +12,15 @@ description = "Stable OpenSearch notebook saved-object UUIDs, not credentials"
 condition = "AND"
 paths = ['''^opensearch/tools/litellm_opensearch/notebooks\.py$''']
 regexes = ['''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$''']
+
+[[allowlists]]
+# In a Helm secretKeyRef, `key: D3_DECISION_API_KEY` names an entry in a
+# Kubernetes Secret; the value lives in the cluster, not in Git. Only whole
+# lines of that shape are skipped: an upper-case environment-variable name with
+# at least one underscore, under deploy/helm/, for the generic-api-key rule.
+description = "Kubernetes Secret key names in Helm templates, not credentials"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^deploy/helm/''']
+regexTarget = "line"
+regexes = ['''^\s*key:\s*["']?[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+["']?\s*$''']
