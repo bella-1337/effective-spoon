@@ -61,7 +61,7 @@ loops, and parallel work (`par`/`and`). A dot replays the messages in order.
 | Diagram | Source | Shows |
 | --- | --- | --- |
 | [Chat completion request](10-chat-request-flow.html) | [10-chat-request-flow.mmd](10-chat-request-flow.mmd) | Authentication, policy, Presidio masking, routing, provider call, and telemetry for one request |
-| [coding-router tier selection](11-coding-router-flow.html) | [11-coding-router-flow.mmd](11-coding-router-flow.mmd) | D3-mini classification, tier mapping, and the `gpt-4o` fallback |
+| [coding-router tier selection](11-coding-router-flow.html) | [11-coding-router-flow.mmd](11-coding-router-flow.mmd) | D3-mini classification, environment-configured tier mapping, and the default-model fallback |
 | [Semantic cache](12-semantic-cache-flow.html) | [12-semantic-cache-flow.mmd](12-semantic-cache-flow.mmd) | The development cache opt-in, similarity threshold, hit, and miss paths |
 | [Xberg auto-indexing](13-xberg-auto-index-flow.html) | [13-xberg-auto-index-flow.mmd](13-xberg-auto-index-flow.mmd) | Extraction, the background indexing task, and its fail-closed Presidio step |
 | [Prompt that triggers an Xberg tool call](24-xberg-tool-call-flow.html) | [24-xberg-tool-call-flow.mmd](24-xberg-tool-call-flow.mmd) | From the user's prompt: the app offers the xberg tools, the model decides to call `extract`, and LiteLLM runs it through the egress allowlist and asks the model again |

@@ -7,10 +7,10 @@ flowchart TD
   %% @mode architecture
   %% @subtitle A coding prompt is classified by D3-mini and completed by the model assigned to its tier
   %% @card cyan | Request path | The client calls model coding-router through Traefik | LiteLLM authenticates, applies budgets and guardrails, then hands off to the Auto Router | The response returns in the normal OpenAI format
-  %% @card violet | Decision | Only the classification request goes to D3-mini | SIMPLE and MEDIUM map to gpt-4o-mini; COMPLEX and REASONING to gpt-4o | A timeout after 15 seconds falls back to gpt-4o
+  %% @card violet | Decision | Only the classification request goes to D3-mini | Each tier maps to its CODING_ROUTER_<TIER>_MODEL from .env | A timeout after 15 seconds falls back to CODING_ROUTER_DEFAULT_MODEL
   %% @card rose | Telemetry | Classifier and completion calls are both traced | Spans and metrics carry no prompt content | Validate tier accuracy on representative prompts before relying on savings
   %% @journey #22d3ee: CLI TR LL AR D3
-  %% @journey #34d399: AR OAI
+  %% @journey #34d399: AR EUP
 
   subgraph CL["Clients — outside the stack"]
     CLI["Client<br/>model: coding-router"]:::frontend
@@ -23,14 +23,14 @@ flowchart TD
   end
   subgraph EX["External services — outside the stack"]
     D3["D3-mini<br/>four-tier decision"]:::external
-    OAI["Completion model<br/>gpt-4o-mini or gpt-4o"]:::external
+    EUP["Regional model provider<br/>tier model from .env"]:::external
   end
 
   CLI ==>|"HTTPS"| TR
   TR ==> LL
   LL ==> AR
   AR ==>|"classification only"| D3
-  AR ==>|"selected tier"| OAI
+  AR ==>|"selected tier"| EUP
   LL -.-> OBS
   AR -.-> OBS
 

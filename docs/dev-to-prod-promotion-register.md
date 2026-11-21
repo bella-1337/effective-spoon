@@ -116,7 +116,8 @@ Tags: `register-added:v1.0.0`, `state:mixed`,
 `stable-support:unverified`, `activation:config`.
 
 Dev adds `test-model` and `bge-m3`. Both profiles expose `d3-mini` for direct
-Decisions calls and `coding-router` for four-tier coding classification.
+Decisions calls and, when `CODING_ROUTER_DEFAULT_MODEL` is set, `coding-router`
+for four-tier coding classification.
 
 Promotion plan:
 
@@ -346,7 +347,7 @@ Promotion plan:
 1. Keep `d3-mini` registered as a Decisions deployment in both profiles.
 2. Keep clients on the normal LiteLLM authentication and policy boundary.
 3. Review SIMPLE, MEDIUM, COMPLEX, and REASONING model assignments.
-4. Preserve the 15-second classifier timeout and fail-safe `gpt-4o` fallback.
+4. Preserve the 15-second classifier timeout and fail-safe `CODING_ROUTER_DEFAULT_MODEL` fallback.
 5. Verify the classifier response header so fallback cannot masquerade as success.
 6. Monitor classifier latency, errors, tier distribution, and fallback rate.
 

@@ -128,7 +128,7 @@ Checks that require external services are intentionally deferred for now:
 
 - starting the full Compose stack and waiting for all service health checks;
 - calling the remote GPU host's BGE-M3 and D3-mini endpoints;
-- calling OpenAI or other provider APIs;
+- calling the configured cloud model providers (Bedrock, Azure OpenAI, Vertex AI);
 - probing a deployed on-prem environment.
 
 These are not silently treated as passing CI tests. Run the documented

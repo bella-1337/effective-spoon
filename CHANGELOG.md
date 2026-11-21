@@ -8,6 +8,34 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** The project is now the Sovereign LLM Gateway, a region-locked
+  gateway. The new required `DATA_SOVEREIGNTY_REGION` (`eu` or `us`) sets where
+  every cloud model must process prompts. Cloud models are no longer listed in
+  `litellm/config.*.yaml`. They come only from the optional `BEDROCK_MODELS`,
+  `AZURE_OPENAI_DEPLOYMENTS`, and `VERTEX_MODELS` lists in `.env`. With none
+  set, the gateways serve only their self-hosted models. At startup,
+  `prepare_runtime_config.py` wires the configured models into both gateways
+  through `litellm/modules/sovereign_models.py`:
+  - Bedrock models get the region's geographic inference profile.
+  - Azure resource regions and Vertex locations are checked against the region.
+  - The gateway refuses to start when a credential is missing or a location
+    could process prompts outside the region.
+- **Breaking:** `gpt-4o`, `gpt-4o-mini`, and `OPENAI_API_KEY` are removed. No
+  model calls the OpenAI API directly.
+- **Breaking:** `coding-router` exists only when `CODING_ROUTER_DEFAULT_MODEL`
+  names a configured model. Its tiers come from the `CODING_ROUTER_*_MODEL`
+  variables.
+- Provider key files live in `PROVIDER_SECRETS_DIR` (default
+  `./litellm/secrets`, ignored by Git), which is mounted read-only into both
+  gateways.
+- The development `test-model` now returns a mock response and makes no
+  provider call.
+- `check-litellm-upgrade-compatibility.py` now fails when a static config
+  lists a cloud model or the launcher's region lock is missing. See
+  [Data sovereignty and regional models](docs/data-sovereignty.md).
+
 ## [v0.3.1] - 2026-11-21
 
 ### Changed

@@ -37,11 +37,28 @@ curl --fail --silent "https://$LITELLM_PROD_HOST/policies/list" \
 curl --fail --silent "https://$LITELLM_PROD_HOST/policies/resolve" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-4o-mini"}'
+  -d '{"model":"<configured model>"}'
 ```
 
 The resolved policy must include `presidio-pii`. Repeat the check on the
 development hostname after policy changes.
+
+## EU model providers
+
+Set `DATA_SOVEREIGNTY_REGION=eu` to keep every cloud model inside the EU. The
+LiteLLM launcher then wires only the provider models named in `.env`. It
+refuses to start if any provider location could process prompts outside EU
+member states:
+
+- Amazon Bedrock: `eu.` inference profiles, called from a source Region whose
+  routing stays inside the EU.
+- Azure OpenAI: resources in EU regions, with Data Zone or regional
+  deployments.
+- Vertex AI: the `eu` multi-region or an EU single region.
+
+No cloud model is configured by default. See
+[Data sovereignty and regional models](data-sovereignty.md) for the variables,
+allowed locations, and provider-side controls.
 
 ## Data minimisation and retention
 
@@ -160,7 +177,10 @@ must separately:
 - test Presidio and policy effectiveness regularly with representative,
   multilingual data. The bundled analyzer supports English only.
 
-The default models call OpenAI and this configuration does not prove EU data
-residency. Confirm the provider account's region, retention, training, and abuse
-monitoring settings plus the applicable contractual transfer safeguards before
-sending personal data.
+With `DATA_SOVEREIGNTY_REGION=eu`, the configured models are restricted to EU
+processing (see [EU model providers](#eu-model-providers)), but this
+configuration alone does not prove EU data residency or sovereignty. AWS, Microsoft, and Google are
+US-headquartered processors. Before sending personal data, confirm each provider
+account's region and policy settings, its retention, training, and abuse
+monitoring terms, and its data processing agreement, and assess any remaining
+third-country access risk.

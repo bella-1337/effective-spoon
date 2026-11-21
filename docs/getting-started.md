@@ -40,6 +40,17 @@ Do not commit `.env`, `.env.optional`, provider keys, database passwords,
 rendered Compose configuration, or TLS private keys. The example `.test` names
 are reserved for testing.
 
+### Data-sovereignty region and models
+
+Choose the region first. `DATA_SOVEREIGNTY_REGION` (`eu` or `us`) is required,
+and every cloud model must stay inside it. The template configures no cloud
+model: leave the provider lists empty to start with only the self-hosted
+models. Add models later by setting `BEDROCK_MODELS`,
+`AZURE_OPENAI_DEPLOYMENTS`, or `VERTEX_MODELS` and their credentials, then
+recreate `litellm-prod` and `litellm-dev`. The gateway refuses to start when a
+provider location falls outside the region. See
+[Data sovereignty and regional models](data-sovereignty.md).
+
 ### Public hostnames and `STACK_DOMAIN`
 
 No public hostname is hard-coded in the Compose files, scripts, or commands in

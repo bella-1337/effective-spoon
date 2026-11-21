@@ -55,6 +55,37 @@ hostname, plus coordinated updates to DNS or local host resolution, TLS
 certificates, firewall policy, and clients. Traefik watches Docker labels and
 discovers recreated routed services automatically.
 
+## Data sovereignty and provider models
+
+`DATA_SOVEREIGNTY_REGION` locks the stack to one region. Every other variable in
+this section is optional: a provider is enabled only when its model list is
+set, and then all of that provider's variables marked "with models" are
+required. `prepare_runtime_config.py` wires the models into both gateways and
+refuses to start when a value is missing or a location falls outside the
+region. Recreate `litellm-prod` and `litellm-dev` after any change. Allowed
+locations, model-name aliases, and provider-side controls are in
+[Data sovereignty and regional models](data-sovereignty.md).
+
+| Variable | Requirement / default | Format | Description and guidance |
+| --- | --- | --- | --- |
+| `DATA_SOVEREIGNTY_REGION` | Required; example: `eu` | `eu` or `us` | Region every cloud model must stay in. Changing it changes which provider locations are accepted. |
+| `BEDROCK_MODELS` | Optional: empty (Bedrock off) | Comma-separated Bedrock model IDs without a routing prefix, each optionally `name=ID` | Example: `anthropic.claude-sonnet-5-5`. The region's geographic inference profile (`eu.` or `us.`) is added for you. |
+| `BEDROCK_AWS_REGION` | With models | AWS Region code | Source Region for the inference profile, for example `eu-central-1`. Only sources whose routing stays in the region are accepted. |
+| `BEDROCK_ACCESS_KEY_ID`, `BEDROCK_SECRET_ACCESS_KEY` | With models; secret | AWS IAM access key pair | Credentials of a dedicated IAM user allowed only `bedrock:InvokeModel*` on the region's inference profiles. Rotate by creating a second key, recreating both gateways, then deleting the old key. |
+| `AZURE_OPENAI_DEPLOYMENTS` | Optional: empty (Azure off) | Comma-separated deployment names, each optionally `name=deployment` | Deployments must be `DataZoneStandard` or `Standard`, never `GlobalStandard`. |
+| `AZURE_OPENAI_REGION` | With deployments | Azure region name, for example `swedencentral` | Declared region of the Azure OpenAI resource, checked against the region table. Keep it accurate; the endpoint does not reveal the region. |
+| `AZURE_OPENAI_API_BASE` | With deployments; sensitive | `https://<resource>.openai.azure.com` | Endpoint of that resource. |
+| `AZURE_OPENAI_API_KEY` | With deployments; secret | Azure-issued key | Rotate by switching to the second key, recreating both gateways, then regenerating the first. |
+| `AZURE_OPENAI_API_VERSION` | Optional: `2025-04-01-preview` | Azure OpenAI data-plane API version | Change only after checking it against the deployed models. |
+| `VERTEX_MODELS` | Optional: empty (Vertex off) | Comma-separated Vertex AI model IDs, each optionally `name=ID` | Example: `gemini-3.5-flash`. |
+| `VERTEX_LOCATION` | With models | `eu`, `us`, or a single region | Multi-region or single region inside the region; `global` is rejected. |
+| `VERTEX_PROJECT` | With models; sensitive | Google Cloud project ID | Project billed for Vertex AI. Restrict its resource locations to the region with an organization policy. |
+| `VERTEX_CREDENTIALS_FILE` | With models; secret | File name inside `PROVIDER_SECRETS_DIR` | Service-account key with only `roles/aiplatform.user`, readable by UID 65532 (`chown 65532:65532`, `chmod 0400`). The gateway fails to start if the file is missing. Rotate by replacing the file and recreating both gateways, then deleting the old key. |
+| `PROVIDER_SECRETS_DIR` | Optional: `./litellm/secrets` | Host directory path | Mounted read-only at `/app/secrets` in both gateways; ignored by Git. |
+| `CODING_ROUTER_DEFAULT_MODEL` | Optional: empty (no `coding-router`) | Configured provider model name | Enables `coding-router`, its fallback when D3-mini classification fails. |
+| `CODING_ROUTER_SIMPLE_MODEL`, `CODING_ROUTER_MEDIUM_MODEL`, `CODING_ROUTER_COMPLEX_MODEL`, `CODING_ROUTER_REASONING_MODEL` | Optional: the default model | Configured provider model name | Model for each D3-mini tier. |
+| `VERIFY_CHAT_MODEL` | Optional: the first provider model | Configured model name | Model that `verify-litellm-upgrade.py` and `verify-semantic-cache.py` send test prompts to. Read by those scripts only, not by the gateways. |
+
 ## Corporate branding
 
 These are LiteLLM's own branding settings, passed through unchanged; the stack
@@ -112,7 +143,6 @@ validating placeholder values.
 | `PG_VECTOR_API_KEY` | Secret; at least 32 random bytes | Shared authentication key between LiteLLM development and the internal pgvector service. Rotate both services together. |
 | `QDRANT_API_KEY` | Secret; at least 32 random bytes | API key protecting the development Qdrant service. Rotate Qdrant and LiteLLM development together. |
 | `LITELLM_MASTER_KEY` | Secret; `sk-` prefix recommended | Administrative and API authentication key for both LiteLLM profiles. It is also used by the internal pgvector connector. Rotate during a maintenance window and update clients. |
-| `OPENAI_API_KEY` | Secret; provider-issued token | Provider credential used by configured models. Scope it to the minimum required project and permissions, set provider-side spend limits, and rotate according to provider policy. |
 | `OPENSEARCH_ADMIN_PASSWORD` | Secret; 16+ URL-safe characters | Password of the OpenSearch `admin` user (security all-access) used to sign in to OpenSearch Dashboards and to import saved objects. `opensearch-setup` re-applies it on every start through the admin certificate, so rotating `.env` and re-running `docker compose up -d opensearch-setup opensearch-dashboards-setup` rotates it. |
 | `OPENSEARCH_DASHBOARDS_SERVER_PASSWORD` | Secret; 16+ URL-safe characters | Password of the internal `kibanaserver` identity that OpenSearch Dashboards uses for its own system calls. Rotate by re-running `opensearch-setup`, then recreate `opensearch-dashboards`. |
 | `OPENSEARCH_DASHBOARDS_COOKIE_PASSWORD` | Secret; 32+ characters | Encrypts OpenSearch Dashboards session cookies. Rotation signs every user out. |

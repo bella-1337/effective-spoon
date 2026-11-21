@@ -1,4 +1,4 @@
-# LiteLLM stack
+# Sovereign LLM Gateway
 
 <!-- badges:start -->
 [![CI](https://github.com/bella-1337/effective-spoon/actions/workflows/validate.yml/badge.svg)](https://github.com/bella-1337/effective-spoon/actions/workflows/validate.yml)
@@ -12,8 +12,16 @@
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-brightgreen?logo=dependabot)](https://github.com/bella-1337/effective-spoon/blob/master/.github/dependabot.yml)
 <!-- badges:end -->
 
-A Docker Compose stack for running separate LiteLLM production and development
-proxies behind Traefik, with PostgreSQL, Presidio, SearXNG, Xberg MCP,
+**A region-locked AI gateway: every prompt stays in the data-sovereignty region
+you choose.** Set `DATA_SOVEREIGNTY_REGION` (`eu` or `us`) and list the models to
+serve from Amazon Bedrock, Azure OpenAI, or Google Vertex AI in `.env`. The
+gateway wires only those models into LiteLLM and refuses to start when a
+provider location could process prompts outside the region. No cloud model is
+required; with none configured, the gateway serves only its self-hosted
+models. See [Data sovereignty and regional models](docs/data-sovereignty.md).
+
+Under the hood, this is a Docker Compose stack for running separate LiteLLM
+production and development proxies behind Traefik, with PostgreSQL, Presidio, SearXNG, Xberg MCP,
 development vLLM model servers, Prometheus, host/container exporters, and
 OpenSearch with OpenSearch Dashboards as the default multi-user observability
 platform for logs, metrics, LiteLLM usage, tracing, alerting, and audit trails.
@@ -100,6 +108,7 @@ see [Documentation site](docs/documentation-site.md).
 
 | Guide | Covers |
 | --- | --- |
+| [Data sovereignty and regional models](docs/data-sovereignty.md) | `DATA_SOVEREIGNTY_REGION`, allowed provider locations per region, wiring Bedrock, Azure OpenAI, and Vertex AI models from `.env`, coding-router, provider-side controls |
 | [Getting started](docs/getting-started.md) | Environment files, `STACK_DOMAIN` hostnames, TLS certificates, host resolution, Prometheus authentication, validation, starting and verifying profiles, stopping and removing the stack |
 | [Hardware sizing](docs/hardware-sizing.md) | Prod, dev, and remote GPU host specifications, memory, CPU, and disk budgets, prod resource limits |
 | [Development and delivery workflow](docs/development-workflow.md) | Development container, local, GitHub Actions, and GitLab CI checks, release delivery |

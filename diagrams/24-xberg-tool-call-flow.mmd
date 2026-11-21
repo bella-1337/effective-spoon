@@ -8,14 +8,14 @@ sequenceDiagram
   %% @type frontend: APP
   %% @type cloud: TR
   %% @type security: PR EG
-  %% @type external: OAI WEB
+  %% @type external: EUP WEB
   %% @type database: OBS
   actor U as User
   participant APP as Chat app or agent<br/>Chat UI · IDE · SDK
   participant TR as Traefik<br/>TLS + edge limits
   participant LL as LiteLLM proxy<br/>auth · MCP gateway
   participant PR as Presidio<br/>PII masking
-  participant OAI as OpenAI<br/>provider model
+  participant EUP as Regional model provider<br/>Bedrock · Azure · Vertex
   participant XB as Xberg MCP<br/>xberg-sandbox
   participant EG as Egress guard<br/>xberg-dns + Squid
   participant WEB as Allowlisted website<br/>e.g. docs.xberg.io
@@ -31,12 +31,12 @@ sequenceDiagram
   LL->>XB: MCP tools/list
   XB-->>LL: tool definitions
   Note over LL: keep the four allowed_tools; in dev, BGE-M3 keeps the 3 that best match the prompt
-  LL->>OAI: prompt + tool definitions
-  Note over OAI: the model decides whether a tool is needed and writes its arguments from the prompt
+  LL->>EUP: prompt + tool definitions
+  Note over EUP: the model decides whether a tool is needed and writes its arguments from the prompt
   alt model answers directly
-    OAI-->>LL: completion, no tool call
+    EUP-->>LL: completion, no tool call
   else model requests the tool
-    OAI-->>LL: tool_call: xberg-extract(uri)
+    EUP-->>LL: tool_call: xberg-extract(uri)
     Note over LL: LiteLLM executes the call itself; the app never sees the tool_call
     LL->>XB: MCP tools/call extract
     XB->>XB: check the URL against the SSRF allowlist
@@ -51,8 +51,8 @@ sequenceDiagram
       LL->>LL: post_mcp_call: mask injection phrases
       Note over LL: dev: a trusted caller's extraction is also indexed in the background (Xberg auto-indexing)
     end
-    LL->>OAI: follow-up: prompt + tool call + tool result
-    OAI-->>LL: final answer
+    LL->>EUP: follow-up: prompt + tool call + tool result
+    EUP-->>LL: final answer
   end
   LL->>PR: post_call: mask PII in the answer
   PR-->>LL: masked answer

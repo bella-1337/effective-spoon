@@ -5,24 +5,20 @@ sequenceDiagram
   %% Source for 11-coding-router-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @subtitle Only the classification request leaves for the remote D3-mini host; the completion goes to the selected tier
-  %% @type external: D3 OAI
+  %% @type external: D3 EUP
   actor C as Client
   participant AR as LiteLLM Auto Router<br/>model = coding-router
   participant D3 as D3-mini<br/>remote GPU host
-  participant OAI as OpenAI<br/>completion models
+  participant EUP as Regional model provider<br/>tier models from .env
 
   C->>AR: chat completion for coding-router
   AR->>D3: classification request only
   alt D3 answers within 15 s
     D3-->>AR: tier SIMPLE, MEDIUM, COMPLEX, or REASONING
-    alt SIMPLE or MEDIUM
-      AR->>OAI: original request to gpt-4o-mini
-    else COMPLEX or REASONING
-      AR->>OAI: original request to gpt-4o
-    end
+    AR->>EUP: original request to that tier's CODING_ROUTER_<TIER>_MODEL
   else timeout or error
     D3--xAR: no answer within 15 s
-    AR->>OAI: fail safe: original request to gpt-4o
+    AR->>EUP: fail safe: original request to CODING_ROUTER_DEFAULT_MODEL
   end
-  OAI-->>AR: completion
+  EUP-->>AR: completion
   AR-->>C: response

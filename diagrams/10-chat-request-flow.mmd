@@ -7,14 +7,14 @@ sequenceDiagram
   %% @subtitle From the client's HTTPS call to the response, through edge limits, authentication, policy, PII masking, routing, and telemetry
   %% @type cloud: TR
   %% @type security: PR
-  %% @type external: D3 OAI
+  %% @type external: D3 EUP
   %% @type database: OBS
   actor C as Client
   participant TR as Traefik<br/>TLS + edge limits
   participant LL as LiteLLM proxy<br/>auth · policy · routing
   participant PR as Presidio<br/>PII masking
   participant D3 as D3-mini<br/>remote GPU host
-  participant OAI as OpenAI<br/>provider model
+  participant EUP as Regional model provider<br/>Bedrock · Azure · Vertex
   participant OBS as Telemetry<br/>spend · metrics · spans
 
   C->>TR: POST /v1/chat/completions over HTTPS
@@ -32,8 +32,8 @@ sequenceDiagram
         LL->>D3: classify the request (routing sequence)
         D3-->>LL: tier
       end
-      LL->>OAI: call the provider model
-      OAI-->>LL: completion
+      LL->>EUP: call the provider model
+      EUP-->>LL: completion
       LL->>PR: post_call: mask PII in the output
       PR-->>LL: masked output
       LL-)OBS: spend log, metrics, content-free span
