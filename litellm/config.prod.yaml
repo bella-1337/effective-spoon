@@ -5,14 +5,12 @@ include:
   - modules/policies/eu-data-protection.yaml
 
 model_list:
-  - model_name: gpt-4o
-    litellm_params:
-      model: openai/gpt-4o
-      api_key: os.environ/OPENAI_API_KEY
-  - model_name: gpt-4o-mini
-    litellm_params:
-      model: openai/gpt-4o-mini
-      api_key: os.environ/OPENAI_API_KEY
+  # Cloud provider models are not listed here. prepare_runtime_config.py adds
+  # them at startup from the environment (BEDROCK_MODELS,
+  # AZURE_OPENAI_DEPLOYMENTS, VERTEX_MODELS), locked to DATA_SOVEREIGNTY_REGION,
+  # together with coding-router when CODING_ROUTER_DEFAULT_MODEL is set. With
+  # none set, only the self-hosted models below are served. See
+  # docs/data-sovereignty.md.
   - model_name: d3-mini
     litellm_params:
       model: hosted_vllm/vllm-sr/d3-mini
@@ -20,21 +18,6 @@ model_list:
       api_key: os.environ/D3_DECISION_API_KEY
     model_info:
       mode: decisions
-  - model_name: coding-router
-    litellm_params:
-      model: auto_router/complexity_router
-      complexity_router_default_model: gpt-4o
-      complexity_router_config:
-        classifier_type: oss_classifier
-        opensource_classifier_config:
-          deployment_name: d3-mini
-          timeout_ms: 15000
-        tiers:
-          SIMPLE: gpt-4o-mini
-          MEDIUM: gpt-4o-mini
-          COMPLEX: gpt-4o
-          REASONING: gpt-4o
-        classifier_fallback: default_model
 
 mcp_servers:
   xberg:

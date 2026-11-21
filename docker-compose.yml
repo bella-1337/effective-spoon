@@ -189,6 +189,7 @@ services:
       - ./litellm/modules:/app/modules:ro
       - ${BRAND_ASSETS_DIR:-./branding/foo-bar}:/app/branding:ro
       - ${GPU_HOST_CA_BUNDLE:?Set GPU_HOST_CA_BUNDLE in .env}:/etc/ssl/certs/gpu-host-ca-bundle.pem:ro
+      - ${PROVIDER_SECRETS_DIR:-./litellm/secrets}:/app/secrets:ro
     environment:
       # LiteLLM-native branding. Logo and favicon accept a local PNG/JPEG/WEBP/ICO
       # path under /app/branding or an https:// URL; the rest are LiteLLM
@@ -208,7 +209,29 @@ services:
       STORE_MODEL_IN_DB: "${LITELLM_STORE_MODEL_IN_DB:-True}"
       USE_V2_MIGRATION_RESOLVER: "${LITELLM_USE_V2_MIGRATION_RESOLVER:-false}"
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      # Data sovereignty: the region every model must stay in, and the optional
+      # provider models that prepare_runtime_config.py wires into LiteLLM at
+      # startup. A provider is enabled only when its model list is set; see
+      # docs/data-sovereignty.md.
+      DATA_SOVEREIGNTY_REGION: ${DATA_SOVEREIGNTY_REGION:?Set DATA_SOVEREIGNTY_REGION in .env}
+      BEDROCK_MODELS: ${BEDROCK_MODELS:-}
+      BEDROCK_AWS_REGION: ${BEDROCK_AWS_REGION:-}
+      BEDROCK_ACCESS_KEY_ID: ${BEDROCK_ACCESS_KEY_ID:-}
+      BEDROCK_SECRET_ACCESS_KEY: ${BEDROCK_SECRET_ACCESS_KEY:-}
+      AZURE_OPENAI_DEPLOYMENTS: ${AZURE_OPENAI_DEPLOYMENTS:-}
+      AZURE_OPENAI_REGION: ${AZURE_OPENAI_REGION:-}
+      AZURE_OPENAI_API_BASE: ${AZURE_OPENAI_API_BASE:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-}
+      VERTEX_MODELS: ${VERTEX_MODELS:-}
+      VERTEX_LOCATION: ${VERTEX_LOCATION:-}
+      VERTEX_PROJECT: ${VERTEX_PROJECT:-}
+      VERTEX_CREDENTIALS_FILE: ${VERTEX_CREDENTIALS_FILE:-}
+      CODING_ROUTER_DEFAULT_MODEL: ${CODING_ROUTER_DEFAULT_MODEL:-}
+      CODING_ROUTER_SIMPLE_MODEL: ${CODING_ROUTER_SIMPLE_MODEL:-}
+      CODING_ROUTER_MEDIUM_MODEL: ${CODING_ROUTER_MEDIUM_MODEL:-}
+      CODING_ROUTER_COMPLEX_MODEL: ${CODING_ROUTER_COMPLEX_MODEL:-}
+      CODING_ROUTER_REASONING_MODEL: ${CODING_ROUTER_REASONING_MODEL:-}
       D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
       D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
       # Public roots plus the GPU host mkcert CA (D3-mini and BGE-M3 over TLS).
@@ -309,6 +332,7 @@ services:
       - ./litellm/modules:/app/modules:ro
       - ${BRAND_ASSETS_DIR:-./branding/foo-bar}:/app/branding:ro
       - ${GPU_HOST_CA_BUNDLE:?Set GPU_HOST_CA_BUNDLE in .env}:/etc/ssl/certs/gpu-host-ca-bundle.pem:ro
+      - ${PROVIDER_SECRETS_DIR:-./litellm/secrets}:/app/secrets:ro
     environment:
       # LiteLLM-native branding. Logo and favicon accept a local PNG/JPEG/WEBP/ICO
       # path under /app/branding or an https:// URL; the rest are LiteLLM
@@ -328,7 +352,29 @@ services:
       STORE_MODEL_IN_DB: "${LITELLM_STORE_MODEL_IN_DB:-True}"
       USE_V2_MIGRATION_RESOLVER: "${LITELLM_USE_V2_MIGRATION_RESOLVER:-false}"
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      # Data sovereignty: the region every model must stay in, and the optional
+      # provider models that prepare_runtime_config.py wires into LiteLLM at
+      # startup. A provider is enabled only when its model list is set; see
+      # docs/data-sovereignty.md.
+      DATA_SOVEREIGNTY_REGION: ${DATA_SOVEREIGNTY_REGION:?Set DATA_SOVEREIGNTY_REGION in .env}
+      BEDROCK_MODELS: ${BEDROCK_MODELS:-}
+      BEDROCK_AWS_REGION: ${BEDROCK_AWS_REGION:-}
+      BEDROCK_ACCESS_KEY_ID: ${BEDROCK_ACCESS_KEY_ID:-}
+      BEDROCK_SECRET_ACCESS_KEY: ${BEDROCK_SECRET_ACCESS_KEY:-}
+      AZURE_OPENAI_DEPLOYMENTS: ${AZURE_OPENAI_DEPLOYMENTS:-}
+      AZURE_OPENAI_REGION: ${AZURE_OPENAI_REGION:-}
+      AZURE_OPENAI_API_BASE: ${AZURE_OPENAI_API_BASE:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-}
+      VERTEX_MODELS: ${VERTEX_MODELS:-}
+      VERTEX_LOCATION: ${VERTEX_LOCATION:-}
+      VERTEX_PROJECT: ${VERTEX_PROJECT:-}
+      VERTEX_CREDENTIALS_FILE: ${VERTEX_CREDENTIALS_FILE:-}
+      CODING_ROUTER_DEFAULT_MODEL: ${CODING_ROUTER_DEFAULT_MODEL:-}
+      CODING_ROUTER_SIMPLE_MODEL: ${CODING_ROUTER_SIMPLE_MODEL:-}
+      CODING_ROUTER_MEDIUM_MODEL: ${CODING_ROUTER_MEDIUM_MODEL:-}
+      CODING_ROUTER_COMPLEX_MODEL: ${CODING_ROUTER_COMPLEX_MODEL:-}
+      CODING_ROUTER_REASONING_MODEL: ${CODING_ROUTER_REASONING_MODEL:-}
       D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
       D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
       # Public roots plus the GPU host mkcert CA (D3-mini and BGE-M3 over TLS).
