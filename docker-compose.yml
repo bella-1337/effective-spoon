@@ -189,7 +189,7 @@ services:
       - ./litellm/modules:/app/modules:ro
       - ${BRAND_ASSETS_DIR:-./branding/foo-bar}:/app/branding:ro
       - ${GPU_HOST_CA_BUNDLE:?Set GPU_HOST_CA_BUNDLE in .env}:/etc/ssl/certs/gpu-host-ca-bundle.pem:ro
-      - ${PROVIDER_SECRETS_DIR:-./litellm/secrets}:/app/secrets:ro
+      - ${PROVIDER_SECRETS_DIR:-./litellm/provider-secrets}:/app/secrets:ro
     environment:
       # LiteLLM-native branding. Logo and favicon accept a local PNG/JPEG/WEBP/ICO
       # path under /app/branding or an https:// URL; the rest are LiteLLM
@@ -332,7 +332,7 @@ services:
       - ./litellm/modules:/app/modules:ro
       - ${BRAND_ASSETS_DIR:-./branding/foo-bar}:/app/branding:ro
       - ${GPU_HOST_CA_BUNDLE:?Set GPU_HOST_CA_BUNDLE in .env}:/etc/ssl/certs/gpu-host-ca-bundle.pem:ro
-      - ${PROVIDER_SECRETS_DIR:-./litellm/secrets}:/app/secrets:ro
+      - ${PROVIDER_SECRETS_DIR:-./litellm/provider-secrets}:/app/secrets:ro
     environment:
       # LiteLLM-native branding. Logo and favicon accept a local PNG/JPEG/WEBP/ICO
       # path under /app/branding or an https:// URL; the rest are LiteLLM

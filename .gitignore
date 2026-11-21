@@ -10,8 +10,9 @@ traefik/certs/*
 !traefik/certs/.gitkeep
 traefik/acme.json
 acme.json
-litellm/secrets/*
-!litellm/secrets/.gitkeep
+litellm/secrets/
+litellm/provider-secrets/*
+!litellm/provider-secrets/.gitkeep
 
 # Runtime output
 *.log

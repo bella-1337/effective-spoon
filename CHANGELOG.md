@@ -28,7 +28,7 @@ All notable changes to this stack are recorded here. The format follows
   names a configured model. Its tiers come from the `CODING_ROUTER_*_MODEL`
   variables.
 - Provider key files live in `PROVIDER_SECRETS_DIR` (default
-  `./litellm/secrets`, ignored by Git), which is mounted read-only into both
+  `./litellm/provider-secrets`, ignored by Git), which is mounted read-only into both
   gateways.
 - The development `test-model` now returns a mock response and makes no
   provider call.

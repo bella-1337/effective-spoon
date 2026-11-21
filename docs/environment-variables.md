@@ -81,7 +81,7 @@ locations, model-name aliases, and provider-side controls are in
 | `VERTEX_LOCATION` | With models | `eu`, `us`, or a single region | Multi-region or single region inside the region; `global` is rejected. |
 | `VERTEX_PROJECT` | With models; sensitive | Google Cloud project ID | Project billed for Vertex AI. Restrict its resource locations to the region with an organization policy. |
 | `VERTEX_CREDENTIALS_FILE` | With models; secret | File name inside `PROVIDER_SECRETS_DIR` | Service-account key with only `roles/aiplatform.user`, readable by UID 65532 (`chown 65532:65532`, `chmod 0400`). The gateway fails to start if the file is missing. Rotate by replacing the file and recreating both gateways, then deleting the old key. |
-| `PROVIDER_SECRETS_DIR` | Optional: `./litellm/secrets` | Host directory path | Mounted read-only at `/app/secrets` in both gateways; ignored by Git. |
+| `PROVIDER_SECRETS_DIR` | Optional: `./litellm/provider-secrets` | Host directory path | Mounted read-only at `/app/secrets` in both gateways; ignored by Git. |
 | `CODING_ROUTER_DEFAULT_MODEL` | Optional: empty (no `coding-router`) | Configured provider model name | Enables `coding-router`, its fallback when D3-mini classification fails. |
 | `CODING_ROUTER_SIMPLE_MODEL`, `CODING_ROUTER_MEDIUM_MODEL`, `CODING_ROUTER_COMPLEX_MODEL`, `CODING_ROUTER_REASONING_MODEL` | Optional: the default model | Configured provider model name | Model for each D3-mini tier. |
 | `VERIFY_CHAT_MODEL` | Optional: the first provider model | Configured model name | Model that `verify-litellm-upgrade.py` and `verify-semantic-cache.py` send test prompts to. Read by those scripts only, not by the gateways. |

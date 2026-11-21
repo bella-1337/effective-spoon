@@ -118,14 +118,14 @@ VERTEX_CREDENTIALS_FILE=vertex-service-account.json
 ```
 
 `VERTEX_CREDENTIALS_FILE` is a file name, not a path, inside
-`PROVIDER_SECRETS_DIR` (default `./litellm/secrets`, ignored by Git). That
+`PROVIDER_SECRETS_DIR` (default `./litellm/provider-secrets`, ignored by Git). That
 directory is mounted read-only at `/app/secrets`. The launcher fails if the
 file is missing. The development gateway runs as UID 65532, so make the key
 readable by it:
 
 ```sh
-chown 65532:65532 litellm/secrets/vertex-service-account.json
-chmod 0400 litellm/secrets/vertex-service-account.json
+chown 65532:65532 litellm/provider-secrets/vertex-service-account.json
+chmod 0400 litellm/provider-secrets/vertex-service-account.json
 ```
 
 Provider-side controls:
