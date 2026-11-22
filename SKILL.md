@@ -27,6 +27,19 @@ configuration, observability, TLS, runtime profiles, or dependency images.
    Lens runs. Never give a gateway a hard dependency on Lens.
 7. Do not remove services, exporters, databases, datasources, or volumes just
    because they have no recent activity. Trace their consumers first.
+8. Keep the stack region-locked. Never list a cloud provider model in
+   `litellm/config.*.yaml` or hard-code a provider credential: cloud models come
+   only from the environment through `litellm/modules/sovereign_models.py`,
+   which locks them to `DATA_SOVEREIGNTY_REGION`. Add a region or provider
+   location only to `REGION_POLICIES`, after confirming that location in the
+   provider's residency documentation, and keep
+   [data-sovereignty.md](docs/data-sovereignty.md) in step.
+9. For every feature request, first check how
+   [BerriAI Inference Stack](https://github.com/BerriAI/inference-stack) does
+   the same thing. Then present that approach, or say that it has none, with
+   any better fit for this stack and a recommendation, and ask the user which
+   approach to implement. Do not implement before the user chooses. Follow
+   [Reference stack](docs/reference-inference-stack.md#feature-requests).
 
 ## Change Workflow
 

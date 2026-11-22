@@ -22,7 +22,7 @@ VALUES
     ARRAY['demo-alice', 'demo-bob'],
     '[{"user_id":"demo-alice","role":"admin"},{"user_id":"demo-bob","role":"user"}]'::jsonb,
     '{"demo":true}'::jsonb,
-    ARRAY['gpt-4o', 'gpt-4o-mini'],
+    ARRAY['claude-sonnet-5-5', 'gpt-5.4-mini'],
     false,
     75.0,
     14.64
@@ -34,7 +34,7 @@ VALUES
     ARRAY['demo-carol', 'demo-dave'],
     '[{"user_id":"demo-carol","role":"admin"},{"user_id":"demo-dave","role":"user"}]'::jsonb,
     '{"demo":true}'::jsonb,
-    ARRAY['gpt-4o', 'gpt-4o-mini'],
+    ARRAY['claude-sonnet-5-5', 'gpt-5.4-mini'],
     false,
     125.0,
     29.87
@@ -70,7 +70,7 @@ VALUES
     'INTERNAL_USER',
     'demo-team-atlas',
     ARRAY['demo-team-atlas'],
-    ARRAY['gpt-4o', 'gpt-4o-mini'],
+    ARRAY['claude-sonnet-5-5', 'gpt-5.4-mini'],
     '{"demo":true}'::jsonb,
     40.0,
     9.93
@@ -82,7 +82,7 @@ VALUES
     'INTERNAL_USER',
     'demo-team-atlas',
     ARRAY['demo-team-atlas'],
-    ARRAY['gpt-4o', 'gpt-4o-mini'],
+    ARRAY['claude-sonnet-5-5', 'gpt-5.4-mini'],
     '{"demo":true}'::jsonb,
     35.0,
     4.71
@@ -94,7 +94,7 @@ VALUES
     'INTERNAL_USER',
     'demo-team-orion',
     ARRAY['demo-team-orion'],
-    ARRAY['gpt-4o', 'gpt-4o-mini'],
+    ARRAY['claude-sonnet-5-5', 'gpt-5.4-mini'],
     '{"demo":true}'::jsonb,
     70.0,
     17.58
@@ -106,7 +106,7 @@ VALUES
     'INTERNAL_USER',
     'demo-team-orion',
     ARRAY['demo-team-orion'],
-    ARRAY['gpt-4o', 'gpt-4o-mini'],
+    ARRAY['claude-sonnet-5-5', 'gpt-5.4-mini'],
     '{"demo":true}'::jsonb,
     55.0,
     12.29
@@ -138,10 +138,10 @@ INSERT INTO "LiteLLM_VerificationToken" (
   updated_by
 )
 VALUES
-  ('demo-token-atlas-alice', 'demo-atlas-alice', 'Atlas - Alice', 'demo-alice', 'demo-team-atlas', ARRAY['gpt-4o', 'gpt-4o-mini'], '{"demo":true}'::jsonb, 9.93, 9.93, 40.0, true, 'system', 'system'),
-  ('demo-token-atlas-bob', 'demo-atlas-bob', 'Atlas - Bob', 'demo-bob', 'demo-team-atlas', ARRAY['gpt-4o', 'gpt-4o-mini'], '{"demo":true}'::jsonb, 4.71, 4.71, 35.0, true, 'system', 'system'),
-  ('demo-token-orion-carol', 'demo-orion-carol', 'Orion - Carol', 'demo-carol', 'demo-team-orion', ARRAY['gpt-4o', 'gpt-4o-mini'], '{"demo":true}'::jsonb, 17.58, 17.58, 70.0, true, 'system', 'system'),
-  ('demo-token-orion-dave', 'demo-orion-dave', 'Orion - Dave', 'demo-dave', 'demo-team-orion', ARRAY['gpt-4o', 'gpt-4o-mini'], '{"demo":true}'::jsonb, 12.29, 12.29, 55.0, true, 'system', 'system')
+  ('demo-token-atlas-alice', 'demo-atlas-alice', 'Atlas - Alice', 'demo-alice', 'demo-team-atlas', ARRAY['claude-sonnet-5-5', 'gpt-5.4-mini'], '{"demo":true}'::jsonb, 9.93, 9.93, 40.0, true, 'system', 'system'),
+  ('demo-token-atlas-bob', 'demo-atlas-bob', 'Atlas - Bob', 'demo-bob', 'demo-team-atlas', ARRAY['claude-sonnet-5-5', 'gpt-5.4-mini'], '{"demo":true}'::jsonb, 4.71, 4.71, 35.0, true, 'system', 'system'),
+  ('demo-token-orion-carol', 'demo-orion-carol', 'Orion - Carol', 'demo-carol', 'demo-team-orion', ARRAY['claude-sonnet-5-5', 'gpt-5.4-mini'], '{"demo":true}'::jsonb, 17.58, 17.58, 70.0, true, 'system', 'system'),
+  ('demo-token-orion-dave', 'demo-orion-dave', 'Orion - Dave', 'demo-dave', 'demo-team-orion', ARRAY['claude-sonnet-5-5', 'gpt-5.4-mini'], '{"demo":true}'::jsonb, 12.29, 12.29, 55.0, true, 'system', 'system')
 ON CONFLICT (token) DO UPDATE SET
   key_name = EXCLUDED.key_name,
   key_alias = EXCLUDED.key_alias,
@@ -173,18 +173,18 @@ INSERT INTO "LiteLLM_SpendLogs" (
   status
 )
 VALUES
-  ('demo-atlas-001', 'acompletion', 'demo-token-atlas-alice', 2.31, 19100, 15100, 4000, NOW() - INTERVAL '6 days', NOW() - INTERVAL '6 days' + INTERVAL '4 seconds', 'gpt-4o', 'gpt-4o', 'openai', 'demo-alice', 'demo-team-atlas', 'success'),
-  ('demo-atlas-002', 'acompletion', 'demo-token-atlas-alice', 1.12, 28200, 24500, 3700, NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days' + INTERVAL '3 seconds', 'gpt-4o-mini', 'gpt-4o-mini', 'openai', 'demo-alice', 'demo-team-atlas', 'success'),
-  ('demo-atlas-003', 'acompletion', 'demo-token-atlas-bob', 3.04, 25100, 18700, 6400, NOW() - INTERVAL '4 days', NOW() - INTERVAL '4 days' + INTERVAL '5 seconds', 'gpt-4o', 'gpt-4o', 'openai', 'demo-bob', 'demo-team-atlas', 'success'),
-  ('demo-atlas-004', 'acompletion', 'demo-token-atlas-alice', 2.48, 20300, 16400, 3900, NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days' + INTERVAL '4 seconds', 'gpt-4o', 'gpt-4o', 'openai', 'demo-alice', 'demo-team-atlas', 'success'),
-  ('demo-atlas-005', 'acompletion', 'demo-token-atlas-bob', 1.67, 39600, 34100, 5500, NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days' + INTERVAL '3 seconds', 'gpt-4o-mini', 'gpt-4o-mini', 'openai', 'demo-bob', 'demo-team-atlas', 'success'),
-  ('demo-atlas-006', 'acompletion', 'demo-token-atlas-alice', 4.02, 33700, 24600, 9100, NOW() - INTERVAL '8 hours', NOW() - INTERVAL '8 hours' + INTERVAL '6 seconds', 'gpt-4o', 'gpt-4o', 'openai', 'demo-alice', 'demo-team-atlas', 'success'),
-  ('demo-orion-001', 'acompletion', 'demo-token-orion-carol', 5.42, 44800, 33100, 11700, NOW() - INTERVAL '6 days', NOW() - INTERVAL '6 days' + INTERVAL '7 seconds', 'gpt-4o', 'gpt-4o', 'openai', 'demo-carol', 'demo-team-orion', 'success'),
-  ('demo-orion-002', 'acompletion', 'demo-token-orion-dave', 2.09, 50100, 42700, 7400, NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days' + INTERVAL '4 seconds', 'gpt-4o-mini', 'gpt-4o-mini', 'openai', 'demo-dave', 'demo-team-orion', 'success'),
-  ('demo-orion-003', 'acompletion', 'demo-token-orion-carol', 4.77, 39700, 29600, 10100, NOW() - INTERVAL '4 days', NOW() - INTERVAL '4 days' + INTERVAL '6 seconds', 'gpt-4o', 'gpt-4o', 'openai', 'demo-carol', 'demo-team-orion', 'success'),
-  ('demo-orion-004', 'acompletion', 'demo-token-orion-dave', 3.88, 32100, 24300, 7800, NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days' + INTERVAL '5 seconds', 'gpt-4o', 'gpt-4o', 'openai', 'demo-dave', 'demo-team-orion', 'success'),
-  ('demo-orion-005', 'acompletion', 'demo-token-orion-carol', 7.39, 61300, 45200, 16100, NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days' + INTERVAL '8 seconds', 'gpt-4o', 'gpt-4o', 'openai', 'demo-carol', 'demo-team-orion', 'success'),
-  ('demo-orion-006', 'acompletion', 'demo-token-orion-dave', 6.32, 146200, 128400, 17800, NOW() - INTERVAL '4 hours', NOW() - INTERVAL '4 hours' + INTERVAL '7 seconds', 'gpt-4o-mini', 'gpt-4o-mini', 'openai', 'demo-dave', 'demo-team-orion', 'success')
+  ('demo-atlas-001', 'acompletion', 'demo-token-atlas-alice', 2.31, 19100, 15100, 4000, NOW() - INTERVAL '6 days', NOW() - INTERVAL '6 days' + INTERVAL '4 seconds', 'claude-sonnet-5-5', 'claude-sonnet-5-5', 'bedrock', 'demo-alice', 'demo-team-atlas', 'success'),
+  ('demo-atlas-002', 'acompletion', 'demo-token-atlas-alice', 1.12, 28200, 24500, 3700, NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days' + INTERVAL '3 seconds', 'gpt-5.4-mini', 'gpt-5.4-mini', 'azure', 'demo-alice', 'demo-team-atlas', 'success'),
+  ('demo-atlas-003', 'acompletion', 'demo-token-atlas-bob', 3.04, 25100, 18700, 6400, NOW() - INTERVAL '4 days', NOW() - INTERVAL '4 days' + INTERVAL '5 seconds', 'claude-sonnet-5-5', 'claude-sonnet-5-5', 'bedrock', 'demo-bob', 'demo-team-atlas', 'success'),
+  ('demo-atlas-004', 'acompletion', 'demo-token-atlas-alice', 2.48, 20300, 16400, 3900, NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days' + INTERVAL '4 seconds', 'claude-sonnet-5-5', 'claude-sonnet-5-5', 'bedrock', 'demo-alice', 'demo-team-atlas', 'success'),
+  ('demo-atlas-005', 'acompletion', 'demo-token-atlas-bob', 1.67, 39600, 34100, 5500, NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days' + INTERVAL '3 seconds', 'gpt-5.4-mini', 'gpt-5.4-mini', 'azure', 'demo-bob', 'demo-team-atlas', 'success'),
+  ('demo-atlas-006', 'acompletion', 'demo-token-atlas-alice', 4.02, 33700, 24600, 9100, NOW() - INTERVAL '8 hours', NOW() - INTERVAL '8 hours' + INTERVAL '6 seconds', 'claude-sonnet-5-5', 'claude-sonnet-5-5', 'bedrock', 'demo-alice', 'demo-team-atlas', 'success'),
+  ('demo-orion-001', 'acompletion', 'demo-token-orion-carol', 5.42, 44800, 33100, 11700, NOW() - INTERVAL '6 days', NOW() - INTERVAL '6 days' + INTERVAL '7 seconds', 'claude-sonnet-5-5', 'claude-sonnet-5-5', 'bedrock', 'demo-carol', 'demo-team-orion', 'success'),
+  ('demo-orion-002', 'acompletion', 'demo-token-orion-dave', 2.09, 50100, 42700, 7400, NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days' + INTERVAL '4 seconds', 'gpt-5.4-mini', 'gpt-5.4-mini', 'azure', 'demo-dave', 'demo-team-orion', 'success'),
+  ('demo-orion-003', 'acompletion', 'demo-token-orion-carol', 4.77, 39700, 29600, 10100, NOW() - INTERVAL '4 days', NOW() - INTERVAL '4 days' + INTERVAL '6 seconds', 'claude-sonnet-5-5', 'claude-sonnet-5-5', 'bedrock', 'demo-carol', 'demo-team-orion', 'success'),
+  ('demo-orion-004', 'acompletion', 'demo-token-orion-dave', 3.88, 32100, 24300, 7800, NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days' + INTERVAL '5 seconds', 'claude-sonnet-5-5', 'claude-sonnet-5-5', 'bedrock', 'demo-dave', 'demo-team-orion', 'success'),
+  ('demo-orion-005', 'acompletion', 'demo-token-orion-carol', 7.39, 61300, 45200, 16100, NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days' + INTERVAL '8 seconds', 'claude-sonnet-5-5', 'claude-sonnet-5-5', 'bedrock', 'demo-carol', 'demo-team-orion', 'success'),
+  ('demo-orion-006', 'acompletion', 'demo-token-orion-dave', 6.32, 146200, 128400, 17800, NOW() - INTERVAL '4 hours', NOW() - INTERVAL '4 hours' + INTERVAL '7 seconds', 'gpt-5.4-mini', 'gpt-5.4-mini', 'azure', 'demo-dave', 'demo-team-orion', 'success')
 ON CONFLICT (request_id) DO UPDATE SET
   spend = EXCLUDED.spend,
   total_tokens = EXCLUDED.total_tokens,

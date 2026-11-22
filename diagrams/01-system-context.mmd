@@ -8,8 +8,8 @@ flowchart TD
   %% @subtitle Who calls the stack, what runs inside the Docker host, and which services live outside it
   %% @card cyan | Clients | Browsers, SDKs, and agents reach the stack only through Traefik over HTTPS | API clients authenticate to LiteLLM with a virtual key or the master key | Operators use OpenSearch Dashboards, plus Grafana, Langfuse, or Lens when enabled
   %% @card violet | Inside the stack | LiteLLM is the single gateway for models, search, MCP tools, and guardrails | Presidio, SearXNG, Xberg, PostgreSQL, and telemetry stay on internal networks | Every container log, metric, and trace lands in OpenSearch by default
-  %% @card rose | Outside the stack | OpenAI serves completions; a separate GPU host runs D3-mini and dev BGE-M3 embeddings behind one TLS proxy trusted through its mkcert CA | SearXNG scrapes public engines — review their terms of use | Xberg reaches only allowlisted sites through the Squid egress proxy
-  %% @journey #22d3ee: API TR LL OAI
+  %% @card rose | Outside the stack | Only the models named in .env serve completions, each from a Bedrock, Azure OpenAI, or Vertex AI location inside DATA_SOVEREIGNTY_REGION; a separate GPU host runs D3-mini and dev BGE-M3 embeddings behind one TLS proxy trusted through its mkcert CA | SearXNG scrapes public engines — review their terms of use | Xberg reaches only allowlisted sites through the Squid egress proxy
+  %% @journey #22d3ee: API TR LL EUP
   %% @journey #a78bfa: BR TR OSD OBS
   %% @journey #34d399: AG TR LL XB SQ WEB
 
@@ -31,7 +31,7 @@ flowchart TD
     SQ["Squid egress proxy<br/>allowlist · denies private ranges"]:::security
   end
   subgraph EX["External services — outside the stack"]
-    OAI["OpenAI API<br/>completion provider"]:::external
+    EUP["Regional model providers<br/>in DATA_SOVEREIGNTY_REGION<br/>Bedrock · Azure OpenAI · Vertex AI"]:::external
     D3["Remote GPU host<br/>D3-mini classifier · dev BGE-M3"]:::external
     SE["Public search engines<br/>scraped by SearXNG"]:::external
     WEB["Allowlisted websites<br/>security/xberg-destinations.toml"]:::external
@@ -51,7 +51,7 @@ flowchart TD
   LL -.->|"Lens adapter"| OPT
   OSD --> OBS
   XB --> SQ
-  LL ==>|"HTTPS"| OAI
+  LL ==>|"HTTPS"| EUP
   LL -->|"TLS + bearer"| D3
   SX --> SE
   SQ --> WEB

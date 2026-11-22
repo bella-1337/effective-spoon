@@ -8,14 +8,14 @@ sequenceDiagram
   %% @type frontend: APP
   %% @type cloud: TR
   %% @type security: PR
-  %% @type external: OAI ENG
+  %% @type external: EUP ENG
   %% @type database: OBS
   actor U as User
   participant APP as Agent or chat app<br/>owns the tool loop
   participant TR as Traefik<br/>TLS + edge limits
   participant LL as LiteLLM proxy<br/>auth · policy · search tools
   participant PR as Presidio<br/>PII masking
-  participant OAI as OpenAI<br/>provider model
+  participant EUP as Regional model provider<br/>Bedrock · Azure · Vertex
   participant SX as SearXNG<br/>internal network only
   participant ENG as Search engines<br/>SearXNG defaults
   participant OBS as Telemetry<br/>spend · metrics · spans
@@ -26,9 +26,9 @@ sequenceDiagram
   TR->>LL: route by host
   LL->>PR: pre_call: mask PII in the prompt
   PR-->>LL: masked prompt
-  LL->>OAI: prompt + tool definition
-  Note over OAI: the model decides it needs a search and writes the query from the prompt
-  OAI-->>LL: tool_call: web_search(query)
+  LL->>EUP: prompt + tool definition
+  Note over EUP: the model decides it needs a search and writes the query from the prompt
+  EUP-->>LL: tool_call: web_search(query)
   LL->>PR: post_call: mask PII in the output
   PR-->>LL: masked output
   LL-)OBS: spend log, metrics, content-free span
@@ -51,8 +51,8 @@ sequenceDiagram
   TR->>LL: route by host
   LL->>PR: pre_call: mask PII, including the results
   PR-->>LL: masked messages
-  LL->>OAI: call the model
-  OAI-->>LL: final answer
+  LL->>EUP: call the model
+  EUP-->>LL: final answer
   LL->>PR: post_call: mask PII in the answer
   PR-->>LL: masked answer
   LL-)OBS: spend log, metrics, content-free span

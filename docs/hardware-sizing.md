@@ -6,7 +6,8 @@ Rough planning figures for two environments, each running every optional
 profile (`grafana`, `langfuse`, `lens`, `security`). They assume:
 
 - about 100,000 production requests a day with 30–60 in flight at peak;
-- prompts are not stored in spend logs, and completions run at OpenAI;
+- prompts are not stored in spend logs, and completions run at the cloud
+  providers configured for the data-sovereignty region;
 - one environment per host, because Traefik binds host ports `80`/`443` and
   node-exporter and cAdvisor read the whole host;
 - D3-mini and BGE-M3 both run on a remote GPU host, so neither stack host
@@ -127,9 +128,10 @@ dedicated mkcert CA; the LiteLLM hosts trust that CA through
 - **About 23 GiB at worst** leaves more than 20 GB free. Neither engine reserves
   memory up front, so no per-process fractions are needed.
 - **D3-mini is on prod's request path.** `coding-router` calls it on every
-  request; if it fails or takes longer than 15 seconds, routing falls back to
-  `gpt-4o`. Keep the host on the same site network and firewalled to both
-  LiteLLM hosts.
+  request unless `CODING_ROUTER_CLASSIFIER=heuristic`. If it fails or takes
+  longer than `CODING_ROUTER_CLASSIFIER_TIMEOUT_MS` (default 3 seconds), LiteLLM
+  scores the request locally. Keep the host on the same site network and
+  firewalled to both LiteLLM hosts.
 - **BGE-M3** has its own API key, which guards every compute route. Keep its
   port firewalled to the dev host. Promoting the semantic cache or RAG to prod
   adds prod load to this GPU.

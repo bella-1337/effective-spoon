@@ -29,6 +29,7 @@ sequenceDiagram
     DC->>INIT: postgres-init creates litellm_dev
     INIT-->>DC: database ready
     DC->>SVC: start litellm-prod after Presidio is healthy
+    Note over SVC: launcher wires the .env provider models locked to DATA_SOVEREIGNTY_REGION, or refuses to start
   and metrics
     DC->>INIT: prometheus-secrets-init copies the metrics key
     INIT-->>DC: key in place

@@ -11,7 +11,7 @@ flowchart TD
   %% @card rose | Scope | Qdrant and the connector run only in the dev profile; only litellm-dev calls BGE-M3, over TLS | Production lists no vector store and no semantic cache | Promote capabilities through the dev-to-prod register
   %% @journey #22d3ee: CU TR LD QD
   %% @journey #a78bfa: LD CON VP
-  %% @journey #34d399: LD OAI
+  %% @journey #34d399: LD EUP
 
   subgraph CL["Clients — outside the stack"]
     CU["Chat UI / API client<br/>dev hostname only"]:::frontend
@@ -28,7 +28,7 @@ flowchart TD
   end
   subgraph EX["External services — outside the stack"]
     BGE["Remote BGE-M3<br/>GPU host · TLS"]:::external
-    OAI["OpenAI API<br/>generation on cache miss"]:::external
+    EUP["Regional model providers<br/>generation on cache miss"]:::external
   end
 
   CU ==>|"HTTPS"| TR
@@ -39,7 +39,7 @@ flowchart TD
   CON --> VP
   LD -.-> PR
   LD -.-> VP
-  LD ==> OAI
+  LD ==> EUP
 
   classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
   classDef cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0

@@ -6,9 +6,9 @@
 """Build the CA bundle LiteLLM uses to trust the remote GPU host.
 
 The GPU host's TLS proxy presents a certificate from its dedicated mkcert CA.
-LiteLLM verifies every outbound TLS connection, including OpenAI's, against the
-single file named by SSL_CERT_FILE, so the bundle must hold the normal public
-roots plus that CA. This script combines them into GPU_HOST_CA_BUNDLE.
+LiteLLM verifies every outbound TLS connection, including those to the model
+providers, against the single file named by SSL_CERT_FILE, so the bundle must
+hold the normal public roots plus that CA. This script combines them into GPU_HOST_CA_BUNDLE.
 
 Usage:
   scripts/build-gpu-host-ca-bundle.py --root-ca PATH [--public-roots PATH] [--output PATH]

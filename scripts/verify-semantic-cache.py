@@ -22,6 +22,7 @@ from maintenance_common import (
     http_request,
     public_host,
     run_main,
+    verification_chat_model,
 )
 
 TLS_CONTEXT = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -93,6 +94,10 @@ def main() -> None:
     if not master_key:
         fail("LITELLM_MASTER_KEY is empty")
 
+    chat_model = verification_chat_model()
+    if chat_model is None:
+        fail("no provider model is configured; set a provider model list or VERIFY_CHAT_MODEL in .env")
+
     nonce = int(time.time())
     prompts = (
         f"Return exactly semantic-cache-{nonce} and no additional text.",
@@ -103,7 +108,7 @@ def main() -> None:
     for prompt in prompts:
         payload = json.dumps(
             {
-                "model": "gpt-4o-mini",
+                "model": chat_model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0,
                 "cache": {"use-cache": True},

@@ -5,11 +5,11 @@ flowchart TD
   %% Source for 21-prod-profile.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @mode architecture
-  %% @subtitle Stable production serving with PII controls, isolated state, the configured provider, tools, and default observability
-  %% @card cyan | Request path | Clients reach litellm-prod only through Traefik on the production hostname | The eu-data-protection policy applies Presidio before and after every model call | coding-router asks the remote D3-mini host for a tier, then calls OpenAI
+  %% @subtitle Stable production serving with PII controls, isolated state, the region-locked providers, tools, and default observability
+  %% @card cyan | Request path | Clients reach litellm-prod only through Traefik on the production hostname | The eu-data-protection policy applies Presidio before and after every model call | coding-router asks the remote D3-mini host for a tier, then calls that tier's model from .env
   %% @card violet | State and telemetry | litellm_prod keeps keys, budgets, and spend without prompt content | Prometheus scrapes metrics; OpenSearch stores logs, traces, and usage copies | Langfuse, Lens, and Grafana are optional profiles, not part of the default path
   %% @card rose | Production limits | No Qdrant cache, pgvector store, or BGE-M3 embeddings in production | Xberg reaches the Internet only through the Squid allowlist | The Chat UI is disabled; the demo profile seeds data only when explicitly enabled
-  %% @journey #22d3ee: USR TR LP OAI
+  %% @journey #22d3ee: USR TR LP EUP
   %% @journey #fb7185: LP PR
   %% @journey #fb923c: LP OS
 
@@ -27,7 +27,7 @@ flowchart TD
     OS[("OpenSearch<br/>logs · traces · usage copies")]:::database
   end
   subgraph EX["External services — outside the stack"]
-    OAI["OpenAI<br/>configured provider"]:::external
+    EUP["Regional model providers<br/>in DATA_SOVEREIGNTY_REGION<br/>Bedrock · Azure OpenAI · Vertex AI"]:::external
     D3["D3-mini GPU host<br/>coding-tier decisions"]:::external
     SE["Public search engines<br/>queried by SearXNG"]:::external
   end
@@ -40,7 +40,7 @@ flowchart TD
   LP -->|"state and spend"| PG
   LP --> PM
   LP -.-> OS
-  LP ==> OAI
+  LP ==> EUP
   LP --> D3
   SX --> SE
 

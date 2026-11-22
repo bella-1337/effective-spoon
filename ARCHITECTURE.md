@@ -2,8 +2,15 @@
 
 ## Purpose
 
-This repository deploys a local, Docker Compose-based LiteLLM platform with:
+This repository deploys the Sovereign LLM Gateway: a Docker Compose-based
+LiteLLM platform locked to one data-sovereignty region. `DATA_SOVEREIGNTY_REGION`
+selects the region, and only the cloud models named in the environment are
+wired into LiteLLM at startup, each through a provider location inside that
+region (see [Data sovereignty and regional models](docs/data-sovereignty.md)).
+It provides:
 
+- region-locked, environment-configured models from Amazon Bedrock, Azure
+  OpenAI, and Google Vertex AI, with none required;
 - locally trusted HTTPS termination;
 - separate production and development LiteLLM profiles;
 - PII masking through Microsoft Presidio;
@@ -120,7 +127,10 @@ two LiteLLM databases on a fresh PostgreSQL volume. The optional
 `grafana-db-init` job separately creates Grafana's read-only role.
 
 Both LiteLLM proxies start through `litellm/modules/prepare_runtime_config.py`.
-It keeps every optional integration off unless its profile's service resolves
+It first adds the cloud models named in the environment, built by
+`litellm/modules/sovereign_models.py` and locked to `DATA_SOVEREIGNTY_REGION`,
+to the static model list. It refuses to start the proxy when a configured
+provider lacks a credential or its location falls outside the region. It keeps every optional integration off unless its profile's service resolves
 on the Compose network: the Langfuse callbacks, and the LiteLLM Lens connection,
 whose `LITELLM_LENS_*` variables it removes from the proxy process when Lens is
 not running. An enabled integration with missing credentials fails closed.
@@ -133,8 +143,11 @@ not running. An enabled integration with missing credentials fails closed.
    LiteLLM's authenticated `searxng-search` tool.
 3. LiteLLM authenticates API requests with `LITELLM_MASTER_KEY`.
 4. Requests for `coding-router` are classified by the remote authenticated D3-mini
-   Decisions endpoint. LiteLLM selects a configured coding tier and falls back to
-   `gpt-4o` if classification fails.
+   Decisions endpoint, or by LiteLLM's local heuristic when
+   `CODING_ROUTER_CLASSIFIER=heuristic`. LiteLLM selects a model from the tier's
+   `CODING_ROUTER_*_MODEL` list and scores the request locally if D3-mini
+   fails or times out. The router exists only when
+   `CODING_ROUTER_DEFAULT_MODEL` is set.
 5. The production guardrail calls Presidio analyzer and anonymizer services.
 6. LiteLLM stores request/spend telemetry in its profile-specific PostgreSQL
    database and emits Prometheus metrics.

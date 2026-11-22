@@ -49,7 +49,7 @@ flowchart TD
     end
   end
   subgraph EX["External services — outside the stack"]
-    PROV["Model providers<br/>OpenAI · remote GPU host"]:::external
+    PROV["Model providers<br/>region-locked Bedrock · Azure OpenAI · Vertex AI<br/>remote GPU host"]:::external
     NET["Allowlisted Internet<br/>public DNS + websites"]:::external
   end
 

@@ -95,6 +95,8 @@ class UpgradeCheckRuntimeConfigTests(unittest.TestCase):
         self.assertIn(f"{self.module.MODULES}:/tmp/modules:ro", command)
         self.assertIn("langfuse-web:127.0.0.1", command)
         self.assertIn("lens:127.0.0.1", command)
+        self.assertIn(f"{self.module.VALIDATION_SECRETS}:/app/secrets:ro", command)
+        self.assertIn("DATA_SOVEREIGNTY_REGION=eu", command)
 
     def test_lens_placeholders_satisfy_the_launcher(self) -> None:
         environment = self.module.optional_integration_environment()
@@ -108,8 +110,11 @@ class UpgradeCheckRuntimeConfigTests(unittest.TestCase):
             self.assertLessEqual(len(value), 512)
 
     def test_success_requires_both_integrations_enabled(self) -> None:
-        full = "Langfuse callbacks are enabled\nLiteLLM Lens tracing is enabled\nLiteLLM: config OK\n"
+        models = self.module.VALIDATION_MODELS_MARKER
+        full = f"{models}\nLangfuse callbacks are enabled\nLiteLLM Lens tracing is enabled\nLiteLLM: config OK\n"
         self.assertEqual(self.module.prepared_status(full), 0)
+        no_models = "Langfuse callbacks are enabled\nLiteLLM Lens tracing is enabled\nLiteLLM: config OK\n"
+        self.assertNotEqual(self.module.prepared_status(no_models), 0)
         partial = "Langfuse callbacks are enabled\nLiteLLM Lens tracing is disabled\nLiteLLM: config OK\n"
         self.assertNotEqual(self.module.prepared_status(partial), 0)
         self.assertIn("LiteLLM Lens tracing is enabled", self.module.validation_failure_detail(125, partial))

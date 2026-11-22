@@ -154,13 +154,13 @@ send representative positive and negative examples:
 curl --fail --silent "https://$LITELLM_PROD_HOST/policies/resolve" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-4o-mini"}'
+  -d '{"model":"<configured model>"}'
 
 curl --fail --silent "https://$LITELLM_DEV_HOST/v1/chat/completions" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model":"gpt-4o-mini",
+    "model":"<configured model>",
     "messages":[{"role":"user","content":"Reply exactly: Example Client Limited"}],
     "temperature":0
   }'

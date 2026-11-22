@@ -165,7 +165,9 @@ required for compliant operation.
 
 | Service | Terms | Required action |
 | --- | --- | --- |
-| OpenAI API (`gpt-4o`, `gpt-4o-mini`) | OpenAI commercial API terms | An organisation API agreement and a data processing agreement for personal data. |
+| Amazon Bedrock (only when `BEDROCK_MODELS` is set) | AWS Customer Agreement, AWS Service Terms, and each model provider's third-party terms on AWS Marketplace | Accept the model EULA in the Bedrock console; the AWS Data Processing Addendum covers personal data. |
+| Azure OpenAI (only when `AZURE_OPENAI_DEPLOYMENTS` is set) | Microsoft Product Terms and the Microsoft Products and Services Data Protection Addendum | An Azure subscription under those terms; apply for modified abuse monitoring if prompts must not be retained for review. |
+| Google Vertex AI (only when `VERTEX_MODELS` is set) | Google Cloud Platform Terms of Service, Service Specific Terms, and the Cloud Data Processing Addendum | A Google Cloud billing account under those terms; keep data logging and caching off unless they are documented. |
 | Lens analysis models (optional) | The terms of the provider behind the configured LiteLLM gateway model | Only when `LENS_GATEWAY_API_KEY` is set: investigations send selected trace content to that model. Cover it with the same agreements as gateway traffic. |
 | Search engines queried by SearXNG | Each engine's terms of service | Restrict engines, use contracted APIs, or formally accept the risk. See [Search-engine terms of use](search-extraction-and-caching.md#search-engine-terms-of-use). |
 | Hugging Face Hub | Hugging Face terms of service and each model's licence | Download only the pinned revisions listed under [models](#models). |
