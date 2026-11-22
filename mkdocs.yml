@@ -108,8 +108,10 @@ extra:
   # Version selector: scripts/build-docs.py writes versions.json next to the
   # version directories. Pages of any version other than the latest release
   # and dev show the "outdated" banner (patterns are regular expressions).
+  # The docs profile serves one version and sets DOCS_VERSION_PROVIDER=none,
+  # which turns the selector off.
   version:
-    provider: mike
+    provider: !ENV [DOCS_VERSION_PROVIDER, mike]
     default:
       - ^latest$
       - ^dev$

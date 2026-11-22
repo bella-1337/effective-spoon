@@ -26,6 +26,17 @@
     <span class="docs-banner docs-banner--local">
       <strong>Local preview</strong> of the working tree. This is not a published version.
     </span>
+  {%- elif build.kind == "deployment" -%}
+    <span class="docs-banner docs-banner--deployment">
+      <strong>Deployment docs</strong> for the stack running here
+      {%- if build.commit %}, at revision <code>{{ build.commit[:7] }}</code>
+      {%- else %}; its revision is unknown, because the image was built without
+      <code>STACK_REPOSITORY_REVISION</code>
+      {%- endif %}.
+      {%- if build.latest %}
+        <a href="{{ base_url }}/../latest/">Switch to the latest release ({{ build.latest }})</a>.
+      {%- endif %}
+    </span>
   {%- endif -%}
 {%- endblock %}
 

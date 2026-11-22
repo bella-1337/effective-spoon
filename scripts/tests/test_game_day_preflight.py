@@ -109,6 +109,15 @@ class GameDayPreflightTests(unittest.TestCase):
                     "cap_drop": ["ALL"],
                     "environment": {"LENS_PUBLIC_URL": "https://lens.example.test"},
                 },
+                "docs": {
+                    "profiles": ["docs"],
+                    "networks": {"edge": {}},
+                    "read_only": True,
+                    "cap_drop": ["ALL"],
+                    "labels": {
+                        "traefik.http.routers.docs.rule": "Host(`gateway-deployment-docs.example.test`)"
+                    },
+                },
                 "image-security-docker-proxy": {"profiles": ["security"]},
                 "image-security-monitor": {"profiles": ["security"]},
                 "d3-mini-preflight": {
@@ -217,6 +226,33 @@ class GameDayPreflightTests(unittest.TestCase):
             "must use the same image": lambda s: s["d3-mini-download"].update(image="other:1"),
             "may join d3-local: searxng": lambda s: s["searxng"]["networks"].update({"d3-local": {}}),
             "Optional D3 service is missing: d3-mini-preflight": lambda s: s.pop("d3-mini-preflight"),
+        }
+        for expected, mutate in cases.items():
+            with self.subTest(expected=expected):
+                config = self.valid_config()
+                mutate(config["services"])
+                failures = self.module.validate_compose_contracts(config)
+                self.assertTrue(any(expected in failure for failure in failures), failures)
+
+    def test_docs_profile_contracts_fail_closed(self) -> None:
+        cases = {
+            "Optional documentation service is missing: docs": lambda s: s.pop("docs"),
+            "must stay in the docs profile": lambda s: s["docs"].update(profiles=["prod"]),
+            "must join only the edge network": lambda s: s["docs"]["networks"].update(
+                {"internal": {}}
+            ),
+            "must not publish host ports": lambda s: s["docs"].update(
+                ports=[{"target": 8080, "published": "8080"}]
+            ),
+            "must not mount volumes": lambda s: s["docs"].update(
+                volumes=[{"type": "bind", "source": "./site", "target": "/usr/share/nginx/html"}]
+            ),
+            "must keep a read-only root filesystem": lambda s: s["docs"].update(read_only=False),
+            "must drop all Linux capabilities": lambda s: s["docs"].update(cap_drop=["NET_RAW"]),
+            "needs its Traefik route on DOCS_HOST": lambda s: s["docs"].update(labels={}),
+            "litellm-prod must not depend on the optional documentation service": lambda s: s[
+                "litellm-prod"
+            ]["depends_on"].update({"docs": {"condition": "service_healthy"}}),
         }
         for expected, mutate in cases.items():
             with self.subTest(expected=expected):

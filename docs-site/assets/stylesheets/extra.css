@@ -97,6 +97,9 @@ body {
     radial-gradient(#ffffff1f 1px, transparent 1.2px) 0 0 / 10px 10px,
     linear-gradient(90deg, #3b0764, #5b21b6);
 }
+.md-banner:has(.docs-banner--deployment) {
+  background: linear-gradient(90deg, #083344, #0e7490);
+}
 .md-banner,
 .md-banner--warning {
   color: #fff;

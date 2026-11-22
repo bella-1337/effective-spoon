@@ -119,13 +119,15 @@ mkcert \
   -cert-file traefik/certs/litellm-stack.pem \
   -key-file traefik/certs/litellm-stack-key.pem \
   "$LITELLM_PROD_HOST" "$LITELLM_DEV_HOST" "$OPENSEARCH_DASHBOARDS_HOST" \
-  "$LANGFUSE_WEB_HOST" "$LANGFUSE_S3_HOST" "$GRAFANA_HOST" "$LENS_HOST"
+  "$LANGFUSE_WEB_HOST" "$LANGFUSE_S3_HOST" "$GRAFANA_HOST" "$LENS_HOST" \
+  "$DOCS_HOST"
 ```
 
 The names come from `.env` and `.env.optional`, so the certificate always
 matches the configured routes. `GRAFANA_HOST` is needed only for the optional
 `grafana` profile, the two Langfuse names only for the `langfuse` profile, and
-`LENS_HOST` only for the `lens` profile.
+`LENS_HOST` only for the `lens` profile, and `DOCS_HOST` only for the `docs`
+profile.
 
 `mkcert` creates a locally trusted CA and a private key. Its certificates are
 for local/private use only: browsers on other devices will not trust them
@@ -156,10 +158,10 @@ configured names and append it:
 
 ```sh
 eval "$(python3 scripts/maintenance.py stack-env)"
-printf '127.0.0.1 %s %s %s %s %s %s %s\n' \
+printf '127.0.0.1 %s %s %s %s %s %s %s %s\n' \
   "$LITELLM_PROD_HOST" "$LITELLM_DEV_HOST" "$OPENSEARCH_DASHBOARDS_HOST" \
   "$LANGFUSE_WEB_HOST" "$LANGFUSE_S3_HOST" "$GRAFANA_HOST" "$LENS_HOST" \
-  | sudo tee -a /etc/hosts
+  "$DOCS_HOST" | sudo tee -a /etc/hosts
 ```
 
 On Windows, edit
@@ -314,6 +316,21 @@ recreate the gateways after Lens is healthy: a gateway that started without
 Lens keeps it disabled. See [LiteLLM Lens](lens.md) for agent tracing keys,
 analysis models, data protection, backups, and upgrades.
 
+To serve this documentation from the stack at `DOCS_HOST`
+(`gateway-deployment-docs.${STACK_DOMAIN}` by default), start the `docs`
+profile. It runs `zensical serve` on the checked-out revision, built into the
+image, so export that revision first; the pages then name the commit they
+describe:
+
+```sh
+export STACK_REPOSITORY_REVISION="$(git rev-parse HEAD)"
+docker compose --env-file .env --env-file .env.optional \
+  --profile docs up -d --build --wait docs
+```
+
+The site has no sign-in. See
+[Documentation site](documentation-site.md#serve-the-site-from-the-stack).
+
 Synthetic production dashboard data is opt-in. To seed it explicitly, activate
 the `demo` profile together with production:
 
@@ -349,6 +366,8 @@ curl --fail --show-error --silent \
   "https://$LANGFUSE_WEB_HOST/api/public/health?failIfDatabaseUnavailable=true"
 # Optional lens profile only:
 curl --fail --show-error --silent "https://$LENS_HOST/health/ready"
+# Optional docs profile only:
+curl --fail --show-error --silent --output /dev/null "https://$DOCS_HOST/"
 # SearXNG is internal-only; Traefik must not route it (expect 404).
 curl --silent --output /dev/null --write-out '%{http_code}\n' \
   -H "Host: search.$STACK_DOMAIN" "https://$LITELLM_PROD_HOST/"

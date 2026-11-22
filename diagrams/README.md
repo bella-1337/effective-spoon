@@ -67,6 +67,7 @@ loops, and parallel work (`par`/`and`). A dot replays the messages in order.
 | [Observability pipeline](03-observability-pipeline.html) | [03-observability-pipeline.mmd](03-observability-pipeline.mmd.html) | How logs, metrics, traces, and LiteLLM usage reach OpenSearch, and how alerts leave the stack |
 | [Langfuse profile](04-langfuse-profile.html) | [04-langfuse-profile.mmd](04-langfuse-profile.mmd.html) | The optional Langfuse services and the `langfuse_otel` trace path |
 | [LiteLLM Lens profile](26-lens-profile.html) | [26-lens-profile.mmd](26-lens-profile.mmd.html) | The optional Lens service, its private ClickHouse store, agent trace uploads, and the gateway connection |
+| [Documentation site profile](28-docs-profile.html) | [28-docs-profile.mmd](28-docs-profile.mmd.html) | The optional `docs` profile: `zensical serve` on the deployed revision behind Traefik at `DOCS_HOST`, and how its image is built |
 | [On-host D3-mini profile](27-d3-profile.html) | [27-d3-profile.mmd](27-d3-profile.mmd.html) | The optional `d3` profile: D3-mini on the stack host's GPU, its preflight and one-shot download, and the internal `d3-local` network |
 | [Grafana profile](05-grafana-profile.html) | [05-grafana-profile.mmd](05-grafana-profile.mmd.html) | The optional Grafana, Loki, and `alloy-loki` services and their read-only data sources |
 | [Xberg MCP sandbox](06-xberg-mcp-sandbox.html) | [06-xberg-mcp-sandbox.mmd](06-xberg-mcp-sandbox.mmd.html) | MCP extraction through LiteLLM, the sandbox network, and allowlisted egress |

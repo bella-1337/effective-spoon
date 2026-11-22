@@ -8,6 +8,22 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Optional `docs` profile that serves this documentation from the stack at
+  `DOCS_HOST`, by default `gateway-deployment-docs.${STACK_DOMAIN}`. The
+  `litellm-stack-docs` image runs `zensical serve` on the checked-out revision,
+  and every page's banner names that commit (`STACK_REPOSITORY_REVISION`). It
+  serves one version without the version selector; the versioned site stays on
+  Pages. The container is non-root and read-only on the `edge` network only;
+  Traefik answers only `GET` and `HEAD` and adds a same-origin Content Security
+  Policy through a `docs-headers` middleware. There is no sign-in. The BerriAI
+  Inference Stack has no documentation site to compare with; building the
+  sources into the image was chosen over mounting a host checkout or
+  redirecting to Pages, so the docs cannot drift from the running stack, and
+  `zensical serve` was chosen over a separate static web server. See
+  [Documentation site](docs/documentation-site.md#serve-the-site-from-the-stack).
+
 ### Changed
 
 - The **Source** links in the [diagram guide](diagrams/README.md) open a

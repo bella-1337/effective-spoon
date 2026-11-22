@@ -1,0 +1,46 @@
+---
+title: Optional documentation site profile
+---
+flowchart TD
+  %% Source for 28-docs-profile.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @mode architecture
+  %% @subtitle zensical serve behind Traefik at DOCS_HOST, serving the checked-out revision the stack runs
+  %% @card cyan | One version | The site is the checked-out revision, and its banner names the commit | No version selector; the versioned site stays on Pages | Rebuild the image after each upgrade
+  %% @card violet | Build | The build stage renders the diagrams and installs the pinned Zensical toolchain | A strict build fails the image on a broken link | Dockerfile.dockerignore keeps .env and runtime state out of the context
+  %% @card rose | Serving | Non-root, read-only root, no capabilities, and tmpfs only for site and .cache | Traefik answers only GET and HEAD and adds the CSP and frame headers | No sign-in, so DOCS_HOST stays on the private network
+  %% @journey #22d3ee: RD TR DS
+  %% @journey #a78bfa: SRC BLD IMG DS
+
+  subgraph CL["Clients — outside the stack"]
+    RD["Operator or developer<br/>browser"]:::frontend
+  end
+  subgraph BH["Image build — docker compose build docs"]
+    SRC["Checked-out tree<br/>Markdown · diagrams · build scripts"]:::bus
+    BLD["build stage<br/>render diagrams · Zensical toolchain · strict build"]:::security
+    IMG[("litellm-stack-docs image<br/>sources · rendered diagrams · Zensical")]:::database
+  end
+  subgraph ST["LiteLLM stack — Docker Compose host"]
+    TR["Traefik<br/>DOCS_HOST · GET/HEAD · docs-headers"]:::cloud
+    subgraph DP["docs profile — compose.optional.yml · edge network only"]
+      DS["docs<br/>zensical serve :8000 · read-only"]:::backend
+    end
+  end
+  subgraph EX["External services — outside the stack"]
+    PKG["PyPI · GitHub · npm<br/>pinned toolchain, renderer, Mermaid.js"]:::external
+  end
+
+  RD ==>|"HTTPS"| TR
+  TR ==>|"GET · HEAD · live-reload WebSocket"| DS
+  SRC --> BLD
+  PKG -.->|"hash-checked downloads"| BLD
+  BLD ==> IMG
+  IMG ==>|"runs"| DS
+
+  classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
+  classDef bus fill:#9a3412,stroke:#fb923c,color:#e2e8f0
+  classDef cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+  classDef database fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+  classDef external fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
+  classDef frontend fill:#083344,stroke:#22d3ee,color:#e2e8f0
+  classDef security fill:#881337,stroke:#fb7185,color:#e2e8f0
