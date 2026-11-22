@@ -105,12 +105,18 @@ listed under Langfuse. See [On-host D3-mini](d3-mini-on-host.md).
 | Trivy | `0.76.2` | `aquasec/trivy` | Copied into the monitor image; host-mode scans |
 | Docker CLI and buildx | `29.9.3-cli` | `docker` | Copied into the monitor image |
 
+## Documentation site
+
+| Component | Version | Image | Used by (profile) |
+| --- | --- | --- | --- |
+| Documentation site (local build, Zensical serve) | `0.1.0` | `litellm-stack-docs` | `docs` (docs), built on the uv image listed under [Build base images](#build-base-images) with the Zensical toolchain pinned in `docs-site/requirements.txt` |
+
 ## Build base images
 
 | Component | Version | Image | Used by (profile) |
 | --- | --- | --- | --- |
 | Python | `3.11-slim-bookworm` | `python` | Base of `pgvector/Dockerfile` |
-| uv with Python 3.13 | `0.9.30-python3.13-bookworm-slim` | `ghcr.io/astral-sh/uv` | Base of `opensearch/tools/Dockerfile` and `security/image-monitor.Dockerfile` |
+| uv with Python 3.13 | `0.9.30-python3.13-bookworm-slim` | `ghcr.io/astral-sh/uv` | Base of `opensearch/tools/Dockerfile`, `security/image-monitor.Dockerfile`, and `docs-site/Dockerfile` |
 
 ## Remote GPU host
 

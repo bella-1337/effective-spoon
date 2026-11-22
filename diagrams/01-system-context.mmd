@@ -6,7 +6,7 @@ flowchart TD
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @mode architecture
   %% @subtitle Who calls the stack, what runs inside the Docker host, and which services live outside it
-  %% @card cyan | Clients | Browsers, SDKs, and agents reach the stack only through Traefik over HTTPS | API clients authenticate to LiteLLM with a virtual key or the master key | Operators use OpenSearch Dashboards, plus Grafana, Langfuse, or Lens when enabled
+  %% @card cyan | Clients | Browsers, SDKs, and agents reach the stack only through Traefik over HTTPS | API clients authenticate to LiteLLM with a virtual key or the master key | Operators use OpenSearch Dashboards, plus Grafana, Langfuse, Lens, or the documentation site when enabled
   %% @card violet | Inside the stack | LiteLLM is the single gateway for models, search, MCP tools, and guardrails | Presidio, SearXNG, Xberg, PostgreSQL, and telemetry stay on internal networks | Every container log, metric, and trace lands in OpenSearch by default
   %% @card rose | Outside the stack | Only the models named in .env serve completions, each from a Bedrock, Azure OpenAI, or Vertex AI location inside DATA_SOVEREIGNTY_REGION; a separate GPU host runs D3-mini and dev BGE-M3 embeddings behind one TLS proxy trusted through its mkcert CA, or the optional d3 profile runs D3-mini on the stack host's own GPU | SearXNG scrapes public engines — review their terms of use | Xberg reaches only allowlisted sites through the Squid egress proxy
   %% @journey #22d3ee: API TR LL EUP
@@ -22,7 +22,7 @@ flowchart TD
     TR["Traefik<br/>TLS 1.2+ · HSTS · runaway limits"]:::cloud
     LL["LiteLLM gateway<br/>prod / dev profile"]:::backend
     OSD["OpenSearch Dashboards<br/>multi-user observability UI"]:::frontend
-    OPT["Optional UIs<br/>Grafana · Langfuse · Lens profiles"]:::frontend
+    OPT["Optional UIs<br/>Grafana · Langfuse · Lens · docs profiles"]:::frontend
     PR["Presidio<br/>PII analyzer + anonymizer"]:::security
     SX["SearXNG<br/>internal-only search"]:::backend
     XB["Xberg MCP<br/>document extraction sandbox"]:::backend

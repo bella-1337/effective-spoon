@@ -21,7 +21,7 @@ flowchart TD
       TR["Traefik<br/>publishes :80 and :443"]:::cloud
       LL["LiteLLM prod / dev<br/>also on internal + xberg-sandbox + d3-local"]:::backend
       OSD["OpenSearch Dashboards<br/>also on internal"]:::frontend
-      WEBUI["Grafana · Langfuse web<br/>optional profiles"]:::frontend
+      WEBUI["Grafana · Langfuse web · docs site<br/>optional profiles"]:::frontend
       LENS["Lens (optional)<br/>also on internal + lens-storage"]:::backend
     end
     subgraph INT["internal network — service-to-service"]

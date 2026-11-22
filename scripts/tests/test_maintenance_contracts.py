@@ -377,6 +377,7 @@ updates:
                 "docker-compose.yml does not require STACK_DOMAIN",
                 "LITELLM_DEV_HOST example must derive from ${STACK_DOMAIN}",
                 "LANGFUSE_S3_HOST must be defined in exactly one environment example",
+                "DOCS_HOST must be defined in exactly one environment example",
             ],
         )
 
@@ -475,6 +476,7 @@ updates:
             ("pgvector/Dockerfile", "python:3.11@sha256:" + "a" * 64),
             ("opensearch/tools/Dockerfile", "base:1"),
             ("security/image-monitor.Dockerfile", "base:1 AS builder"),
+            ("docs-site/Dockerfile", "base:1 AS build"),
         ):
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)

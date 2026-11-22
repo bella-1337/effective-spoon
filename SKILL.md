@@ -64,7 +64,10 @@ Map the change across these surfaces:
   model revision must stay in step with `gpu-host/deploy.py`;
 - the Mermaid diagram sources in `diagrams/*.mmd`;
 - `mkdocs.yml` `nav:` when a Markdown file is added, moved, or removed, so the
-  [documentation site](docs/documentation-site.md) strict build keeps passing.
+  [documentation site](docs/documentation-site.md) strict build keeps passing;
+- the optional `docs` profile (`docs-site/Dockerfile` and its
+  `Dockerfile.dockerignore` allowlist), when the documentation build starts
+  reading a new script or file type.
 
 For every proposed removal, identify:
 
@@ -131,7 +134,7 @@ Run:
 ```sh
 docker compose --env-file .env --env-file .env.optional \
   --profile prod --profile dev --profile grafana --profile langfuse --profile lens \
-  --profile d3 --profile security config --quiet
+  --profile d3 --profile docs --profile security config --quiet
 python3 -m unittest discover -s scripts/tests
 jq empty grafana/dashboards/litellm-stack/litellm-stack.json
 jq empty grafana/dashboards/litellm-cost/litellm-cost.json

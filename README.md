@@ -101,7 +101,9 @@ To stop, restart, or remove the stack, see
 
 The guides below are also published as a versioned documentation site on
 GitHub Pages or GitLab Pages, with a version selector for each release and
-the unreleased `dev` branch. Preview it with `./scripts/build-docs.py serve`;
+the unreleased `dev` branch. Preview it with `./scripts/build-docs.py serve`,
+or serve the deployed revision from the stack with `zensical serve` at
+`gateway-deployment-docs.${STACK_DOMAIN}` with the optional `docs` profile;
 see [Documentation site](docs/documentation-site.md).
 
 ### Guides
@@ -113,7 +115,7 @@ see [Documentation site](docs/documentation-site.md).
 | [Hardware sizing](docs/hardware-sizing.md) | Prod, dev, and remote GPU host specifications, memory, CPU, and disk budgets, prod resource limits |
 | [Development and delivery workflow](docs/development-workflow.md) | Feature requests, development container, local, GitHub Actions, and GitLab CI checks, release delivery |
 | [Reference stack: BerriAI Inference Stack](docs/reference-inference-stack.md) | How to check feature requests against LiteLLM's reference deployment, and how the two stacks differ |
-| [Documentation site](docs/documentation-site.md) | Local preview, versions and the dev switch, GitHub Pages and GitLab Pages publishing |
+| [Documentation site](docs/documentation-site.md) | Local preview, versions and the dev switch, the optional `docs` profile that serves the deployed revision at `DOCS_HOST`, GitHub Pages and GitLab Pages publishing |
 | [Corporate branding and virtual-key management](docs/branding-and-key-management.md) | Admin UI branding, Enterprise virtual-key rotation, key email notifications |
 | [Observability](docs/observability.md) | OpenSearch users, roles, tenants, alerting and recovery; optional Langfuse and Grafana profiles; demonstration data and telemetry stores |
 | [LiteLLM Lens](docs/lens.md) | Optional `lens` profile: AI review of agent traces in the LiteLLM dashboard, secrets, gateway connection, analysis models, data protection, backup, and upgrades |

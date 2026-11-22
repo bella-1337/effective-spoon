@@ -22,7 +22,7 @@ from maintenance_common import (
 )
 import xberg_allowlist
 
-COMPOSE_PROFILES = ("prod", "dev", "demo", "security", "grafana", "langfuse", "lens", "d3")
+COMPOSE_PROFILES = ("prod", "dev", "demo", "security", "grafana", "langfuse", "lens", "d3", "docs")
 EXPECTED_ALERT_UIDS = {
     "litellm-prod-unavailable",
     "litellm-postgres-unavailable",
@@ -59,6 +59,7 @@ LOCAL_BUILD_DOCKERFILES = (
     Path("pgvector") / "Dockerfile",
     Path("opensearch") / "tools" / "Dockerfile",
     Path("security") / "image-monitor.Dockerfile",
+    Path("docs-site") / "Dockerfile",
 )
 # A build context fetched from a Git repository must pin a full commit, so the
 # image is reproducible and its revision label names the exact source.
@@ -255,6 +256,7 @@ def validate_compose_contracts(config: Mapping[str, Any]) -> list[str]:
 
     failures.extend(lens_compose_failures(services))
     failures.extend(d3_compose_failures(services))
+    failures.extend(docs_compose_failures(services))
 
     for name in ("image-security-docker-proxy", "image-security-monitor"):
         service = services.get(name)
@@ -463,6 +465,33 @@ def lens_compose_failures(services: Mapping[str, Any]) -> list[str]:
         failures.append(
             "Only Lens and its ClickHouse may join lens-storage: " + ", ".join(outsiders)
         )
+    return failures
+
+
+def docs_compose_failures(services: Mapping[str, Any]) -> list[str]:
+    """Keep the documentation site optional, edge-only, stateless, and read-only."""
+    docs = services.get("docs")
+    if not isinstance(docs, dict):
+        return ["Optional documentation service is missing: docs"]
+    failures: list[str] = []
+    if docs.get("profiles") != ["docs"]:
+        failures.append("The documentation service must stay in the docs profile")
+    if set(docs.get("networks", {}) or {}) != {"edge"}:
+        failures.append("The documentation service must join only the edge network")
+    if docs.get("ports"):
+        failures.append("The documentation service must not publish host ports; route it through Traefik")
+    if docs.get("volumes"):
+        failures.append("The documentation service must not mount volumes; its site is in the image")
+    if docs.get("read_only") is not True:
+        failures.append("The documentation service must keep a read-only root filesystem")
+    cap_drop = {str(cap).upper() for cap in docs.get("cap_drop", []) or []}
+    if "ALL" not in cap_drop:
+        failures.append("The documentation service must drop all Linux capabilities")
+    if "traefik.http.routers.docs.rule" not in service_label_keys(docs):
+        failures.append("The documentation service needs its Traefik route on DOCS_HOST")
+    for name, service in sorted(services.items()):
+        if name != "docs" and isinstance(service, dict) and "docs" in required_dependency_names(service):
+            failures.append(f"{name} must not depend on the optional documentation service")
     return failures
 
 

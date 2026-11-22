@@ -654,6 +654,64 @@ services:
       - traefik.http.services.lens.loadbalancer.server.port=4318
 
   # ---------------------------------------------------------------------------
+  # docs profile: this repository's documentation site at DOCS_HOST
+  # ---------------------------------------------------------------------------
+
+  # `zensical serve` on the checked-out revision, built into the image, so the
+  # pages describe the stack that runs here. One version, without the version
+  # selector; the versioned site stays on Pages. Edge only: it reaches no other
+  # service, holds no data, and needs no secret. Traefik answers only GET and
+  # HEAD and adds the security headers.
+  docs:
+    logging: *default-logging
+    profiles: [docs]
+    image: litellm-stack-docs:0.1.0
+    build:
+      context: .
+      dockerfile: docs-site/Dockerfile
+      args:
+        STACK_REPOSITORY_REVISION: ${STACK_REPOSITORY_REVISION:-}
+      labels:
+        <<: *own-image-labels
+        org.opencontainers.image.title: litellm-stack-docs
+        org.opencontainers.image.description: Documentation site of the LiteLLM stack, served by Zensical from the repository revision it is deployed with
+        org.opencontainers.image.version: "0.1.0"
+        org.opencontainers.image.base.name: ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm-slim
+    networks: [edge]
+    read_only: true
+    # Zensical's build output and cache; everything else is read-only.
+    tmpfs:
+      - /src/site:uid=65532,gid=65532,mode=0700,noexec,nosuid,size=256m
+      - /src/.cache:uid=65532,gid=65532,mode=0700,noexec,nosuid,size=64m
+      - /tmp:mode=1777,noexec,nosuid,size=64m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    deploy: *resources-small
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.docs.rule=Host(`${DOCS_HOST:?Set DOCS_HOST in .env.optional}`) && (Method(`GET`) || Method(`HEAD`))
+      - traefik.http.routers.docs.entrypoints=websecure
+      - traefik.http.routers.docs.tls=true
+      - traefik.http.routers.docs.middlewares=docs-headers
+      - traefik.http.services.docs.loadbalancer.server.port=8000
+      # The theme and diagram pages use inline scripts and styles and load
+      # nothing from another origin; Zensical's live reload connects back to
+      # the same origin. Traefik's edge headers (HSTS, nosniff, referrer
+      # policy) apply as on every route.
+      - "traefik.http.middlewares.docs-headers.headers.contentSecurityPolicy=default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'self'"
+      - traefik.http.middlewares.docs-headers.headers.customFrameOptionsValue=SAMEORIGIN
+      - traefik.http.middlewares.docs-headers.headers.permissionsPolicy=camera=(), microphone=(), geolocation=(), payment=()
+      - traefik.http.middlewares.docs-headers.headers.customResponseHeaders.X-Robots-Tag=noindex, nofollow, noarchive
+
+  # ---------------------------------------------------------------------------
   # d3 profile: D3-mini on this host's NVIDIA GPU, for coding-router decisions
   # ---------------------------------------------------------------------------
 
