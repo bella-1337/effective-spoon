@@ -14,8 +14,10 @@
 
 FROM ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm-slim@sha256:531f855bda2c73cd6ef67d56b733b357cea384185b3022bd09f05e002cd144ca AS build
 
-# Debian removes superseded package versions from its mirrors, so install with
-# a fresh package index.
+# Debian removes superseded package versions from its mirrors, so exact pins
+# would break rebuilds. Graphviz only renders the diagrams here and is not
+# copied into the docs image.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends graphviz \
     && rm -rf /var/lib/apt/lists/*
@@ -51,8 +53,14 @@ RUN chmod -R a=rX /src /opt/zensical
 # the edit buttons open the files at it. Compose passes
 # STACK_REPOSITORY_REVISION; anything but a commit SHA is refused.
 ARG STACK_REPOSITORY_REVISION=
-RUN printf '%s' "$STACK_REPOSITORY_REVISION" | grep -Eqx '([0-9a-f]{7,40})?' \
-    || { echo "STACK_REPOSITORY_REVISION must be a Git commit SHA" >&2; exit 1; }
+RUN rev="$STACK_REPOSITORY_REVISION"; \
+    case "$rev" in \
+      "") ;; \
+      *[!0-9a-f]*) echo "STACK_REPOSITORY_REVISION must be a Git commit SHA" >&2; exit 1 ;; \
+      *) if [ "${#rev}" -lt 7 ] || [ "${#rev}" -gt 40 ]; then \
+           echo "STACK_REPOSITORY_REVISION must be a Git commit SHA" >&2; exit 1; \
+         fi ;; \
+    esac
 
 # Read by mkdocs.yml (!ENV). One version, so no version selector.
 ENV PYTHONDONTWRITEBYTECODE=1 \
