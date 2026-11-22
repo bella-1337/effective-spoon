@@ -60,6 +60,8 @@ Map the change across these surfaces:
 - `gpu-host/` (the separate remote D3-mini and BGE-M3 stack: `compose.yml`,
   `deploy.py`, and its Nginx configuration), whose image and model pins the
   licence register must also cover;
+- the optional on-host D3-mini (`d3` profile in `compose.optional.yml`), whose
+  model revision must stay in step with `gpu-host/deploy.py`;
 - the Mermaid diagram sources in `diagrams/*.mmd`;
 - `mkdocs.yml` `nav:` when a Markdown file is added, moved, or removed, so the
   [documentation site](docs/documentation-site.md) strict build keeps passing.
@@ -129,7 +131,7 @@ Run:
 ```sh
 docker compose --env-file .env --env-file .env.optional \
   --profile prod --profile dev --profile grafana --profile langfuse --profile lens \
-  --profile security config --quiet
+  --profile d3 --profile security config --quiet
 python3 -m unittest discover -s scripts/tests
 jq empty grafana/dashboards/litellm-stack/litellm-stack.json
 jq empty grafana/dashboards/litellm-cost/litellm-cost.json

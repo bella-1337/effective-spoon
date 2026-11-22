@@ -22,7 +22,7 @@ from maintenance_common import (
 )
 import xberg_allowlist
 
-COMPOSE_PROFILES = ("prod", "dev", "demo", "security", "grafana", "langfuse", "lens")
+COMPOSE_PROFILES = ("prod", "dev", "demo", "security", "grafana", "langfuse", "lens", "d3")
 EXPECTED_ALERT_UIDS = {
     "litellm-prod-unavailable",
     "litellm-postgres-unavailable",
@@ -65,6 +65,12 @@ LOCAL_BUILD_DOCKERFILES = (
 REMOTE_BUILD_CONTEXT_RE = re.compile(r"^(?:https://|git@)\S+?\.git#([0-9a-f]{40})$")
 LENS_SERVICES = ("lens-preflight", "lens-clickhouse", "lens")
 LENS_CORE_ENV_KEYS = frozenset({"LITELLM_LENS_SERVICE_TOKEN", "LENS_GATEWAY_SECRET"})
+# On-host D3-mini (d3 profile). The gateways keep D3_DECISION_API_BASE and
+# D3_DECISION_API_KEY in .env; the profile's sizing settings live in
+# .env.optional.
+D3_SERVICES = ("d3-mini-preflight", "d3-mini-download", "d3-mini")
+D3_CORE_ENV_KEYS = frozenset({"D3_DECISION_API_BASE", "D3_DECISION_API_KEY"})
+D3_GATEWAYS = ("litellm-prod", "litellm-dev")
 DOCKERFILE_FROM_RE = re.compile(r"^FROM\s+(?:--platform=\S+\s+)?(\S+)", re.MULTILINE | re.IGNORECASE)
 # The remote GPU host stack pins its images in gpu-host/compose.yml and its
 # model revisions there and in gpu-host/deploy.py; the licence register must
@@ -248,6 +254,7 @@ def validate_compose_contracts(config: Mapping[str, Any]) -> list[str]:
             failures.append(f"{name} must depend on langfuse-preflight")
 
     failures.extend(lens_compose_failures(services))
+    failures.extend(d3_compose_failures(services))
 
     for name in ("image-security-docker-proxy", "image-security-monitor"):
         service = services.get(name)
@@ -456,6 +463,115 @@ def lens_compose_failures(services: Mapping[str, Any]) -> list[str]:
         failures.append(
             "Only Lens and its ClickHouse may join lens-storage: " + ", ".join(outsiders)
         )
+    return failures
+
+
+def _is_root_user(service: Mapping[str, Any]) -> bool:
+    user = str(service.get("user") or "").partition(":")[0]
+    return user in {"", "0", "root"}
+
+
+def _command_option(service: Mapping[str, Any], option: str) -> str | None:
+    command = service.get("command")
+    if not isinstance(command, list):
+        return None
+    for name, value in zip(command, command[1:]):
+        if name == option:
+            return str(value)
+    return None
+
+
+def d3_compose_failures(services: Mapping[str, Any]) -> list[str]:
+    """Keep the on-host D3-mini optional, offline, unpublished, and unprivileged."""
+    failures: list[str] = []
+    for name in D3_SERVICES:
+        service = services.get(name)
+        if not isinstance(service, dict):
+            failures.append(f"Optional D3 service is missing: {name}")
+        elif service.get("profiles") != ["d3"]:
+            failures.append(f"Optional D3 service must stay in the d3 profile: {name}")
+    for name, dependency in (
+        ("d3-mini-download", "d3-mini-preflight"),
+        ("d3-mini", "d3-mini-download"),
+    ):
+        service = services.get(name)
+        if isinstance(service, dict) and dependency not in required_dependency_names(service):
+            failures.append(f"{name} must depend on {dependency}")
+
+    for name in D3_GATEWAYS:
+        service = services.get(name)
+        if isinstance(service, dict) and "d3-mini" in required_dependency_names(service):
+            failures.append(
+                f"{name} must not require d3-mini; coding-router falls back to its local heuristic"
+            )
+
+    preflight = services.get("d3-mini-preflight")
+    if isinstance(preflight, dict) and preflight.get("network_mode") != "none":
+        failures.append("d3-mini-preflight must run without a network")
+
+    download = services.get("d3-mini-download")
+    server = services.get("d3-mini")
+    for name, service, network in (
+        ("d3-mini-download", download, "d3-download"),
+        ("d3-mini", server, "d3-local"),
+    ):
+        if not isinstance(service, dict):
+            continue
+        if set(service.get("networks", {}) or {}) != {network}:
+            failures.append(f"{name} must join only the {network} network")
+        if service.get("ports") or any(
+            key.startswith("traefik.") for key in service_label_keys(service)
+        ):
+            failures.append(f"{name} must not be published or routed")
+        if _is_root_user(service):
+            failures.append(f"{name} must run as a non-root user")
+        if service.get("read_only") is not True:
+            failures.append(f"{name} must keep a read-only root filesystem")
+        cap_drop = {str(cap).upper() for cap in service.get("cap_drop", []) or []}
+        if "ALL" not in cap_drop or service.get("cap_add"):
+            failures.append(f"{name} must drop all Linux capabilities")
+
+    if isinstance(server, dict):
+        environment = server.get("environment", {})
+        if not isinstance(environment, dict):
+            environment = {}
+        if str(environment.get("HF_HUB_OFFLINE", "")) != "1":
+            failures.append("d3-mini must run offline (HF_HUB_OFFLINE=1)")
+        if "VLLM_API_KEY" not in environment:
+            failures.append("d3-mini must require D3_DECISION_API_KEY through VLLM_API_KEY")
+        if any(
+            isinstance(volume, dict)
+            and volume.get("target") == "/models"
+            and volume.get("read_only") is not True
+            for volume in server.get("volumes", []) or []
+        ):
+            failures.append("d3-mini must mount its model volume read-only")
+        if isinstance(download, dict):
+            download_environment = download.get("environment", {})
+            revision = (
+                download_environment.get("D3_MODEL_REVISION")
+                if isinstance(download_environment, dict)
+                else None
+            )
+            if not revision or revision != _command_option(server, "--revision"):
+                failures.append("d3-mini must serve the revision d3-mini-download fetches")
+            if download.get("image") != server.get("image"):
+                failures.append("d3-mini and d3-mini-download must use the same image")
+
+    allowed = {
+        "d3-local": {"d3-mini", *D3_GATEWAYS},
+        "d3-download": {"d3-mini-download"},
+    }
+    for network, members in allowed.items():
+        outsiders = sorted(
+            name
+            for name, service in services.items()
+            if isinstance(service, dict)
+            and network in set(service.get("networks", {}) or {})
+            and name not in members
+        )
+        if outsiders:
+            failures.append(f"Only {', '.join(sorted(members))} may join {network}: " + ", ".join(outsiders))
     return failures
 
 
@@ -1239,6 +1355,7 @@ def validate_repository_contracts(root: Path = ROOT) -> list[str]:
             "lens",
             "lens-clickhouse",
             "image-security-monitor",
+            "d3-mini",
         )
         for service in optional_services:
             declaration = re.compile(rf"^  {re.escape(service)}:\s*$", re.MULTILINE)
@@ -1298,6 +1415,8 @@ def validate_repository_contracts(root: Path = ROOT) -> list[str]:
             if key.startswith(("GRAFANA_", "LANGFUSE_", "LENS_", "IMAGE_SECURITY_"))
             and key not in core_langfuse_keys
             and key not in LENS_CORE_ENV_KEYS
+        } | {
+            key for key in core_env_keys if key.startswith("D3_") and key not in D3_CORE_ENV_KEYS
         }
         if misplaced_optional_keys:
             failures.append(
@@ -1321,6 +1440,12 @@ def validate_repository_contracts(root: Path = ROOT) -> list[str]:
             failures.append(
                 "Core-consumed Lens variables are missing from .env.example: "
                 + ", ".join(sorted(missing_core_lens_keys))
+            )
+        duplicated_core_d3_keys = D3_CORE_ENV_KEYS & optional_env_keys
+        if duplicated_core_d3_keys:
+            failures.append(
+                "Core-consumed D3 variables remain in .env.optional.example: "
+                + ", ".join(sorted(duplicated_core_d3_keys))
             )
         duplicated_core_lens_keys = LENS_CORE_ENV_KEYS & optional_env_keys
         if duplicated_core_lens_keys:

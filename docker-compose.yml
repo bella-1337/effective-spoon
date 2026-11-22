@@ -283,7 +283,9 @@ services:
         condition: service_healthy
         required: false
     cap_drop: [NET_RAW]
-    networks: [edge, internal, xberg-sandbox]
+    # d3-local reaches the optional on-host D3-mini (d3 profile). No
+    # dependency: until it is healthy, coding-router classifies locally.
+    networks: [edge, internal, xberg-sandbox, d3-local]
     restart: unless-stopped
     deploy: *resources-litellm
     healthcheck:
@@ -453,7 +455,9 @@ services:
         condition: service_healthy
         required: false
     cap_drop: [NET_RAW]
-    networks: [edge, internal, xberg-sandbox]
+    # d3-local reaches the optional on-host D3-mini (d3 profile). No
+    # dependency: until it is healthy, coding-router classifies locally.
+    networks: [edge, internal, xberg-sandbox, d3-local]
     restart: unless-stopped
     deploy: *resources-litellm
     healthcheck:

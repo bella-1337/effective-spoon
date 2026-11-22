@@ -11,7 +11,8 @@ profile (`grafana`, `langfuse`, `lens`, `security`). They assume:
 - one environment per host, because Traefik binds host ports `80`/`443` and
   node-exporter and cAdvisor read the whole host;
 - D3-mini and BGE-M3 both run on a remote GPU host, so neither stack host
-  needs a GPU.
+  needs a GPU. The optional `d3` profile moves D3-mini onto the stack host's
+  own GPU instead; see [On-host D3-mini](#on-host-d3-mini-d3-profile).
 
 Validate these figures with a load test before purchasing.
 
@@ -137,3 +138,31 @@ dedicated mkcert CA; the LiteLLM hosts trust that CA through
   adds prod load to this GPU.
 - **Dev and prod share D3-mini.** A dev load test can slow prod routing. With
   the headroom on a 48 GB card, a second D3-mini instance for dev fits too.
+
+## On-host D3-mini (`d3` profile)
+
+The optional [`d3` profile](d3-mini-on-host.md) runs D3-mini on one NVIDIA GPU
+in the stack host, on the official vLLM image. It is sized for a single
+**NVIDIA RTX PRO 2000 Blackwell** (16 GB GDDR7, compute capability 12.0).
+BGE-M3 stays on the remote GPU host.
+
+| Part | Estimate on a 16 GB card |
+| --- | --- |
+| BF16 weights (9.1 GB) | ~8.5 GiB |
+| CUDA context, PyTorch, and kernels | ~1 GiB |
+| One input at the default 4,096-token cap | under 1 GiB |
+| vLLM's reservation (`D3_GPU_MEMORY_UTILIZATION=0.90`) | ~14.3 GiB of about 15.9 GiB |
+
+- **Keep the input cap at 4,096 tokens on 16 GB.** The remote host's figures
+  (~12 GiB typical, ~18 GiB worst case at 8,192 tokens) describe the Semantic
+  Router runtime, which allocates on demand; they do not apply to vLLM, and an
+  18 GiB peak would not fit this card. vLLM reserves its share up front and refuses to start when an input of
+  `D3_MAX_INPUT_TOKENS` does not fit. Raise the cap only after
+  [checking it on the card](d3-mini-on-host.md#verify-on-the-card).
+- **Driver 580 or newer and the NVIDIA Container Toolkit.** The image is built
+  on CUDA 13.0 with forward compatibility off.
+- **Host additions:** up to `D3_MEMORY_LIMIT` (16 GB) of RAM, `D3_CPU_LIMIT` (4)
+  CPUs, and about 30 GB of disk for the 9.3 GiB image download and the 9.1 GB
+  weights.
+- **Not measured.** These are estimates; nothing has run on an RTX PRO 2000
+  Blackwell yet.

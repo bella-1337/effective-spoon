@@ -1,0 +1,46 @@
+---
+title: Optional on-host D3-mini profile
+---
+flowchart TD
+  %% Source for 27-d3-profile.html. Edit this file, then run ./scripts/render-diagrams.py.
+  %% Directives: docs in diagrams/README.md (Updating diagrams).
+  %% @mode architecture
+  %% @subtitle coding-router decisions on the stack host's own NVIDIA GPU, sized for a single 16 GB RTX PRO 2000 Blackwell
+  %% @card cyan | Decision path | coding-router sends each prompt to http://d3-mini:8000/v1/systemone with D3_DECISION_API_KEY | Inputs over D3_MAX_INPUT_TOKENS are rejected and scored by the local heuristic | A failure or timeout falls back to the heuristic too; the gateways never wait for d3-mini
+  %% @card violet | Isolation | d3-mini sits on the internal d3-local network with the two gateways only | It runs offline, without root, with a read-only model volume | No host port and no Traefik route
+  %% @card rose | Start-up | d3-mini-preflight rejects out-of-range settings with no network | d3-mini-download alone reaches Hugging Face, for the pinned revision | vLLM reserves D3_GPU_MEMORY_UTILIZATION and checks the cap before serving
+  %% @journey #22d3ee: LL D3 GPU
+  %% @journey #fb7185: PF DL HF
+
+  subgraph ST["LiteLLM stack — Docker Compose host"]
+    LL["LiteLLM prod / dev<br/>coding-router"]:::backend
+    subgraph DP["d3 profile — compose.optional.yml"]
+      PF["d3-mini-preflight<br/>settings check · no network"]:::security
+      subgraph DDN["d3-download network"]
+        DL["d3-mini-download<br/>pinned revision · one-shot"]:::backend
+      end
+      VOL[("d3-mini-models<br/>9.1 GB weights")]:::database
+      subgraph DLN["d3-local network — internal"]
+        D3["d3-mini<br/>vLLM v0.33.0 · /v1/systemone · offline"]:::backend
+      end
+    end
+    GPU["NVIDIA GPU<br/>RTX PRO 2000 Blackwell · 16 GB"]:::cloud
+  end
+  subgraph EX["External services — outside the stack"]
+    HF["Hugging Face<br/>vllm-sr/d3-mini"]:::external
+  end
+
+  LL ==>|"http://d3-mini:8000 · bearer key"| D3
+  D3 ==> GPU
+  PF -.->|"must succeed first"| DL
+  DL -->|"HTTPS download"| HF
+  DL --> VOL
+  DL -.->|"must succeed first"| D3
+  VOL -->|"read-only"| D3
+
+  classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
+  classDef cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0
+  classDef database fill:#4c1d95,stroke:#a78bfa,color:#e2e8f0
+  classDef external fill:#1e293b,stroke:#94a3b8,color:#e2e8f0
+  classDef frontend fill:#083344,stroke:#22d3ee,color:#e2e8f0
+  classDef security fill:#881337,stroke:#fb7185,color:#e2e8f0

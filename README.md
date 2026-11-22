@@ -125,6 +125,7 @@ see [Documentation site](docs/documentation-site.md).
 | [Maintenance runtime](docs/maintenance-runtime.md) | Installing `uv` for the maintenance scripts, why they use Python, and where their logs are kept for review |
 | [Image security and supply-chain evidence](docs/image-security.md) | Trivy and CISA KEV image scanning, exceptions, alerts, scheduling, SBOMs, licence evidence, OCI image labels |
 | [Remote GPU host](gpu-host/README.md) | D3-mini and BGE-M3 on one shared GPU: engine choice, memory budget, deployment, network security |
+| [On-host D3-mini](docs/d3-mini-on-host.md) | Optional `d3` profile: D3-mini on the stack host's NVIDIA GPU (sized for a 16 GB RTX PRO 2000 Blackwell), settings, GPU memory, verification on the card |
 | [Back up and restore the databases](docs/backup-and-restore.md) | Database backups, restore, and the game-day preflight |
 | [Validate and roll back a LiteLLM image upgrade](docs/upgrades-and-rollback.md) | Maintenance entry point, upgrade compatibility checks, regression suite, rollback |
 

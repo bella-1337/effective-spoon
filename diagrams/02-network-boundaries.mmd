@@ -7,7 +7,7 @@ flowchart TD
   %% @mode architecture
   %% @subtitle Each Compose network is a trust zone; only Traefik publishes host ports
   %% @card cyan | Ingress | Only Traefik publishes host ports 80 and 443 | edge members are reachable only through a Traefik host rule | SearXNG, databases, and telemetry have no route from clients
-  %% @card violet | Isolation | Xberg sits alone on xberg-sandbox with LiteLLM and its proxies | Its outbound HTTPS goes through Squid and its DNS through an allowlist-only resolver | opensearch-certs runs with no network at all
+  %% @card violet | Isolation | Xberg sits alone on xberg-sandbox with LiteLLM and its proxies; the optional d3-mini shares d3-local only with the gateways | Its outbound HTTPS goes through Squid and its DNS through an allowlist-only resolver | opensearch-certs runs with no network at all
   %% @card rose | Docker socket | Traefik, Alloy, and the image scanner never mount the socket | Each reaches Docker through its own socket proxy on a dedicated network | The proxies allow read-only GET calls; POST is disabled
   %% @journey #22d3ee: CLI TR LL PROV
   %% @journey #34d399: LL XB SQ NET
@@ -19,7 +19,7 @@ flowchart TD
   subgraph HOST["Docker host"]
     subgraph EDGE["edge network — Traefik-routed"]
       TR["Traefik<br/>publishes :80 and :443"]:::cloud
-      LL["LiteLLM prod / dev<br/>also on internal + xberg-sandbox"]:::backend
+      LL["LiteLLM prod / dev<br/>also on internal + xberg-sandbox + d3-local"]:::backend
       OSD["OpenSearch Dashboards<br/>also on internal"]:::frontend
       WEBUI["Grafana · Langfuse web<br/>optional profiles"]:::frontend
       LENS["Lens (optional)<br/>also on internal + lens-storage"]:::backend
@@ -33,6 +33,9 @@ flowchart TD
     end
     subgraph LSN["lens-storage — internal, Lens only"]
       LCH[("Lens ClickHouse<br/>no route from any other service")]:::database
+    end
+    subgraph D3N["d3-local — internal, d3 profile"]
+      D3M["d3-mini (optional)<br/>vLLM on the host GPU · offline"]:::backend
     end
     subgraph SBX["xberg-sandbox — internal-only MCP"]
       XB["Xberg MCP<br/>no Internet, no internal route"]:::backend
@@ -64,6 +67,7 @@ flowchart TD
   LL --> SX
   LL --> DB
   OSD --> OS
+  LL -->|"http://d3-mini:8000"| D3M
   LL -->|"MCP"| XB
   XB --> DNS
   XB --> SQ

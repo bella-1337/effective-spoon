@@ -238,7 +238,12 @@ class LauncherWiringTests(unittest.TestCase):
             patch.object(self.launcher, "lens_is_available", return_value=False),
             patch("sys.stdout"),
         ):
-            self.launcher.prepare_config(source, destination, environment)
+            # Every gateway start also checks the D3-mini endpoint.
+            self.launcher.prepare_config(
+                source,
+                destination,
+                {"D3_DECISION_API_BASE": "https://d3-mini.example.test:8443", **environment},
+            )
         return json.loads(destination.read_text(encoding="utf-8"))
 
     def test_appends_provider_models_before_static_models(self) -> None:

@@ -162,7 +162,9 @@ How each request is routed:
 1. **Keywords.** A prompt containing a word from `CODING_ROUTER_<TIER>_KEYWORDS`
    goes straight to that tier, with no classification. If several tiers match,
    the highest wins.
-2. **Classification.** D3-mini classifies the prompt. With
+2. **Classification.** D3-mini classifies the prompt, on the remote GPU host
+   or, with the optional [`d3` profile](d3-mini-on-host.md), on the stack host
+   itself, so the prompt never leaves it. With
    `CODING_ROUTER_CLASSIFIER=heuristic`, LiteLLM scores it locally instead, with
    no model call. If D3-mini fails or takes longer than
    `CODING_ROUTER_CLASSIFIER_TIMEOUT_MS` (default 3000), the request is scored

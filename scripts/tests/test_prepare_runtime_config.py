@@ -41,7 +41,15 @@ class PrepareRuntimeConfigTests(unittest.TestCase):
     def setUp(self) -> None:
         # Every gateway start needs a region; tests that pass their own
         # environment add it there.
-        self.enterContext(patch.dict(os.environ, {"DATA_SOVEREIGNTY_REGION": "eu"}))
+        self.enterContext(
+            patch.dict(
+                os.environ,
+                {
+                    "DATA_SOVEREIGNTY_REGION": "eu",
+                    "D3_DECISION_API_BASE": "https://d3-mini.example.test:8443",
+                },
+            )
+        )
         self.enterContext(patch("sys.stdout"))
 
     def write_config(self, directory: str) -> tuple[Path, Path]:
@@ -130,6 +138,38 @@ class PrepareRuntimeConfigTests(unittest.TestCase):
             self.assertFalse(destination.exists())
 
 
+    def test_d3_endpoint_accepts_https_or_the_on_host_service(self) -> None:
+        for value in (
+            "https://d3-mini.example.test:8443",
+            "https://d3-mini.example.test:8443/",
+            "https://10.0.0.5",
+            "http://d3-mini:8000",
+        ):
+            with self.subTest(value=value):
+                self.module.validate_d3_endpoint({"D3_DECISION_API_BASE": value})
+
+    def test_d3_endpoint_fails_closed_before_writing_the_config(self) -> None:
+        for value in (
+            "",
+            "http://d3-mini.example.test:8000",
+            "http://d3-mini:8001",
+            "http://d3-mini:8000/",
+            "d3-mini:8000",
+            "https://",
+            "https://user:secret@d3.example.test",
+            "https://d3.example.test/v1/systemone",
+            "https://d3.example.test?key=value",
+            "https://d3.example.test:99999",
+            "https://d3.example.test:0",
+            "ftp://d3.example.test",
+        ):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as directory:
+                source, destination = self.write_config(directory)
+                with patch.dict(os.environ, {"D3_DECISION_API_BASE": value}):
+                    with self.assertRaisesRegex(ValueError, "D3_DECISION_API_BASE must be"):
+                        self.module.prepare_config(source, destination)
+                self.assertFalse(destination.exists())
+
     def lens_environment(self, **overrides: str) -> dict[str, str]:
         environment = {
             "LITELLM_LENS_URL": "http://lens:4318",
@@ -137,6 +177,7 @@ class PrepareRuntimeConfigTests(unittest.TestCase):
             "LITELLM_LENS_SERVICE_TOKEN": "s" * 64,
             "LENS_GATEWAY_SECRET": "g" * 64,
             "DATA_SOVEREIGNTY_REGION": "eu",
+            "D3_DECISION_API_BASE": "http://d3-mini:8000",
             "UNRELATED": "kept",
         }
         environment.update(overrides)
@@ -160,7 +201,14 @@ class PrepareRuntimeConfigTests(unittest.TestCase):
 
         self.assertFalse(lens_enabled)
         self.assertNotIn("general_settings", config)
-        self.assertEqual(environment, {"DATA_SOVEREIGNTY_REGION": "eu", "UNRELATED": "kept"})
+        self.assertEqual(
+            environment,
+            {
+                "DATA_SOVEREIGNTY_REGION": "eu",
+                "D3_DECISION_API_BASE": "http://d3-mini:8000",
+                "UNRELATED": "kept",
+            },
+        )
 
     def test_removes_configured_lens_store_when_service_is_absent(self) -> None:
         environment = self.lens_environment()

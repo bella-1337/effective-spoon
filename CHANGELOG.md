@@ -14,6 +14,25 @@ All notable changes to this stack are recorded here. The format follows
   compares this stack with LiteLLM's reference deployment. Feature requests are
   now checked against it, and the requester chooses the approach before it is
   implemented (SKILL.md guardrail 9).
+- Optional `d3` profile: D3-mini on the stack host's own NVIDIA GPU, sized for
+  a single 16 GB RTX PRO 2000 Blackwell. See
+  [On-host D3-mini](docs/d3-mini-on-host.md).
+  - It runs on the official `vllm/vllm-openai:v0.33.0` image, pinned by digest.
+    Both gateways reach it only on the new internal `d3-local` network, at
+    `D3_DECISION_API_BASE=http://d3-mini:8000`.
+  - `d3-mini-download` fetches the pinned model revision once. `d3-mini` then
+    runs offline, without root, and is never published.
+  - New `.env.optional` settings: `D3_MAX_INPUT_TOKENS` (default 4096, range
+    512–8192), `D3_GPU_MEMORY_UTILIZATION` (0.90, range 0.50–0.95),
+    `D3_GPU_DEVICE_ID`, `D3_CPU_LIMIT`, `D3_MEMORY_LIMIT`, and `D3_SHM_SIZE`.
+    `d3-mini-preflight` refuses to start the profile on a value out of range.
+  - The host needs NVIDIA driver 580 or newer and the NVIDIA Container Toolkit.
+  - Decision record: the reference stack runs models as plain vLLM containers
+    with `--max-model-len` (default 4,096). The profile follows it, because
+    vLLM reserves memory and checks the cap at start-up. The Semantic Router
+    runtime allocates on demand, so an oversized cap would fail on a request.
+    The service is declared in Compose instead of started by a launcher that
+    holds the Docker socket. The profile has not run on the target card yet.
 
 ### Changed
 
@@ -47,6 +66,9 @@ All notable changes to this stack are recorded here. The format follows
 - **Breaking:** The D3-mini classifier timeout drops from 15 to 3 seconds
   (`CODING_ROUTER_CLASSIFIER_TIMEOUT_MS`). A failed or slow classification is
   now scored locally instead of going to `CODING_ROUTER_DEFAULT_MODEL`.
+- **Breaking:** The gateways refuse to start unless `D3_DECISION_API_BASE` is an
+  HTTPS base URL without a path, credentials, or query, or exactly
+  `http://d3-mini:8000` for the `d3` profile.
 - Provider key files live in `PROVIDER_SECRETS_DIR` (default
   `./litellm/provider-secrets`, ignored by Git), which is mounted read-only into both
   gateways.

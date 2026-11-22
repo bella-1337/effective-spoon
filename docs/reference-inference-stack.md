@@ -42,7 +42,7 @@ Update this section when a later release changes a row.
 | Area | This stack (Sovereign LLM Gateway) | Inference Stack |
 | --- | --- | --- |
 | Purpose | A region-locked gateway in front of cloud models, plus self-hosted classification and embedding models | Running Hugging Face models on your own GPUs with vLLM |
-| Model source | Bedrock, Azure OpenAI, and Vertex AI models from `.env`, locked to `DATA_SOVEREIGNTY_REGION`. D3-mini and BGE-M3 on a separate GPU host. | vLLM servers that the launcher deploys from the Hugging Face catalogue |
+| Model source | Bedrock, Azure OpenAI, and Vertex AI models from `.env`, locked to `DATA_SOVEREIGNTY_REGION`. D3-mini and BGE-M3 on a separate GPU host, or D3-mini on the stack host with the optional `d3` profile (plain vLLM, declared statically in Compose). | vLLM servers that the launcher deploys from the Hugging Face catalogue |
 | Model registration | Static config and environment, built at startup by `prepare_runtime_config.py`, which refuses to start out of region | Registered at runtime through LiteLLM's `/model/new` API (`store_model_in_db: true`) by the launcher or a Helm hook job |
 | Routing | LiteLLM's complexity Auto Router (`coding-router`) chooses a model for each request | llm-d's endpoint picker, behind Envoy, chooses a vLLM replica of one model from queue depth, KV-cache use, and prefix-cache hits |
 | Team fairness | Not implemented | A LiteLLM callback sends the team ID to llm-d (`x-llm-d-inference-fairness-id`) so capacity is shared between teams |

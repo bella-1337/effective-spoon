@@ -165,6 +165,7 @@ nav:
       - First deployment: docs/getting-started.md
       - Hardware sizing: docs/hardware-sizing.md
       - Remote GPU host: gpu-host/README.md
+      - On-host D3-mini: docs/d3-mini-on-host.md
       - Data sovereignty and regional models: docs/data-sovereignty.md
       - Environment variables: docs/environment-variables.md
       - Component versions: docs/component-versions.md

@@ -325,6 +325,24 @@ and it would let anyone who can reach the hostname create an account.
 
 See [LiteLLM Lens](lens.md) for the operating guide.
 
+## Optional on-host D3-mini profile
+
+Used only by the optional `d3` profile, which runs D3-mini on this host's
+NVIDIA GPU. Set them in `.env.optional`. `d3-mini-preflight` refuses to start
+the profile when a value is outside its range or when `D3_DECISION_API_BASE`
+in `.env` is not `http://d3-mini:8000`.
+
+| Variable | Default / format | Description and guidance |
+| --- | --- | --- |
+| `D3_MAX_INPUT_TOKENS` | `4096`; whole number from 512 to 8192 | Longest input D3-mini reads, passed to vLLM as `--max-model-len`. LiteLLM sends the whole prompt, including the system prompt; vLLM rejects a longer one, and `coding-router` then classifies it with the local heuristic. vLLM refuses to start when an input of this length does not fit in its memory share. Keep `4096` on a 16 GB card until a larger value is [verified on the card](d3-mini-on-host.md#verify-on-the-card). |
+| `D3_GPU_MEMORY_UTILIZATION` | `0.90`; decimal from 0.50 to 0.95 | Share of the GPU's total memory vLLM reserves at start-up for the weights, one maximum-length input, and cache. Lower it when a display or another process uses the card; vLLM refuses to start when the share is not free. |
+| `D3_GPU_DEVICE_ID` | `0`; one `nvidia-smi` index or GPU UUID | The GPU that Docker passes to `d3-mini`. |
+| `D3_CPU_LIMIT` | `4`; positive decimal CPUs | CPU cap of `d3-mini` (vLLM API server, tokenizer, and engine). |
+| `D3_MEMORY_LIMIT` | `16g`; Docker size | Host memory cap of `d3-mini`, which loads the 9.1 GB weights through host memory. |
+| `D3_SHM_SIZE` | `2g`; Docker size | Shared memory between vLLM's API server and engine processes. |
+
+See [On-host D3-mini](d3-mini-on-host.md) for the operating guide.
+
 ## Development model and data services
 
 These variables primarily affect the `dev` profile. Embedding model and dimension
@@ -350,8 +368,8 @@ see [Remote BGE-M3 embeddings](search-extraction-and-caching.md#remote-bge-m3-em
 | `QDRANT_STORAGE_SIZE` | `1g`; Docker tmpfs size | Volatile Qdrant storage limit. The bundled development cache is intentionally non-persistent; all contents disappear on recreation. |
 | `QDRANT_CPU_LIMIT` | `1`; positive decimal CPUs | CPU limit for Qdrant. |
 | `QDRANT_MEMORY_LIMIT` | `2g`; Docker size | Memory limit for Qdrant. Keep enough headroom for indexes and query peaks. |
-| `D3_DECISION_API_BASE` | Required; HTTPS base URL; example: `https://d3-mini.${STACK_DOMAIN}:8443` | Operator-controlled remote D3-mini endpoint, without `/v1/systemone`. LiteLLM appends the path. Allowlist this destination in network policy and use a certificate trusted by the LiteLLM host. |
-| `D3_DECISION_API_KEY` | Required secret, at least 32 random characters | Bearer credential shared only by LiteLLM and the remote D3 listener. Rotate it independently of LiteLLM client keys. |
+| `D3_DECISION_API_BASE` | Required; HTTPS base URL without a path, or exactly `http://d3-mini:8000`; example: `https://d3-mini.${STACK_DOMAIN}:8443` | D3-mini endpoint for `coding-router`, without `/v1/systemone`. LiteLLM appends the path. For the remote GPU host, use its HTTPS address, allowlist it in network policy, and use a certificate trusted by the LiteLLM host. For the optional [on-host `d3` profile](d3-mini-on-host.md), use `http://d3-mini:8000`, which is reachable only on the internal `d3-local` network. The gateways refuse to start with any other plain-HTTP, credential-bearing, or path-bearing value. |
+| `D3_DECISION_API_KEY` | Required secret, at least 32 random characters; 32-512 URL-safe characters with the `d3` profile | Bearer credential shared only by LiteLLM and the D3-mini listener (the remote GPU host, or vLLM's `VLLM_API_KEY` in the `d3` profile). Rotate it independently of LiteLLM client keys. |
 | `GPU_HOST_CA_BUNDLE` | Required host path to a PEM bundle; example: `./traefik/certs/gpu-host-ca-bundle.pem` | Bundle mounted into both LiteLLM containers as `SSL_CERT_FILE`. Build it with `scripts/build-gpu-host-ca-bundle.py --root-ca rootCA.pem` from the GPU host's mkcert CA. It must hold that CA **and** the normal public roots needed by completion providers; a private CA alone would break those providers. Rebuild it and recreate both proxies when the GPU host's CA changes. Replaces `D3_DECISION_CA_BUNDLE`. |
 
 ### Presidio, Xberg, and pgvector connector

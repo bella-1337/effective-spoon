@@ -28,7 +28,9 @@ It provides:
 - optional Langfuse (`langfuse` profile) for LLM-specific tracing workflows
   beyond the default OpenSearch Trace Analytics pipeline;
 - optional LiteLLM Lens (`lens` profile), embedded in the LiteLLM dashboard,
-  for AI review of agent traces, backed by its own ClickHouse.
+  for AI review of agent traces, backed by its own ClickHouse;
+- optional on-host D3-mini (`d3` profile) on the stack host's NVIDIA GPU, in
+  place of the remote GPU host, for `coding-router` decisions.
 
 The bundled `mkcert` configuration is for a trusted local workstation or
 private network. It is not a public Internet TLS solution.
@@ -102,7 +104,7 @@ docker compose --profile prod --profile dev up -d
 ```
 
 The root `docker-compose.yml` includes `compose.optional.yml`, which owns
-Grafana/Loki, Langfuse, Lens, and image-security services and state. The core file
+Grafana/Loki, Langfuse, Lens, on-host D3-mini, and image-security services and state. The core file
 groups its services along the request path (edge, LiteLLM, guardrails and
 tools, data stores, the dev model plane, observability); the optional file
 groups them by profile. YAML anchors cannot cross the include boundary, so the
@@ -120,6 +122,7 @@ commands pass it after `.env`.
 | `grafana` | `grafana`, `loki`, `alloy-loki` | read-only `grafana_ro` | Optional Grafana dashboards, Explore, and alert rules |
 | `langfuse` | Langfuse web/worker, PostgreSQL, ClickHouse, Redis, MinIO | Langfuse-specific stores | Optional LLM trace UI, datasets, prompt management, and evaluations |
 | `lens` | `lens`, `lens-clickhouse`, `lens-preflight` | Lens ClickHouse (`lens-clickhouse-data`) | Optional AI review of agent traces, findings, and datasets inside the LiteLLM dashboard; see [LiteLLM Lens](docs/lens.md) |
+| `d3` | `d3-mini`, `d3-mini-download`, `d3-mini-preflight` | Model weights (`d3-mini-models`) | Optional D3-mini on this host's NVIDIA GPU, reached by both gateways on the internal `d3-local` network; see [On-host D3-mini](docs/d3-mini-on-host.md) |
 | `security` | Image scanner and read-only Docker socket proxy | Bind-mounted reports and state | Optional scheduled image inventory and vulnerability policy |
 
 `postgres-init` is a required one-shot service, not redundant: it creates the
@@ -134,6 +137,8 @@ provider lacks a credential or its location falls outside the region. It keeps e
 on the Compose network: the Langfuse callbacks, and the LiteLLM Lens connection,
 whose `LITELLM_LENS_*` variables it removes from the proxy process when Lens is
 not running. An enabled integration with missing credentials fails closed.
+It also refuses a `D3_DECISION_API_BASE` that is not an HTTPS base URL, except
+`http://d3-mini:8000` for the on-host `d3` profile.
 
 ## Request and PII Flow
 
@@ -142,8 +147,9 @@ not running. An enabled integration with missing credentials fails closed.
    Grafana, Langfuse, or Lens route. SearXNG has no route; it is reachable only through
    LiteLLM's authenticated `searxng-search` tool.
 3. LiteLLM authenticates API requests with `LITELLM_MASTER_KEY`.
-4. Requests for `coding-router` are classified by the remote authenticated D3-mini
-   Decisions endpoint, or by LiteLLM's local heuristic when
+4. Requests for `coding-router` are classified by the authenticated D3-mini
+   Decisions endpoint (on the remote GPU host, or on this host with the `d3`
+   profile), or by LiteLLM's local heuristic when
    `CODING_ROUTER_CLASSIFIER=heuristic`. LiteLLM selects a model from the tier's
    `CODING_ROUTER_*_MODEL` list and scores the request locally if D3-mini
    fails or times out. The router exists only when
@@ -329,6 +335,8 @@ docker compose --env-file .env --env-file .env.optional \
   --profile prod --profile langfuse config --quiet
 docker compose --env-file .env --env-file .env.optional \
   --profile prod --profile lens config --quiet
+docker compose --env-file .env --env-file .env.optional \
+  --profile prod --profile d3 config --quiet
 docker compose --profile prod --profile dev up -d --wait --wait-timeout 150
 ```
 

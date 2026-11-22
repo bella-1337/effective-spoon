@@ -15,11 +15,17 @@ suites) and 1.3, and resolves each upstream per request, so one model starting
 or failing never blocks the other's endpoint. This is a separate Compose project
 from the main stack and never runs on the LiteLLM hosts.
 
+To run D3-mini on the stack host's own NVIDIA GPU instead, for example a
+single 16 GB RTX PRO 2000 Blackwell, use the main stack's optional `d3`
+profile; see [On-host D3-mini](../docs/d3-mini-on-host.md). BGE-M3 for the dev
+profile still runs here.
+
 ## Engine choice
 
 - **D3-mini on the Semantic Router runtime.** D3 is a decision model with its
-  own readout heads; only this runtime serves its Decisions and System One API.
-  vLLM, SGLang, TGI, and Ollama cannot. The runtime enforces `D3_API_KEY` on
+  own readout heads. This runtime serves its Decisions and System One API.
+  vLLM 0.33.0 and later also serve `/v1/systemone`, and the main stack's
+  on-host `d3` profile uses them; SGLang, TGI, and Ollama cannot. The runtime enforces `D3_API_KEY` on
   every public route.
 - **BGE-M3 on TEI.** TEI is built for embedding models: Flash Attention,
   token-budget batching, a small image, and no up-front GPU memory reservation.

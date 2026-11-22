@@ -68,7 +68,7 @@ Profile `core` services run without a profile. Other profiles are described in
 | --- | --- | --- | --- |
 | Langfuse web | `4.80.0` | `docker.langfuse.com/langfuse/langfuse` | `langfuse-web` (langfuse) |
 | Langfuse worker | `4.80.0` | `docker.langfuse.com/langfuse/langfuse-worker` | `langfuse-worker` (langfuse) |
-| PostgreSQL 17 | `17.12` | `postgres` | `langfuse-postgres`, `langfuse-preflight` (langfuse); `grafana-db-init` (grafana); `lens-preflight` (lens) |
+| PostgreSQL 17 | `17.12` | `postgres` | `langfuse-postgres`, `langfuse-preflight` (langfuse); `grafana-db-init` (grafana); `lens-preflight` (lens); `d3-mini-preflight` (d3) |
 | ClickHouse | `26.3.64.3` | `clickhouse/clickhouse-server` | `langfuse-clickhouse`, `langfuse-clickhouse-observability-setup` (langfuse) |
 | Redis | `7.4.12` | `redis` | `langfuse-redis` (langfuse) |
 | MinIO (Chainguard) | `latest` | `cgr.dev/chainguard/minio` | `langfuse-minio` (langfuse) |
@@ -86,6 +86,16 @@ Lens publishes no release image yet. The stack builds the upstream
 images are pinned by digest upstream; the runtime base is overridden with a
 newer `cgr.dev/chainguard/wolfi-base` digest in `compose.optional.yml`. See
 [LiteLLM Lens](lens.md#upgrade-lens).
+
+## On-host D3-mini
+
+| Component | Version | Image | Used by (profile) |
+| --- | --- | --- | --- |
+| vLLM (CUDA 13.0) | `v0.33.0` | `vllm/vllm-openai` | `d3-mini`, `d3-mini-download` (d3) |
+
+The first vLLM release that serves Decision 3.0 models. Its image needs NVIDIA
+driver 580 or newer. `d3-mini-preflight` reuses the `postgres:17.12` image
+listed under Langfuse. See [On-host D3-mini](d3-mini-on-host.md).
 
 ## Image security
 
@@ -116,7 +126,7 @@ Deployed separately with [`gpu-host/`](../gpu-host/README.md).
 
 | Model | Revision | Loaded by |
 | --- | --- | --- |
-| `vllm-sr/d3-mini` | `a475367de0d8133a3c1a2a0dc12303d89cfa2ab4` (tag `v3.1.0`) | `d3-mini` on the remote GPU host |
+| `vllm-sr/d3-mini` | `a475367de0d8133a3c1a2a0dc12303d89cfa2ab4` (tag `v3.1.0`) | `d3-mini` on the remote GPU host; `d3-mini` (d3 profile) |
 | `BAAI/bge-m3` | `5617a9f61b028005a4858fdac845db406aefb181` | `bge-m3` on the remote GPU host |
 | `spacy/en_core_web_lg` | Bundled in Presidio analyzer `2.2.362` | `presidio-analyzer` |
 
