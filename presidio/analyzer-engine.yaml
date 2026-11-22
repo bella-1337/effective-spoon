@@ -1,0 +1,7 @@
+# Languages presidio-analyzer serves. Each needs a spaCy model in
+# presidio/analyzer.yaml and is listed in presidio/recognizers.yaml.
+supported_languages:
+  - en
+  - de
+  - fr
+default_score_threshold: 0

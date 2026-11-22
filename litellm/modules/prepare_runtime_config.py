@@ -17,7 +17,9 @@ removing the Lens connection variables when Lens is not running.
 
 from __future__ import annotations
 
+import ipaddress
 import os
+import re
 import socket
 import sys
 from pathlib import Path
@@ -197,6 +199,76 @@ def with_sovereign_models(config: dict[str, Any], environ: Mapping[str, str]) ->
     return region, [entry["model_name"] for entry in entries]
 
 
+PII_ASSIST_MODEL_NAME = "pii-assist"
+PII_ASSIST_API_BASE_ENV = "PII_ASSIST_API_BASE"
+PII_ASSIST_OLLAMA_MODEL_ENV = "PII_ASSIST_OLLAMA_MODEL"
+PII_ASSIST_DEFAULT_OLLAMA_MODEL = "qwen3.5:4b"
+OLLAMA_MODEL_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}(?::[a-z0-9][a-z0-9._-]{0,63})?")
+
+
+def validate_local_api_base(value: str) -> str:
+    """Accept only an on-host or private-network model server, never a cloud API."""
+    parsed = urlsplit(value)
+    host = parsed.hostname or ""
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not host
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or parsed.username
+        or parsed.password
+    ):
+        raise ValueError(f"{PII_ASSIST_API_BASE_ENV} must be an http(s) base URL without a path or credentials")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    local = (
+        host == "host.docker.internal"
+        or (address is None and "." not in host)  # a Compose service name
+        or (address is not None and address.is_private and not address.is_link_local)
+    )
+    if not local:
+        raise ValueError(
+            f"{PII_ASSIST_API_BASE_ENV} must name host.docker.internal, a Compose service, or a "
+            "private address: personal data is sent to this model unmasked, so it must not be a "
+            "cloud API (cloud models come only from the region-locked provider variables)"
+        )
+    return value.rstrip("/")
+
+
+def with_pii_assist(config: dict[str, Any], environ: Mapping[str, str]) -> str | None:
+    """Add the local pii-assist model when configured; return its Ollama model name."""
+    api_base = environ.get(PII_ASSIST_API_BASE_ENV, "").strip()
+    if not api_base:
+        return None
+    api_base = validate_local_api_base(api_base)
+    model = environ.get(PII_ASSIST_OLLAMA_MODEL_ENV, "").strip() or PII_ASSIST_DEFAULT_OLLAMA_MODEL
+    if not OLLAMA_MODEL_RE.fullmatch(model):
+        raise ValueError(f"{PII_ASSIST_OLLAMA_MODEL_ENV} must be an Ollama model name such as qwen3.5:4b")
+    static = config.get("model_list") or []
+    if any(isinstance(item, dict) and item.get("model_name") == PII_ASSIST_MODEL_NAME for item in static):
+        raise ValueError(f"model name {PII_ASSIST_MODEL_NAME} is reserved for the PII assist model")
+    config["model_list"] = [
+        *static,
+        {
+            "model_name": PII_ASSIST_MODEL_NAME,
+            "litellm_params": {
+                "model": f"ollama_chat/{model}",
+                "api_base": api_base,
+                # Keep the model loaded: a cold load adds seconds to a request.
+                "keep_alive": "30m",
+            },
+            "model_info": {
+                "mode": "chat",
+                "description": "Local language and personal-data detection for the PII guardrail",
+            },
+        },
+    ]
+    return model
+
+
 def prepare_config(
     source: Path,
     destination: Path,
@@ -214,6 +286,7 @@ def prepare_config(
     current = os.environ if environ is None else environ
     validate_d3_endpoint(current)
     region, models = with_sovereign_models(config, current)
+    assist_model = with_pii_assist(config, current)
 
     langfuse_enabled = langfuse_is_available()
     if langfuse_enabled:
@@ -236,6 +309,10 @@ def prepare_config(
     print(
         f"Data sovereignty region: {region}; provider models: "
         + (", ".join(models) if models else "none")
+    )
+    print(
+        "PII assist model: "
+        + (f"{PII_ASSIST_MODEL_NAME} (ollama {assist_model})" if assist_model else "not configured; Presidio runs alone")
     )
     return langfuse_enabled, lens_enabled
 

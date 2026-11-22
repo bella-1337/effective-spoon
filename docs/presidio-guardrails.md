@@ -8,11 +8,16 @@ see [Public hostnames and `STACK_DOMAIN`](getting-started.md#public-hostnames-an
 
 Both LiteLLM profiles use the internal Presidio Analyzer and Anonymizer through
 the `presidio-pii` guardrail. It runs in `pre_call` and `post_call` modes by
-the globally attached `eu-data-protection` policy, masks detected
-English-language PII before input reaches the model provider and before output
-reaches the user. The analyzer's NLP configuration includes `PERSON` for
-individual/client names and `ORGANIZATION` for company/client organization
-names; organization matches require a minimum confidence of 0.7.
+the globally attached `eu-data-protection` policy, masks detected PII in
+English, German, or French before input reaches the model provider and before
+output reaches the user. When a local model is configured, the
+[`pii-assist` guardrail](#local-model-assist) runs first: it chooses each
+request's language and masks personal data Presidio's recognizers miss. The
+analyzer's NLP configuration maps spaCy's person, place, date, and nationality
+labels to `PERSON`, `LOCATION`, `DATE_TIME`, and `NRP`.
+It intentionally does not map organisation names (`ORG`), so the gateway does
+not mask company or client names; `scripts/verify-litellm-upgrade.py` checks
+this.
 
 Clients may also select the guardrail explicitly by including:
 
@@ -26,6 +31,136 @@ Presidio masking is pseudonymisation, not anonymisation. It is language,
 endpoint, model, and confidence dependent; test it against the data and API
 surfaces used by each deployment. Do not claim that all personal data is
 detected or that no personal data reaches a provider.
+
+## Check what the guardrail masks
+
+Administrators can see what the guardrail does to a piece of text without
+sending it to a model. There are two ways, and neither calls a model provider:
+
+| Way | Who | What it shows |
+| --- | --- | --- |
+| `POST /guardrails/apply_guardrail` | Proxy administrators (master key or an admin's key), through the API | The exact text the `presidio-pii` guardrail produces, with this gateway's settings. |
+| Admin UI → **Guardrails** → **Test Playground** | Proxy administrators | The same result as the API, in the LiteLLM admin UI. |
+
+LiteLLM treats the apply-guardrail route as an administrator route: an
+ordinary virtual key receives `401 Only proxy admin can be used`. For end
+users, the separate PII review tool offers a self-service page that signs
+people in with their virtual key. The API takes the guardrail name and the
+text, and returns the masked text in `response_text`:
+
+```sh
+curl --fail --silent "https://$LITELLM_PROD_HOST/guardrails/apply_guardrail" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"guardrail_name":"presidio-pii","text":"Email Jane Example at jane@example.test"}'
+```
+
+```json
+{"response_text": "Email <PERSON> at <EMAIL_ADDRESS>"}
+```
+
+Use them to check the gateway's exact result, for example after adding
+`presidio_score_thresholds` or `pii_entities_config` to the guardrail.
+
+## Languages and UK formats
+
+The analyzer (`presidio-analyzer`) serves English, German, and French:
+
+| File | Purpose |
+| --- | --- |
+| `presidio/Dockerfile`, `presidio/spacy-models.txt` | The upstream analyzer image plus the German and French spaCy pipelines (`de_core_news_lg`, `fr_core_news_lg` 3.8.0), pinned by hash. |
+| `presidio/analyzer-engine.yaml` | The languages the analyzer accepts. |
+| `presidio/analyzer.yaml` | The spaCy model per language and the label mapping. `ORG` is deliberately not mapped. |
+| `presidio/recognizers.yaml` | Presidio's default recognizers for these languages, credit cards also in German and French, and UK National Insurance numbers (`UK_NINO`), passports (`UK_PASSPORT`), and postcodes (`UK_POSTCODE`) switched on. The NHS number (`UK_NHS`) was already on. UK vehicle registrations stay off because their short codes cause many false positives. Two custom recognizers mask whole German and French street addresses (street, house number, and an optional postcode and city) as `LOCATION`; the NER models alone find only the street or city. |
+
+A request is analysed in English unless its language is set, either by the
+`pii-assist` guardrail or by the client in the request metadata:
+
+```json
+{"metadata": {"guardrail_config": {"language": "de"}}}
+```
+
+The address recognizers match a street name with a German suffix (`-straße`,
+`-weg`, `-platz`, `-allee`, and similar) or a French street type (`rue`,
+`avenue`, `boulevard`, `place`, and similar) next to a house number. Amounts
+(`12345 Euro`), years after words like `Arbeitsmarkt 2024`, and counts
+(`75000 personnes`) are not addresses. House numbers above 999 and addresses
+without a recognised street word are left to the NER models.
+`scripts/tests/test_presidio_recognizers.py` lists the examples that must and
+must not match, and checks that crafted 100 KB inputs stay fast.
+
+Other values are ignored. LiteLLM itself drops this setting on chat requests
+(its `apply_guardrail` path passes no per-request config, checked up to
+1.111.0-dev.4); `litellm/modules/pii_assist.py` installs a small compatibility
+shim that restores it, and also stops the German and French models from
+re-detecting placeholders such as `<LOCATION>`. If a LiteLLM upgrade changes
+the patched method, the shim is not installed, a warning is logged, and
+requests are analysed in English; `scripts/verify-litellm-upgrade.py` checks
+German and French analysis and the guardrail order.
+
+The German and French pipelines make the analyzer larger: about 2.4 GiB,
+shared by its workers because gunicorn preloads them (`GUNICORN_CMD_ARGS:
+--preload`). Two workers use about 2.7 GiB; keep `PRESIDIO_ANALYZER_MEMORY_LIMIT`
+at 4g or more.
+
+## Local-model assist
+
+The `pii-assist` guardrail (`litellm/modules/pii_assist.py`) asks a local model
+about every new prompt text before Presidio runs:
+
+1. **Language.** The newest text's language (`en`, `de`, or `fr`) becomes the
+   request's Presidio language, unless the client set one.
+2. **Personal data.** Names, addresses, cities, email addresses, phone numbers,
+   and identity, tax, insurance, or account numbers the model finds are
+   replaced with `<PERSON>`, `<LOCATION>`, `<ID_NUMBER>`, and so on. Only text
+   that occurs verbatim in the prompt is replaced, never inside a longer word.
+   Organisation names and the vague `OTHER` type are not masked. A five-digit
+   postcode directly before a masked city, and a house number directly after a
+   masked street, are folded into the placeholder, because masking the
+   model's items first hides the full address from Presidio's address
+   recognizers.
+3. **Presidio** then masks everything else its recognizers find, as before.
+
+Enable it by pointing the gateways at a model server on the Docker host or a
+private network, for example Ollama:
+
+```sh
+ollama pull qwen3.5:4b
+# .env
+PII_ASSIST_API_BASE=http://host.docker.internal:11434
+PII_ASSIST_OLLAMA_MODEL=qwen3.5:4b
+```
+
+Then recreate both gateways. At start-up, `prepare_runtime_config.py` adds the
+model as `pii-assist` and logs `PII assist model: pii-assist (ollama
+qwen3.5:4b)`. Without `PII_ASSIST_API_BASE` the guardrail does nothing and
+Presidio runs alone, in English. The gateways reach the Docker host through
+`host.docker.internal` (built into Docker Desktop, added by `extra_hosts` on
+Linux).
+
+Things to know:
+
+- **Data stays on the host.** Prompts reach this model unmasked. The gateways
+  refuse a `PII_ASSIST_API_BASE` that is not `host.docker.internal`, a Compose
+  service name, or a private address, so it cannot point at a cloud API.
+- **Latency.** With `qwen3.5:4b` on the test host, a new prompt took about 1-4
+  seconds more; the first call after the model unloads takes up to about
+  9 seconds (`keep_alive` holds it for 30 minutes). Results are cached per
+  text, so a conversation's history is not analysed again.
+- **Budget.** Long prompts are split into `PII_ASSIST_MAX_CHUNK_CHARS` pieces,
+  and at most `PII_ASSIST_MAX_CALLS` new pieces per request go to the model,
+  newest first. The rest is masked by Presidio alone.
+- **Fails open to Presidio.** A timeout, error, or invalid answer skips the
+  model for that request; Presidio still masks it, in English.
+- **The model's own requests are not masked.** The `eu-data-protection`
+  policy is the default attachment, and the `local-pii-assist` policy exempts
+  only the `pii-assist` model, which must see text unmasked. A repository
+  contract rejects any other policy attachment, because a default attachment
+  stops applying to requests another attachment matches.
+- **Logs.** The guardrail logs the language, counts, and duration, never
+  prompt text or what it found.
+- Model output can be wrong. Presidio remains the baseline, and the masking is
+  still pseudonymisation, not anonymisation.
 
 ## Manage the configured guardrails
 
@@ -56,7 +191,7 @@ guardrails:
       presidio_language: en
       presidio_filter_scope: both
       presidio_score_thresholds:
-        ORGANIZATION: 0.7
+        PERSON: 0.7  # example: ignore person matches below 0.7
 ```
 
 - Remove `post_call` only if model output must intentionally remain unscanned.
@@ -68,9 +203,12 @@ guardrails:
   detection sensitivity. Validate both false positives and false negatives.
 
 Edit `presidio/analyzer.yaml` when changing the spaCy model or entity-label
-mapping. Removing `ORG: ORGANIZATION`, for example, disables that model label as
-a source of organisation detections; it does not guarantee that no other
-Presidio recognizer can detect an organisation. This file configures NLP
+mapping. A new language also needs its model in `presidio/spacy-models.txt`,
+an entry in `presidio/analyzer-engine.yaml` and `presidio/recognizers.yaml`,
+and the language code in `litellm/modules/pii_assist_prompt.json`. Adding
+`ORG: ORGANIZATION`, for example, would make the gateway mask organisation
+names, and Xberg auto-indexing, which calls this analyzer directly, would mask
+them too; update the upgrade check if you choose that. This file configures NLP
 mapping, not arbitrary LiteLLM policies. Exact company/client deny lists or new
 custom entity types require a supported Presidio recognizer implementation and
 representative tests; do not place sensitive production client lists in Git.
@@ -143,7 +281,8 @@ Restart the components that consume the changed files:
 docker compose --profile prod up -d --force-recreate litellm-prod
 docker compose --profile dev up -d --force-recreate litellm-dev
 
-# Presidio analyzer configuration changed
+# Presidio analyzer configuration changed (presidio/*.yaml); add --build
+# when presidio/Dockerfile or presidio/spacy-models.txt changed
 docker compose up -d --force-recreate presidio-analyzer
 ```
 

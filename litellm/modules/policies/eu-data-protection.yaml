@@ -1,10 +1,27 @@
 policies:
   eu-data-protection:
-    description: Mask supported personal and organization data before and after every model call.
+    description: Mask personal data before and after every model call; organisation names are not masked.
     guardrails:
       add:
+        # Order matters: pii-assist sets the language Presidio analyzes in and
+        # masks what the local model finds; presidio-pii then masks the rest.
+        - pii-assist
         - presidio-pii
+  # The local pii-assist model must see text unmasked to find personal data in
+  # it. It runs on this host or a private network (prepare_runtime_config.py
+  # refuses anything else), so nothing leaves the stack unmasked.
+  local-pii-assist:
+    description: No masking for the on-host pii-assist detection model.
+    guardrails:
+      add: []
 
 policy_attachments:
+  # default: true makes this the policy for every request that no other
+  # attachment matches. The only other attachment allowed is the pii-assist
+  # model's below; a repository contract rejects any other, because it would
+  # silently replace this masking for the requests it matches.
   - policy: eu-data-protection
     scope: "*"
+    default: true
+  - policy: local-pii-assist
+    models: ["pii-assist"]

@@ -1,0 +1,11 @@
+# Language and personal-data assist from a local model, before presidio-pii.
+# litellm/modules/pii_assist.py sets the request's Presidio language (en, de,
+# fr) and masks the personal data the local `pii-assist` model finds. It does
+# nothing unless PII_ASSIST_API_BASE is set, which makes
+# prepare_runtime_config.py add that model; Presidio then runs alone.
+# The eu-data-protection policy lists it first so it runs before Presidio.
+guardrails:
+  - guardrail_name: pii-assist
+    litellm_params:
+      guardrail: modules.pii_assist.PiiAssistGuardrail
+      mode: pre_call

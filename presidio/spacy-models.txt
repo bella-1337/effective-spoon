@@ -1,0 +1,5 @@
+# German and French spaCy pipelines for the Presidio analyzer, pinned by
+# version and hash. 3.8.0 is the model series of the image's spaCy 3.8.
+# de_core_news_lg: MIT. fr_core_news_lg: LGPL-LR (see docs/third-party-licences.md).
+de_core_news_lg @ https://github.com/explosion/spacy-models/releases/download/de_core_news_lg-3.8.0/de_core_news_lg-3.8.0-py3-none-any.whl --hash=sha256:36fda650e476b54d5e87803635e36dadd1e8e034c4b5962088586d684f4c9fed
+fr_core_news_lg @ https://github.com/explosion/spacy-models/releases/download/fr_core_news_lg-3.8.0/fr_core_news_lg-3.8.0-py3-none-any.whl --hash=sha256:da5bf7fc860af64293d88638b4416b3de3a29005b785bfff67d09b06c77345de

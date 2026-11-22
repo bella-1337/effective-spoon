@@ -72,7 +72,7 @@ Licence categories: **permissive** (MIT, Apache-2.0, BSD, PostgreSQL, PSF),
 | `gcr.io/cadvisor/cadvisor:v0.55.1` | `cadvisor` (core) | Apache-2.0 | Permissive | None. |
 | `ghcr.io/tecnativa/docker-socket-proxy:v0.5.0` | `traefik-docker-proxy`, `alloy-docker-proxy` (core); `image-security-docker-proxy` (security) | Apache-2.0; bundles HAProxy (GPL-2.0-or-later) | Permissive, with GPL component | Unmodified internal use creates no GPL obligation. |
 | `traefik:v3.7.19` | `traefik` (core) | MIT | Permissive | None. |
-| `mcr.microsoft.com/presidio-analyzer:2.2.362` | `presidio-analyzer` (core) | MIT; includes the spaCy `en_core_web_lg` model (see [models](#models)) | Permissive | None. |
+| `litellm-presidio-analyzer:2.2.362-1` | `presidio-analyzer` (core) | Presidio: MIT; spaCy `en_core_web_lg` and `de_core_news_lg`: MIT; `fr_core_news_lg`: LGPL-LR (see [models](#models)) | Mixed: permissive, with a weak-copyleft linguistic resource | Local build of `presidio/Dockerfile`: the upstream analyzer plus the pinned German and French spaCy pipelines. LGPL-LR obligations (provide the model and its source data licence terms, allow modification) apply only if the image is distributed outside the organisation. |
 | `mcr.microsoft.com/presidio-anonymizer:2.2.362` | `presidio-anonymizer` (core) | MIT | Permissive | None. |
 | `searxng/searxng:2026.11.15-2d500cb6b` | `searxng` (core) | AGPL-3.0 | Strong copyleft | Unmodified internal use creates no AGPL obligation. The licence grants no right to use the queried search engines; see [external services](#external-services-and-terms) and [Search-engine terms of use](search-extraction-and-caching.md#search-engine-terms-of-use). |
 | `ghcr.io/xberg-io/xberg:1.3.10-core` | `xberg` (prod, dev) | MIT | Permissive | None. |
@@ -88,6 +88,7 @@ stack is built, scanned, or extended.
 | Image | Used by | Licence | Category | Obligations and notes |
 | --- | --- | --- | --- | --- |
 | `python:3.11-slim-bookworm` | Base of `pgvector/Dockerfile` | Python: PSF-2.0; Debian packages under their own licences | Permissive base, mixed OS packages | None for internal use. |
+| `mcr.microsoft.com/presidio-analyzer:2.2.362` | Base of `presidio/Dockerfile` | MIT; includes the spaCy `en_core_web_lg` model (see [models](#models)) | Permissive | None. |
 | `ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm-slim` | Base of `opensearch/tools/Dockerfile` and `security/image-monitor.Dockerfile` | uv: MIT OR Apache-2.0; Python: PSF-2.0; Debian packages under their own licences | Permissive base, mixed OS packages | None for internal use. |
 | `docker:29.9.3-cli` | Docker CLI and buildx copied into `security/image-monitor.Dockerfile` | Apache-2.0 | Permissive | None. |
 | `aquasec/trivy:0.76.2` | Trivy copied into the monitor image; also run directly by host-mode scans | Apache-2.0 | Permissive | Trivy vulnerability and Java databases are downloaded at scan time under Aqua's database terms; internal use is permitted. |
@@ -106,6 +107,9 @@ Each model is pinned to an immutable revision.
 | `BAAI/bge-m3` | `5617a9f61b028005a4858fdac845db406aefb181` | `gpu-host/compose.yml` (`bge-m3`) | MIT | This revision ships `pytorch_model.bin` (pickle format) rather than safetensors; load it only from the pinned revision. Text Embeddings Inference reads it with its own pickle parser, without executing Python code. |
 | `vllm-sr/d3-mini` | `a475367de0d8133a3c1a2a0dc12303d89cfa2ab4` (tag `v3.1.0`) | `gpu-host/deploy.py`; `compose.optional.yml` (`d3-mini`, d3 profile) | Apache-2.0 | Fine-tuned from Qwen3.5-4B (Apache-2.0). Newer revisions exist; re-review the model card when updating the pin. |
 | `spacy/en_core_web_lg` | Bundled in `mcr.microsoft.com/presidio-analyzer:2.2.362` at build time | `presidio-analyzer` | MIT | Trained partly on OntoNotes 5, which Explosion licenses commercially; the released model package is MIT. |
+| `spacy/de_core_news_lg` | `3.8.0`, wheel SHA-256 `36fda650e476b54d5e87803635e36dadd1e8e034c4b5962088586d684f4c9fed` (`presidio/spacy-models.txt`) | `presidio-analyzer` | MIT | Trained on the TIGER Corpus, Tiger2Dep, and WikiNER; the released model package is MIT. |
+| `spacy/fr_core_news_lg` | `3.8.0`, wheel SHA-256 `da5bf7fc860af64293d88638b4416b3de3a29005b785bfff67d09b06c77345de` (`presidio/spacy-models.txt`) | `presidio-analyzer` | LGPL-LR (Lesser General Public License For Linguistic Resources) | Weak copyleft inherited from the UD French Sequoia corpus. Internal, unmodified use creates no obligation; distributing the analyzer image to third parties requires providing the model under LGPL-LR. Review with legal before such distribution. |
+| `qwen3.5:4b` (Ollama) | As pulled on the Docker host; not pinned by the stack | `pii-assist` model of both gateways, when `PII_ASSIST_API_BASE` is set | Apache-2.0 (Qwen 3.5 open-weight models) | Runs outside the stack on the operator's Ollama host. Pin it with a digest-tagged `ollama pull` if reproducibility matters; check the licence of any other model chosen with `PII_ASSIST_OLLAMA_MODEL`. |
 
 ## Repository Python dependencies
 

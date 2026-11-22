@@ -77,8 +77,9 @@ after their first HTTPS visit; API SDKs do not honour HSTS.
   request cannot exhaust the analyzer's memory.
 - Presidio Analyzer and Anonymizer each run two synchronous workers
   (`PRESIDIO_ANALYZER_WORKERS`, `PRESIDIO_ANONYMIZER_WORKERS`). Raise them on
-  busy hosts; add about 0.5 GiB to `PRESIDIO_ANALYZER_MEMORY_LIMIT` for each
-  additional analyzer worker.
+  busy hosts. The analyzer preloads its English, German, and French pipelines,
+  so its workers share them and each extra worker adds only about 0.1 GiB to
+  the roughly 2.7 GiB `PRESIDIO_ANALYZER_MEMORY_LIMIT` must cover.
 
 ## Prompt injection
 

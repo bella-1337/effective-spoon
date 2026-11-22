@@ -20,3 +20,5 @@
 !opensearch/tools/metrics.yml
 !opensearch/tools/litellm_opensearch/
 !opensearch/tools/litellm_opensearch/*.py
+!presidio/
+!presidio/spacy-models.txt

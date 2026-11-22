@@ -57,6 +57,7 @@ updates:
     directories:
       - /.devcontainer
       - /opensearch/tools
+      - /presidio
       - /security
     schedule:
       interval: weekly

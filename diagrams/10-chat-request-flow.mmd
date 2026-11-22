@@ -7,12 +7,13 @@ sequenceDiagram
   %% @subtitle From the client's HTTPS call to the response, through edge limits, authentication, policy, PII masking, routing, and telemetry
   %% @type cloud: TR
   %% @type security: PR
-  %% @type external: D3 EUP
+  %% @type external: D3 EUP OL
   %% @type database: OBS
   actor C as Client
   participant TR as Traefik<br/>TLS + edge limits
   participant LL as LiteLLM proxy<br/>auth · policy · routing
-  participant PR as Presidio<br/>PII masking
+  participant OL as Local model pii-assist<br/>e.g. Ollama on the Docker host
+  participant PR as Presidio<br/>PII masking · en, de, fr
   participant D3 as D3-mini<br/>remote GPU host
   participant EUP as Regional model provider<br/>Bedrock · Azure · Vertex
   participant OBS as Telemetry<br/>spend · metrics · spans
@@ -25,8 +26,13 @@ sequenceDiagram
     alt key invalid or model not allowed
       LL--xC: 401 / 403 through Traefik
     else authorized
-      Note over LL: resolve the eu-data-protection policy
-      LL->>PR: pre_call: mask PII in the input
+      Note over LL: resolve the eu-data-protection policy: pii-assist, then presidio-pii
+      opt PII_ASSIST_API_BASE is set and the text is new (cached otherwise)
+        LL->>OL: pre_call: language and personal data in the input
+        OL-->>LL: language (en, de, fr) and items
+        Note over LL: mask the items (not organisations), set the request language
+      end
+      LL->>PR: pre_call: mask PII in the input, in that language
       PR-->>LL: masked input
       opt model is coding-router
         LL->>D3: classify the request (routing sequence)

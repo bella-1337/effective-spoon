@@ -22,7 +22,16 @@ from maintenance_common import (
 )
 import xberg_allowlist
 
-COMPOSE_PROFILES = ("prod", "dev", "demo", "security", "grafana", "langfuse", "lens", "d3")
+COMPOSE_PROFILES = (
+    "prod",
+    "dev",
+    "demo",
+    "security",
+    "grafana",
+    "langfuse",
+    "lens",
+    "d3",
+)
 EXPECTED_ALERT_UIDS = {
     "litellm-prod-unavailable",
     "litellm-postgres-unavailable",
@@ -59,6 +68,7 @@ LOCAL_BUILD_DOCKERFILES = (
     Path("pgvector") / "Dockerfile",
     Path("opensearch") / "tools" / "Dockerfile",
     Path("security") / "image-monitor.Dockerfile",
+    Path("presidio") / "Dockerfile",
 )
 # A build context fetched from a Git repository must pin a full commit, so the
 # image is reproducible and its revision label names the exact source.
@@ -1223,6 +1233,15 @@ def edge_and_abuse_compose_failures(services: Mapping[str, Any]) -> list[str]:
         workers = str(environment.get("WORKERS", "")) if isinstance(environment, dict) else ""
         if not workers.isdigit() or int(workers) < 2:
             failures.append(f"{name} needs at least two workers so one prompt cannot stall masking")
+    # The analyzer holds English, German, and French spaCy pipelines (about
+    # 2.4 GiB); without preloading, every worker loads its own copy.
+    for name in ("presidio-analyzer",):
+        service = services.get(name)
+        environment = service.get("environment", {}) if isinstance(service, dict) else {}
+        if isinstance(service, dict) and "--preload" not in str(
+            (environment if isinstance(environment, dict) else {}).get("GUNICORN_CMD_ARGS", "")
+        ):
+            failures.append(f"{name} must preload its models (GUNICORN_CMD_ARGS=--preload) so workers share them")
     return failures
 
 
@@ -1312,9 +1331,66 @@ def litellm_guardrail_failures(root: Path) -> list[str]:
     return failures
 
 
+PII_ASSIST_MODEL = "pii-assist"
+# The only allowed shape of litellm/modules/policies/eu-data-protection.yaml,
+# ignoring comments, blank lines, and the description texts.
+DATA_PROTECTION_POLICY_LINES = (
+    "policies:",
+    "  eu-data-protection:",
+    "    description: *",
+    "    guardrails:",
+    "      add:",
+    "        - pii-assist",
+    "        - presidio-pii",
+    "  local-pii-assist:",
+    "    description: *",
+    "    guardrails:",
+    "      add: []",
+    "policy_attachments:",
+    "  - policy: eu-data-protection",
+    '    scope: "*"',
+    "    default: true",
+    "  - policy: local-pii-assist",
+    f'    models: ["{PII_ASSIST_MODEL}"]',
+)
+
+
+def data_protection_policy_failures(source: str) -> list[str]:
+    """Keep Presidio masking on every request except the local pii-assist model's.
+
+    The global attachment is a default (it applies when nothing else matches), so
+    any other attachment would silently remove masking from the requests it
+    matches. The only other one allowed exempts the on-host detection model,
+    which must see text unmasked; pii-assist must run before presidio-pii.
+    """
+    lines = [
+        line.rstrip()
+        for line in source.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    matches = len(lines) == len(DATA_PROTECTION_POLICY_LINES) and all(
+        (expected.endswith(" *") and line.startswith(expected[:-1]) and len(line) > len(expected))
+        or line == expected
+        for line, expected in zip(lines, DATA_PROTECTION_POLICY_LINES)
+    )
+    if matches:
+        return []
+    return [
+        "litellm/modules/policies/eu-data-protection.yaml must attach eu-data-protection "
+        "(pii-assist, then presidio-pii) as the global default and exempt only the "
+        f"{PII_ASSIST_MODEL} model; any other attachment would remove masking from the "
+        "requests it matches"
+    ]
+
+
 def validate_repository_contracts(root: Path = ROOT) -> list[str]:
     failures: list[str] = []
     failures.extend(runtime_lifecycle_failures(root))
+    policy_file = root / "litellm" / "modules" / "policies" / "eu-data-protection.yaml"
+    if not policy_file.is_file() or policy_file.is_symlink():
+        failures.append("Data-protection policy is missing or unsafe")
+    else:
+        failures.extend(data_protection_policy_failures(policy_file.read_text(encoding="utf-8")))
 
     traefik_dynamic = root / "traefik" / "dynamic.yml"
     if not traefik_dynamic.is_file() or traefik_dynamic.is_symlink():

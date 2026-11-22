@@ -243,6 +243,13 @@ services:
       CODING_ROUTER_STALL_ESCALATION: ${CODING_ROUTER_STALL_ESCALATION:-}
       D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
       D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
+      # Optional local model for language and personal-data detection before
+      # Presidio (pii-assist guardrail); empty disables it. Never a cloud API.
+      PII_ASSIST_API_BASE: ${PII_ASSIST_API_BASE:-}
+      PII_ASSIST_OLLAMA_MODEL: ${PII_ASSIST_OLLAMA_MODEL:-qwen3.5:4b}
+      PII_ASSIST_MAX_CHUNK_CHARS: "${PII_ASSIST_MAX_CHUNK_CHARS:-4000}"
+      PII_ASSIST_MAX_CALLS: "${PII_ASSIST_MAX_CALLS:-3}"
+      PII_ASSIST_TIMEOUT_SECONDS: "${PII_ASSIST_TIMEOUT_SECONDS:-20}"
       # Public roots plus the GPU host mkcert CA (D3-mini and BGE-M3 over TLS).
       SSL_CERT_FILE: /etc/ssl/certs/gpu-host-ca-bundle.pem
       LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
@@ -283,6 +290,10 @@ services:
         condition: service_healthy
         required: false
     cap_drop: [NET_RAW]
+    # Reaches a model server on the Docker host, such as Ollama for
+    # PII_ASSIST_API_BASE (built in on Docker Desktop; needed on Linux).
+    extra_hosts:
+      - host.docker.internal:host-gateway
     # d3-local reaches the optional on-host D3-mini (d3 profile). No
     # dependency: until it is healthy, coding-router classifies locally.
     networks: [edge, internal, xberg-sandbox, d3-local]
@@ -397,6 +408,13 @@ services:
       CODING_ROUTER_STALL_ESCALATION: ${CODING_ROUTER_STALL_ESCALATION:-}
       D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
       D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
+      # Optional local model for language and personal-data detection before
+      # Presidio (pii-assist guardrail); empty disables it. Never a cloud API.
+      PII_ASSIST_API_BASE: ${PII_ASSIST_API_BASE:-}
+      PII_ASSIST_OLLAMA_MODEL: ${PII_ASSIST_OLLAMA_MODEL:-qwen3.5:4b}
+      PII_ASSIST_MAX_CHUNK_CHARS: "${PII_ASSIST_MAX_CHUNK_CHARS:-4000}"
+      PII_ASSIST_MAX_CALLS: "${PII_ASSIST_MAX_CALLS:-3}"
+      PII_ASSIST_TIMEOUT_SECONDS: "${PII_ASSIST_TIMEOUT_SECONDS:-20}"
       # Public roots plus the GPU host mkcert CA (D3-mini and BGE-M3 over TLS).
       SSL_CERT_FILE: /etc/ssl/certs/gpu-host-ca-bundle.pem
       LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
@@ -455,6 +473,10 @@ services:
         condition: service_healthy
         required: false
     cap_drop: [NET_RAW]
+    # Reaches a model server on the Docker host, such as Ollama for
+    # PII_ASSIST_API_BASE (built in on Docker Desktop; needed on Linux).
+    extra_hosts:
+      - host.docker.internal:host-gateway
     # d3-local reaches the optional on-host D3-mini (d3 profile). No
     # dependency: until it is healthy, coding-router classifies locally.
     networks: [edge, internal, xberg-sandbox, d3-local]
@@ -503,29 +525,50 @@ services:
 
   presidio-analyzer:
     logging: *default-logging
-    image: mcr.microsoft.com/presidio-analyzer:2.2.362@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
+    image: litellm-presidio-analyzer:2.2.362-1
+    # The upstream image ships only English; presidio/Dockerfile adds the
+    # pinned German and French spaCy pipelines.
+    build:
+      context: .
+      dockerfile: presidio/Dockerfile
+      labels:
+        <<: *own-image-labels
+        org.opencontainers.image.title: litellm-presidio-analyzer
+        org.opencontainers.image.description: Presidio analyzer with English, German, and French spaCy pipelines for the LiteLLM stack
+        org.opencontainers.image.version: 2.2.362-1
+        org.opencontainers.image.base.name: mcr.microsoft.com/presidio-analyzer:2.2.362
+        org.opencontainers.image.licenses: MIT AND LGPL-LR
     environment:
       PRESIDIO_NLP_ENGINE: ${PRESIDIO_NLP_ENGINE:-spacy}
-      PRESIDIO_SUPPORTED_LANGUAGES: ${PRESIDIO_SUPPORTED_LANGUAGES:-en}
+      # Informational: the languages come from presidio/analyzer-engine.yaml.
+      PRESIDIO_SUPPORTED_LANGUAGES: en,de,fr
       NLP_CONF_FILE: /app/presidio_analyzer/conf/litellm-analyzer.yaml
+      ANALYZER_CONF_FILE: /app/presidio_analyzer/conf/stack-analyzer-engine.yaml
+      RECOGNIZER_REGISTRY_CONF_FILE: /app/presidio_analyzer/conf/stack-recognizers.yaml
       # Each gunicorn worker is synchronous; one large prompt otherwise
       # serializes the PII guardrail for every caller.
       WORKERS: ${PRESIDIO_ANALYZER_WORKERS:-2}
+      # Load the spaCy pipelines once before forking, so workers share them:
+      # about 2.7 GiB for two workers instead of 2.4 GiB each.
+      GUNICORN_CMD_ARGS: --preload
     volumes:
       - ./presidio/analyzer.yaml:/app/presidio_analyzer/conf/litellm-analyzer.yaml:ro
+      - ./presidio/analyzer-engine.yaml:/app/presidio_analyzer/conf/stack-analyzer-engine.yaml:ro
+      - ./presidio/recognizers.yaml:/app/presidio_analyzer/conf/stack-recognizers.yaml:ro
     deploy:
       resources:
         limits:
           cpus: "${PRESIDIO_ANALYZER_CPU_LIMIT:-2}"
-          memory: ${PRESIDIO_ANALYZER_MEMORY_LIMIT:-2g}
+          # English, German, and French pipelines, shared by the workers.
+          memory: ${PRESIDIO_ANALYZER_MEMORY_LIMIT:-4g}
     networks: [internal]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=5)"]
       interval: 10s
       timeout: 5s
-      retries: 12
-      start_period: 30s
+      retries: 18
+      start_period: 60s
 
   presidio-anonymizer:
     logging: *default-logging

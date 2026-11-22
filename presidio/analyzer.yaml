@@ -1,7 +1,15 @@
+# NLP configuration of presidio-analyzer, which the gateway guardrail and
+# Xberg auto-indexing use. English, German, and French; see
+# presidio/analyzer-engine.yaml and presidio/recognizers.yaml.
 nlp_engine_name: spacy
 models:
   - lang_code: en
     model_name: en_core_web_lg
+  # German and French models are installed by presidio/Dockerfile.
+  - lang_code: de
+    model_name: de_core_news_lg
+  - lang_code: fr
+    model_name: fr_core_news_lg
 
 ner_model_configuration:
   model_to_presidio_entity_mapping:
@@ -18,6 +26,10 @@ ner_model_configuration:
   low_confidence_score_multiplier: 0.4
   low_score_entity_names: []
   labels_to_ignore:
+    # Organisation names are intentionally not detected for the gateway.
+    - ORG
+    # MISC: the German and French models' catch-all label (events, works, nationalities).
+    - MISC
     - CARDINAL
     - EVENT
     - LANGUAGE
