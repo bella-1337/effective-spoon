@@ -283,7 +283,9 @@ services:
         condition: service_healthy
         required: false
     cap_drop: [NET_RAW]
-    networks: [edge, internal, xberg-sandbox]
+    # d3-local reaches the optional on-host D3-mini (d3 profile). No
+    # dependency: until it is healthy, coding-router classifies locally.
+    networks: [edge, internal, xberg-sandbox, d3-local]
     restart: unless-stopped
     deploy: *resources-litellm
     healthcheck:
@@ -453,7 +455,9 @@ services:
         condition: service_healthy
         required: false
     cap_drop: [NET_RAW]
-    networks: [edge, internal, xberg-sandbox]
+    # d3-local reaches the optional on-host D3-mini (d3 profile). No
+    # dependency: until it is healthy, coding-router classifies locally.
+    networks: [edge, internal, xberg-sandbox, d3-local]
     restart: unless-stopped
     deploy: *resources-litellm
     healthcheck:
@@ -967,7 +971,8 @@ services:
     depends_on:
       prometheus-secrets-init:
         condition: service_completed_successfully
-    networks: [internal]
+    # d3-local: scrape the optional on-host D3-mini's vLLM metrics.
+    networks: [internal, d3-local]
     restart: unless-stopped
     deploy: *resources-medium
 
@@ -1278,7 +1283,8 @@ services:
     depends_on:
       opensearch-setup:
         condition: service_completed_successfully
-    networks: [internal]
+    # d3-local: receive the optional on-host D3-mini's OTLP spans.
+    networks: [internal, d3-local]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "bash", "-ec", ": >/dev/tcp/127.0.0.1/21892 && : >/dev/tcp/127.0.0.1/21890"]

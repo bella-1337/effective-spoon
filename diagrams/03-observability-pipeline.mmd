@@ -6,7 +6,7 @@ flowchart TD
   %% Directives: docs in diagrams/README.md (Updating diagrams).
   %% @mode architecture
   %% @subtitle Logs, metrics, traces, and LiteLLM usage converge in OpenSearch; operators read them through Dashboards
-  %% @card cyan | Ingest paths | Alloy ships container logs over OTLP to Data Prepper | LiteLLM exports content-free spans to Data Prepper Trace Analytics | The bridge mirrors Prometheus series and non-content PostgreSQL rows every minute
+  %% @card cyan | Ingest paths | Alloy ships container logs over OTLP to Data Prepper | LiteLLM exports content-free spans, with each coding-router decision, to Data Prepper Trace Analytics; the optional d3-mini adds its own spans and metrics | The bridge mirrors Prometheus series and non-content PostgreSQL rows every minute
   %% @card violet | Stores | OpenSearch: logs, mirrored metrics, alert state, usage copies, audit log | Prometheus stays the metrics source of truth and a PPL direct-query source | LiteLLM PostgreSQL stays the system of record for spend and identity
   %% @card rose | Access and alerts | OpenSearch security roles and tenants restrict each user | One alerting monitor per Grafana rule, plus staleness monitors | Set OPENSEARCH_ALERT_CHANNEL_ID or alerts are visible only in the UI
   %% @journey #fb923c: CT AL DP OS
@@ -18,7 +18,8 @@ flowchart TD
   end
   subgraph ST["LiteLLM stack — Docker Compose host"]
     TR["Traefik<br/>HTTPS routing"]:::cloud
-    LL["LiteLLM prod / dev<br/>/metrics · OTel v2 spans"]:::backend
+    LL["LiteLLM prod / dev<br/>/metrics · OTel v2 spans · routing decisions"]:::backend
+    D3["d3-mini (optional d3 profile)<br/>vLLM /metrics · OTLP spans"]:::backend
     CT["All Compose containers<br/>stdout / stderr"]:::backend
     EXP["Exporters<br/>node · cAdvisor · postgres · blackbox"]:::backend
     OSD["OpenSearch Dashboards<br/>dashboards · Discover · alerting"]:::frontend
@@ -40,6 +41,8 @@ flowchart TD
   AL -.->|"OTLP"| DP
   LL -.-> DP
   LL --> PM
+  D3 -->|"scrape on d3-local"| PM
+  D3 -.->|"OTLP on d3-local"| DP
   EXP --> PM
   LL --> PG
   PM -->|"PromQL"| BR

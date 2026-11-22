@@ -111,6 +111,35 @@ class GameDayPreflightTests(unittest.TestCase):
                 },
                 "image-security-docker-proxy": {"profiles": ["security"]},
                 "image-security-monitor": {"profiles": ["security"]},
+                "d3-mini-preflight": {
+                    "profiles": ["d3"],
+                    "network_mode": "none",
+                    "user": "0:0",
+                    "cap_drop": ["ALL"],
+                    "cap_add": ["CHOWN"],
+                },
+                "d3-mini-download": {
+                    "profiles": ["d3"],
+                    "image": "vllm/vllm-openai:v0.33.0@sha256:" + "a" * 64,
+                    "user": "10001:10001",
+                    "depends_on": {"d3-mini-preflight": {}},
+                    "networks": {"d3-download": {}},
+                    "read_only": True,
+                    "cap_drop": ["ALL"],
+                    "environment": {"D3_MODEL_REVISION": "b" * 40},
+                },
+                "d3-mini": {
+                    "profiles": ["d3"],
+                    "image": "vllm/vllm-openai:v0.33.0@sha256:" + "a" * 64,
+                    "user": "10001:10001",
+                    "command": ["vllm-sr/d3-mini", "--revision", "b" * 40],
+                    "depends_on": {"d3-mini-download": {}},
+                    "networks": {"d3-local": {}},
+                    "read_only": True,
+                    "cap_drop": ["ALL"],
+                    "environment": {"HF_HUB_OFFLINE": "1", "VLLM_API_KEY": "k" * 64},
+                    "volumes": [{"target": "/models", "read_only": True}],
+                },
                 "xberg": {
                     "environment": {"NO_PROXY": "127.0.0.1,localhost"},
                     "dns": ["172.29.0.53"],
@@ -150,6 +179,62 @@ class GameDayPreflightTests(unittest.TestCase):
         ] = "172.29.0.54"
 
         self.assertEqual(self.module.validate_compose_contracts(config), [])
+
+    def test_d3_profile_contracts_fail_closed(self) -> None:
+        cases = {
+            "must stay in the d3 profile: d3-mini": lambda s: s["d3-mini"].update(profiles=["prod"]),
+            "d3-mini must depend on d3-mini-download": lambda s: s["d3-mini"].update(depends_on={}),
+            "litellm-prod must not require d3-mini": lambda s: s["litellm-prod"]["depends_on"].update(
+                {"d3-mini": {"condition": "service_healthy"}}
+            ),
+            "d3-mini-preflight must run without a network": lambda s: s["d3-mini-preflight"].pop(
+                "network_mode"
+            ),
+            "d3-mini must join only the d3-local network": lambda s: s["d3-mini"]["networks"].update(
+                {"internal": {}}
+            ),
+            "d3-mini-download must join only the d3-download network": lambda s: s[
+                "d3-mini-download"
+            ].update(networks={"internal": {}}),
+            "d3-mini must not be published or routed": lambda s: s["d3-mini"].update(
+                ports=[{"target": 8000, "published": "8000"}]
+            ),
+            "d3-mini must run as a non-root user": lambda s: s["d3-mini"].pop("user"),
+            "d3-mini-download must keep a read-only root filesystem": lambda s: s[
+                "d3-mini-download"
+            ].update(read_only=False),
+            "d3-mini must drop all Linux capabilities": lambda s: s["d3-mini"].update(
+                cap_add=["SYS_ADMIN"]
+            ),
+            "d3-mini must run offline": lambda s: s["d3-mini"]["environment"].pop("HF_HUB_OFFLINE"),
+            "through VLLM_API_KEY": lambda s: s["d3-mini"]["environment"].pop("VLLM_API_KEY"),
+            "mount its model volume read-only": lambda s: s["d3-mini"].update(
+                volumes=[{"target": "/models", "read_only": False}]
+            ),
+            "serve the revision d3-mini-download fetches": lambda s: s["d3-mini"].update(
+                command=["vllm-sr/d3-mini", "--revision", "c" * 40]
+            ),
+            "must use the same image": lambda s: s["d3-mini-download"].update(image="other:1"),
+            "may join d3-local: searxng": lambda s: s["searxng"]["networks"].update({"d3-local": {}}),
+            "Optional D3 service is missing: d3-mini-preflight": lambda s: s.pop("d3-mini-preflight"),
+        }
+        for expected, mutate in cases.items():
+            with self.subTest(expected=expected):
+                config = self.valid_config()
+                mutate(config["services"])
+                failures = self.module.validate_compose_contracts(config)
+                self.assertTrue(any(expected in failure for failure in failures), failures)
+
+    def test_d3_gateways_and_telemetry_collectors_may_join_d3_local(self) -> None:
+        config = self.valid_config()
+        config["services"]["litellm-prod"]["networks"] = {"internal": {}, "d3-local": {}}
+        config["services"]["litellm-dev"] = {"networks": {"d3-local": {}}}
+        config["services"]["prometheus"] = {"networks": {"internal": {}, "d3-local": {}}}
+        config["services"]["data-prepper"] = {"networks": {"internal": {}, "d3-local": {}}}
+
+        failures = self.module.validate_compose_contracts(config)
+
+        self.assertFalse([failure for failure in failures if "d3" in failure.lower()], failures)
 
     def test_auxiliary_production_dependency_fails(self) -> None:
         config = self.valid_config()

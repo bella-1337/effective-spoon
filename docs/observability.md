@@ -94,6 +94,16 @@ service (`log.attributes.compose_service:"lens"`), Prometheus probes its
 readiness as job `lens`, and the **LiteLLM Lens is not ready** alert fires when
 a running Lens stays unready for five minutes.
 
+## Coding router and on-host D3-mini
+
+`coding-router` decisions reach OpenSearch on the gateways' request spans as
+`litellm.routing.*` attributes: the tier, the deciding mechanism (`cause`), the
+classifier model, its confidence, any failure reason, and the routed model.
+With the optional [`d3` profile](d3-mini-on-host.md#observe), Prometheus also
+scrapes D3-mini's vLLM metrics (job `d3-mini`), vLLM sends one span per
+decision to Data Prepper, and the **On-host D3-mini is unavailable** alert
+watches the scrape. The **Coding Router and D3-mini** dashboard combines them.
+
 ## OpenSearch: the default multi-user observability platform
 
 OpenSearch replaces Grafana as the default UI because Grafana OSS cannot
@@ -143,6 +153,10 @@ Dashboards in the Global tenant (start at **LiteLLM Overview**):
   operation, model calls, guardrail outcomes, database latency by table, error
   spans, and the slowest spans. **Observability → Trace Analytics** adds trace
   waterfalls and the service map.
+- **Coding Router and D3-mini** (operators) – `coding-router` decisions by tier
+  and deciding mechanism, D3-mini answers versus heuristic fallbacks and their
+  reasons, the models chosen, and, with the `d3` profile, D3-mini's request
+  rate by HTTP status, latency, queue, load, and span timings.
 - **Infrastructure: Host & Containers**, **Infrastructure: PostgreSQL**, and
   **Infrastructure: Traefik, Probes & Targets** – the core Node Exporter Full,
   cAdvisor, PostgreSQL, Traefik, blackbox, TLS-expiry, and scrape-target panels.

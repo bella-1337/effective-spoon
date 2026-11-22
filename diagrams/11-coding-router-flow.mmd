@@ -4,11 +4,11 @@ title: coding-router tier selection
 sequenceDiagram
   %% Source for 11-coding-router-flow.html. Edit this file, then run ./scripts/render-diagrams.py.
   %% Directives: docs in diagrams/README.md (Updating diagrams).
-  %% @subtitle Keywords or D3-mini pick the tier; only the classification request leaves for the remote D3-mini host
+  %% @subtitle Keywords or D3-mini pick the tier; only the classification request goes to D3-mini, on the remote GPU host or on this host with the d3 profile
   %% @type external: D3 EUP
   actor C as Client
   participant AR as LiteLLM Auto Router<br/>model = coding-router
-  participant D3 as D3-mini<br/>remote GPU host
+  participant D3 as D3-mini<br/>remote GPU host or d3 profile
   participant EUP as Regional model provider<br/>tier models from .env
 
   C->>AR: chat completion for coding-router
@@ -20,7 +20,7 @@ sequenceDiagram
     AR->>D3: classification request only
     alt D3 answers within CODING_ROUTER_CLASSIFIER_TIMEOUT_MS
       D3-->>AR: tier SIMPLE, MEDIUM, COMPLEX, or REASONING
-    else timeout or error
+    else timeout, error, or input over the cap
       D3--xAR: no answer in time
       Note over AR: local heuristic scores the prompt
     end

@@ -435,6 +435,28 @@ class SavedObjectTests(unittest.TestCase):
             for field in fields:
                 self.assertIn(field, known, f"{item['id']} aggregates unknown field {field}")
 
+    def test_routing_dashboard_queries_known_span_and_metric_fields(self) -> None:
+        dashboard = self.by_id[("dashboard", "litellm-dash-routing")]
+        span_fields = {f["name"] for f in setup.static_fields("otel-v1-apm-span-*")}
+        text = (ROOT / "opensearch" / "tools" / "metrics.yml").read_text(encoding="utf-8")
+        for reference in dashboard["references"]:
+            item = self.by_id[(reference["type"], reference["id"])]
+            meta = json.loads(item["attributes"]["kibanaSavedObjectMeta"]["searchSourceJSON"])
+            query = meta.get("query", {}).get("query", "")
+            for field in re.findall(r"(span\.attributes\.[\w@]+):", query):
+                self.assertIn(field, span_fields, item["id"])
+            for name in re.findall(r'metric:"(d3_[^"]+)"', query):
+                self.assertIn(f"  - name: {name}\n", text, item["id"])
+        overview_links = {object_id for object_id, _, _ in saved_objects.DASHBOARD_LINKS}
+        self.assertIn("litellm-dash-routing", overview_links)
+
+    def test_routing_and_d3_span_attributes_are_keywords(self) -> None:
+        fields = {f["name"]: f for f in setup.static_fields("otel-v1-apm-span-*")}
+        for name in (*setup.ROUTING_SPAN_ATTRIBUTES, *setup.D3_SPAN_ATTRIBUTES):
+            field = fields[f"span.attributes.{name}"]
+            self.assertEqual(field["esTypes"], ["keyword"])
+            self.assertTrue(field["aggregatable"])
+
     def test_referenced_metrics_exist_in_catalog(self) -> None:
         text = (ROOT / "opensearch" / "tools" / "metrics.yml").read_text(encoding="utf-8")
         catalog = set(re.findall(r"^  - name: (\S+)$", text, re.MULTILINE))

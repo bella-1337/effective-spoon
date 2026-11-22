@@ -1,0 +1,5 @@
+{"id": "greeting", "prompt": "Hi, are you there?", "expected_tier": "SIMPLE"}
+{"id": "rename-variable", "prompt": "Rename the variable tmp to total in this function.", "expected_tier": "SIMPLE", "acceptable_tiers": ["MEDIUM"]}
+{"id": "explain-error", "prompt": "Why does this Python code raise KeyError: 'id' when the list is empty?", "expected_tier": "MEDIUM"}
+{"id": "add-endpoint", "prompt": "Add a paginated GET /orders endpoint with tests to this FastAPI service.", "system_prompt": "You are a coding agent working in a Python repository.", "expected_tier": "COMPLEX"}
+{"id": "split-monolith", "prompt": "Plan how to split this monolith into services, with the trade-offs of each boundary and a migration order.", "expected_tier": "REASONING", "acceptable_tiers": ["COMPLEX"]}

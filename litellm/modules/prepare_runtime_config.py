@@ -48,6 +48,11 @@ LENS_ENV = (
 LENS_SECRETS = ("LITELLM_LENS_SERVICE_TOKEN", "LENS_GATEWAY_SECRET")
 # Lens and LiteLLM both reject connection secrets outside this length range.
 LENS_SECRET_LENGTH = range(32, 513)
+# D3-mini receives every coding-router prompt. A remote host is reached only
+# over HTTPS; plain HTTP is allowed only for the optional on-host d3 profile,
+# whose service is reachable solely on the internal d3-local network.
+D3_API_BASE_ENV = "D3_DECISION_API_BASE"
+D3_LOCAL_API_BASE = "http://d3-mini:8000"
 
 
 def service_resolves(host: str, port: int) -> bool:
@@ -144,6 +149,31 @@ def validate_lens_environment(environ: Mapping[str, str] = os.environ) -> None:
             )
 
 
+def validate_d3_endpoint(environ: Mapping[str, str] = os.environ) -> None:
+    value = environ.get(D3_API_BASE_ENV, "").strip()
+    if value == D3_LOCAL_API_BASE:
+        return
+    parsed = urlsplit(value)
+    try:
+        port_is_valid = parsed.port is None or parsed.port > 0
+    except ValueError:
+        port_is_valid = False
+    if (
+        not port_is_valid
+        or parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.path.rstrip("/")
+    ):
+        raise ValueError(
+            f"{D3_API_BASE_ENV} must be an https:// base URL without a path, or "
+            f"{D3_LOCAL_API_BASE} for the on-host d3 profile"
+        )
+
+
 def with_sovereign_models(config: dict[str, Any], environ: Mapping[str, str]) -> tuple[str, list[str]]:
     """Append the environment's provider models; return (region, model names)."""
     region, entries = sovereign_model_list(environ)
@@ -182,6 +212,7 @@ def prepare_config(
     if not isinstance(config, dict):
         raise ValueError("LiteLLM config must be a YAML mapping")
     current = os.environ if environ is None else environ
+    validate_d3_endpoint(current)
     region, models = with_sovereign_models(config, current)
 
     langfuse_enabled = langfuse_is_available()
