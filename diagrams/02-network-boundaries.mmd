@@ -35,7 +35,7 @@ flowchart TD
       LCH[("Lens ClickHouse<br/>no route from any other service")]:::database
     end
     subgraph D3N["d3-local — internal, d3 profile"]
-      D3M["d3-mini (optional)<br/>vLLM on the host GPU · offline"]:::backend
+      D3M["d3-mini (optional)<br/>vLLM on the host GPU · offline<br/>shared with gateways, Prometheus, Data Prepper"]:::backend
     end
     subgraph SBX["xberg-sandbox — internal-only MCP"]
       XB["Xberg MCP<br/>no Internet, no internal route"]:::backend
@@ -68,6 +68,8 @@ flowchart TD
   LL --> DB
   OSD --> OS
   LL -->|"http://d3-mini:8000"| D3M
+  PM -->|"scrape /metrics"| D3M
+  D3M -.->|"OTLP spans"| OS
   LL -->|"MCP"| XB
   XB --> DNS
   XB --> SQ

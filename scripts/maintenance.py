@@ -123,6 +123,7 @@ SCRIPTS = (
     "monitor-image-vulnerabilities.py", "generate-image-sbom.py",
     "install-image-security-schedule.py",
     "run-image-security-scheduler.py", "lens.py",
+    "compare-coding-router-classifiers.py",
 )
 
 

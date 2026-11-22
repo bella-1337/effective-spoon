@@ -33,10 +33,38 @@ raw:
     selector: '{__name__=~"probe_.+"}'
   - name: security-and-backup
     selector: '{__name__=~"image_security_.+|litellm_backup_.+|node_textfile_.+"}'
+  - name: d3-mini
+    # vLLM engine series and the per-route HTTP counters of the on-host D3-mini.
+    selector: '{job="d3-mini", __name__=~"up|vllm:.+|http_requests_total", __name__!~".+_(bucket|created)"}'
   - name: langfuse-clickhouse-capacity
     selector: '{__name__=~"ClickHouseAsyncMetrics_(FilesystemMainPathAvailableBytes|FilesystemMainPathTotalBytes|FilesystemLogsPathAvailableBytes|FilesystemLogsPathTotalBytes)|ClickHouseProfileEvents_(AsyncLoggingTextLogTotalMessages|AsyncLoggingErrorFileLogTotalMessages)"}'
 
 expressions:
+  # --- On-host D3-mini (d3 profile) -----------------------------------------
+  - name: d3_up
+    title: D3-mini metrics endpoint up
+    query: up{job="d3-mini"}
+  - name: d3_requests_per_second
+    title: D3-mini decision requests per second by status
+    query: sum by (status) (rate(http_requests_total{job="d3-mini", handler="/v1/systemone"}[5m]))
+  - name: d3_latency_p95_seconds
+    title: D3-mini decision latency p95 (HTTP)
+    query: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job="d3-mini", handler="/v1/systemone"}[5m])))
+  - name: d3_queue_time_p95_seconds
+    title: D3-mini queue time p95
+    query: histogram_quantile(0.95, sum by (le) (rate(vllm:request_queue_time_seconds_bucket{job="d3-mini"}[5m])))
+  - name: d3_prefill_time_p95_seconds
+    title: D3-mini prefill time p95
+    query: histogram_quantile(0.95, sum by (le) (rate(vllm:request_prefill_time_seconds_bucket{job="d3-mini"}[5m])))
+  - name: d3_requests_running
+    title: D3-mini requests running
+    query: sum(vllm:num_requests_running{job="d3-mini"})
+  - name: d3_requests_waiting
+    title: D3-mini requests waiting
+    query: sum(vllm:num_requests_waiting{job="d3-mini"})
+  - name: d3_prompt_tokens_per_second
+    title: D3-mini input tokens per second
+    query: sum(rate(vllm:prompt_tokens_total{job="d3-mini"}[5m]))
   # --- LiteLLM Stack (dev/prod) -------------------------------------------
   - name: litellm_requests_per_minute
     title: LiteLLM requests per minute by model

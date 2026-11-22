@@ -93,8 +93,9 @@ networks:
   # can reach the trace database.
   lens-storage:
     internal: true
-  # On-host D3-mini (d3 profile): only d3-mini and the two gateways. Internal,
-  # so the container that reads prompts has no route out of the host.
+  # On-host D3-mini (d3 profile): d3-mini, the two gateways, and the telemetry
+  # collectors Prometheus (metrics) and Data Prepper (spans). Internal, so the
+  # container that reads prompts has no route out of the host.
   d3-local:
     internal: true
   # The one-shot model download only; d3-mini never joins it.
@@ -747,7 +748,8 @@ services:
     deploy: *resources-medium
 
   # vLLM's System One endpoint (/v1/systemone) for the gateways' coding-router.
-  # Reachable only on d3-local, never published or routed. vLLM reserves
+  # Reachable only on d3-local, never published or routed. Prometheus scrapes
+  # its /metrics there, and it sends spans to Data Prepper. vLLM reserves
   # D3_GPU_MEMORY_UTILIZATION of the card and checks at start-up that a
   # D3_MAX_INPUT_TOKENS input fits; longer prompts are rejected and LiteLLM
   # classifies them locally.
@@ -771,6 +773,10 @@ services:
       # Skip CUDA graph capture and torch.compile: less GPU memory and fewer
       # kernels compiled on first start, at no cost for single-pass decisions.
       - --enforce-eager
+      # One span per decision (queue, prefill, and total time, token counts;
+      # no prompt text) to Data Prepper, then OpenSearch Trace Analytics.
+      - --otlp-traces-endpoint
+      - http://data-prepper:21890
     environment:
       # vLLM requires this key on every /v1 route, including /v1/systemone.
       VLLM_API_KEY: ${D3_DECISION_API_KEY:-}
@@ -779,6 +785,8 @@ services:
       TRANSFORMERS_OFFLINE: "1"
       VLLM_NO_USAGE_STATS: "1"
       DO_NOT_TRACK: "1"
+      OTEL_SERVICE_NAME: d3-mini
+      OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: grpc
       # The image has no account for UID 10001; Python reads these instead.
       USER: d3
       LOGNAME: d3

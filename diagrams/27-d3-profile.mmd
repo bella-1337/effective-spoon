@@ -7,7 +7,7 @@ flowchart TD
   %% @mode architecture
   %% @subtitle coding-router decisions on the stack host's own NVIDIA GPU, sized for a single 16 GB RTX PRO 2000 Blackwell
   %% @card cyan | Decision path | coding-router sends each prompt to http://d3-mini:8000/v1/systemone with D3_DECISION_API_KEY | Inputs over D3_MAX_INPUT_TOKENS are rejected and scored by the local heuristic | A failure or timeout falls back to the heuristic too; the gateways never wait for d3-mini
-  %% @card violet | Isolation | d3-mini sits on the internal d3-local network with the two gateways only | It runs offline, without root, with a read-only model volume | No host port and no Traefik route
+  %% @card violet | Isolation | d3-mini sits on the internal d3-local network with the two gateways, Prometheus, and Data Prepper | It runs offline, without root, with a read-only model volume | No host port and no Traefik route
   %% @card rose | Start-up | d3-mini-preflight rejects out-of-range settings with no network | d3-mini-download alone reaches Hugging Face, for the pinned revision | vLLM reserves D3_GPU_MEMORY_UTILIZATION and checks the cap before serving
   %% @journey #22d3ee: LL D3 GPU
   %% @journey #fb7185: PF DL HF
@@ -25,6 +25,9 @@ flowchart TD
       end
     end
     GPU["NVIDIA GPU<br/>RTX PRO 2000 Blackwell · 16 GB"]:::cloud
+    PM[("Prometheus<br/>job d3-mini · also on d3-local")]:::database
+    DP["Data Prepper<br/>OTLP spans · also on d3-local"]:::backend
+    OS[("OpenSearch<br/>Coding Router and D3-mini dashboard")]:::database
   end
   subgraph EX["External services — outside the stack"]
     HF["Hugging Face<br/>vllm-sr/d3-mini"]:::external
@@ -37,6 +40,10 @@ flowchart TD
   DL --> VOL
   DL -.->|"must succeed first"| D3
   VOL -->|"read-only"| D3
+  PM -->|"scrape /metrics"| D3
+  D3 -.->|"OTLP spans"| DP
+  PM -->|"opensearch-bridge"| OS
+  DP -.-> OS
 
   classDef backend fill:#064e3b,stroke:#34d399,color:#e2e8f0
   classDef cloud fill:#78350f,stroke:#fbbf24,color:#e2e8f0

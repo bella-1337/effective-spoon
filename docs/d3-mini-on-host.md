@@ -28,10 +28,10 @@ these services and their networks.
   release that serves Decision 3.0 models, pinned by digest. vLLM requires
   `D3_DECISION_API_KEY` on every `/v1` route.
 - `d3-local` is an internal network shared only by `d3-mini`, `litellm-prod`,
-  and `litellm-dev`. `d3-mini` is not published on a host port or routed by
-  Traefik, and it has no route to the internet. Its routes outside `/v1`, such
-  as `/health` and `/metrics`, need no key and are reachable only by the two
-  gateways.
+  `litellm-dev`, and the telemetry collectors `prometheus` and `data-prepper`.
+  `d3-mini` is not published on a host port or routed by Traefik, and it has
+  no route to the internet. Its routes outside `/v1`, such as `/health` and
+  `/metrics`, need no key and are reachable only by those services.
 - The gateways do not depend on `d3-mini`. Until it is healthy, or when it
   fails, times out (`CODING_ROUTER_CLASSIFIER_TIMEOUT_MS`), or rejects a prompt,
   `coding-router` classifies the request with LiteLLM's local heuristic.
@@ -198,6 +198,130 @@ cap, the image, or the model revision.
    prod gateway, then check that the `d3-mini` log shows a matching
    `POST /v1/systemone` access line with status 200. The access log records
    the route and status only, not the prompt.
+
+## Compare classifiers on your prompts
+
+Before choosing between LiteLLM's heuristic, its trained `heuristic_v2`
+predictor, D3-mini, and the smaller d3-nano, measure them on your own
+prompts. No published benchmark compares them for tier routing.
+`scripts/compare-coding-router-classifiers.py` classifies a labelled prompt
+file with each of them. It runs inside the pinned prod LiteLLM image, with
+the same code, tier descriptions, timeout, and heuristic fallback as the
+gateways.
+
+### Prepare labelled prompts
+
+Spend logs do not store prompts, so collect a sample yourself, following
+your data-protection policy, and label each prompt with the tier it should
+get. Aim for a few hundred prompts that match your real traffic, including
+long agent requests with their system prompts. Keep the file outside the
+repository with mode `0600`; the script refuses a file that other users can
+read.
+
+```json
+{"id": "add-endpoint", "prompt": "Add a paginated GET /orders endpoint with tests.", "system_prompt": "You are a coding agent.", "expected_tier": "COMPLEX"}
+{"id": "split-monolith", "prompt": "Plan how to split this monolith into services.", "expected_tier": "REASONING", "acceptable_tiers": ["COMPLEX"]}
+```
+
+`expected_tier` is one of `SIMPLE`, `MEDIUM`, `COMPLEX`, or `REASONING`.
+`id`, `system_prompt`, and `acceptable_tiers` are optional. A full example is
+in `scripts/tests/fixtures/coding-router-eval.example.jsonl`.
+
+### Run the comparison
+
+The heuristics alone need no GPU and no network:
+
+```sh
+./scripts/compare-coding-router-classifiers.py --prompts ~/router-eval.jsonl
+```
+
+With the `d3` profile running, add D3-mini:
+
+```sh
+./scripts/compare-coding-router-classifiers.py --prompts ~/router-eval.jsonl \
+  --d3 d3-mini=vllm-sr/d3-mini@http://d3-mini:8000 --report ~/router-eval-d3-mini.json
+```
+
+The classifier container joins `d3-local` with no capabilities, a read-only
+root filesystem, and an unprivileged user. It reads `D3_DECISION_API_KEY`
+from `.env` and gets it through its environment, never on the command line.
+Output and the optional `--report` file hold prompt ids and tiers only.
+
+### Try d3-nano on the same card
+
+A 16 GB card holds one model at a time, and prod falls back to the heuristic
+while D3-mini is stopped, so run the trial off-peak or on a test host.
+Take the current commit of [vllm-sr/d3-nano](https://huggingface.co/vllm-sr/d3-nano/commits/main)
+as `<commit>`. vLLM 0.33.0 already includes the loading fix d3-nano needs.
+
+```sh
+COMPOSE="docker compose --env-file .env --env-file .env.optional --profile d3"
+# 1. Fetch d3-nano into the same model volume.
+$COMPOSE run --rm --no-deps -e D3_MODEL=vllm-sr/d3-nano -e D3_MODEL_REVISION=<commit> d3-mini-download
+# 2. Free the card, then serve d3-nano on d3-local as the container d3-nano.
+$COMPOSE stop d3-mini
+$COMPOSE run --rm --no-deps -d --name d3-nano d3-mini vllm-sr/d3-nano --revision <commit> \
+  --host 0.0.0.0 --port 8000 --max-model-len 8192 --gpu-memory-utilization 0.90 --enforce-eager
+docker logs --follow d3-nano   # wait for "Application startup complete", then Ctrl-C
+# 3. Compare, then put D3-mini back.
+./scripts/compare-coding-router-classifiers.py --prompts ~/router-eval.jsonl \
+  --d3 d3-nano=vllm-sr/d3-nano@http://d3-nano:8000 --report ~/router-eval-d3-nano.json
+docker stop d3-nano
+$COMPOSE up -d d3-mini
+```
+
+d3-nano's weights are 4.5 GB, so the trial uses an 8,192-token cap; change
+`--max-model-len` to test another one. The `d3-mini` service keeps serving
+`vllm-sr/d3-mini` until its pinned model is changed in `compose.optional.yml`.
+
+### Read the results
+
+| Column | Meaning |
+| --- | --- |
+| Exact | Chose the labelled tier |
+| Accept | Chose the labelled tier or one of `acceptable_tiers` |
+| Under | Chose a lower tier: a weaker model answers, a quality risk |
+| Over | Chose a higher tier: a more expensive model answers |
+| Errors | The classifier raised an error instead of choosing |
+
+For each D3 model the script also reports how many prompts D3 answered
+itself, how many fell back to the heuristic and why, and the median and 95th
+percentile latency. A prompt over the input cap shows as `classifier_error`;
+a slow answer as `timeout`. Run again with a larger `--timeout-ms` to see D3's
+own choices without timeouts. The confusion tables show which tiers each
+classifier mixes up.
+
+The comparison measures tier choice against your labels, not the quality or
+cost of the final answers. It calls D3 with LiteLLM's own HTTP client and
+request, not through the gateway's model list, so it does not test the
+gateway's connection to D3.
+
+## Observe
+
+Every D3-mini signal ends up in OpenSearch, and the **Coding Router and
+D3-mini** dashboard shows them together. None of them contains prompt text.
+
+| Signal | Path | Where to look |
+| --- | --- | --- |
+| Routing decisions | Each gateway request span carries LiteLLM's `litellm.routing.*` attributes (tier, deciding mechanism, classifier model, confidence, failure reason, routed model). Spans go to Data Prepper over OTLP. | Dashboard; Discover on `otel-v1-apm-span-*`, for example `span.attributes.litellm@routing@cause:"jev_classifier"` |
+| D3-mini metrics | Prometheus scrapes vLLM's `/metrics` as job `d3-mini` on `d3-local`; `opensearch-bridge` mirrors the `vllm:*` series and adds the `d3_*` expressions (request rate by HTTP status, latency, queue and prefill time, requests running and waiting). | Dashboard; Metric Explorer; `litellm-metrics-*` |
+| D3-mini spans | vLLM sends one `llm_request` span per decision, as service `d3-mini`, with queue, prefill, and total time and the input token count, to `data-prepper:21890`. | Dashboard; Observability → Trace Analytics |
+| D3-mini logs | Alloy collects the container log, including the access line for each `POST /v1/systemone`. | Container Logs dashboard; Discover `log.attributes.compose_service:"d3-mini"` |
+
+The **On-host D3-mini is unavailable** alert fires when Prometheus cannot
+scrape `d3-mini` for 20 minutes. Without the `d3` profile the job has no
+target and the alert stays quiet.
+
+- **Fallbacks.** "D3-mini failed, heuristic used" counts requests whose
+  routing span has a `classifier_failure_reason`: `timeout`, or
+  `classifier_error`, for example a 400 for a prompt over
+  `D3_MAX_INPUT_TOKENS`. The 4xx share of `d3_requests_per_second` shows the
+  over-cap rejections on the D3-mini side.
+- **Spans are not linked.** LiteLLM sends no trace context with its D3-mini
+  call, so a D3-mini span is a separate trace. Match it to the gateway request
+  by time.
+- **GPU memory** is not collected: there is no NVIDIA DCGM exporter. Use
+  `nvidia-smi` on the host.
 
 ## Operate
 

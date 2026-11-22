@@ -214,3 +214,31 @@ groups:
         labels:
           severity: warning
           source: litellm-stack
+
+      - uid: d3-mini-unavailable
+        title: On-host D3-mini is unavailable
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prom
+            relativeTimeRange: { from: 600, to: 0 }
+            model:
+              datasource: { type: prometheus, uid: prom }
+              editorMode: code
+              expr: up{job="d3-mini"} == bool 0
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+        # The optional d3 profile has no target while d3-mini is stopped.
+        noDataState: OK
+        execErrState: Alerting
+        # A first start downloads and loads the model before /metrics answers.
+        for: 20m
+        annotations:
+          summary: "On-host D3-mini has not answered for 20 minutes"
+          description: "Prometheus cannot scrape d3-mini, so coding-router classifies every request with LiteLLM's local heuristic. Check the d3-mini logs for CUDA, out-of-memory, or start-up errors and the d3-mini-download result."
+        labels:
+          severity: warning
+          source: litellm-stack

@@ -617,6 +617,7 @@ DASHBOARD_LINKS = (
     ("litellm-dash-logs", "Container Logs", "Every Compose service's stdout and stderr, with severity"),
     ("litellm-dash-access", "Traefik Access Logs", "Every HTTPS request: route, status, latency, path"),
     ("litellm-dash-traces", "LiteLLM Request Traces", "Request, model, guardrail, and database spans"),
+    ("litellm-dash-routing", "Coding Router and D3-mini", "Tier decisions, D3-mini answers and fallbacks, D3-mini health"),
     ("litellm-dash-host", "Infrastructure: Host & Containers", "CPU, memory, disk, network, and per-service containers"),
     ("litellm-dash-postgres", "Infrastructure: PostgreSQL", "LiteLLM PostgreSQL and pgvector health"),
     ("litellm-dash-edge", "Infrastructure: Traefik, Probes & Targets", "Ingress traffic, TLS expiry, probes, scrape targets"),
@@ -1477,6 +1478,134 @@ def _traces(b: Builder) -> None:
     )
 
 
+def _routing(b: Builder) -> None:
+    route = ATTR + "litellm@routing@"
+    decisions = f"{route}tier:*"
+    d3_answered = f'{route}cause:"jev_classifier"'
+    fallbacks = f"{route}classifier_failure_reason:*"
+    d3_spans = 'serviceName:"d3-mini" and name:"llm_request"'
+    b.dashboard(
+        "litellm-dash-routing",
+        "Coding Router and D3-mini",
+        "coding-router tier decisions from LiteLLM's request spans, and the on-host D3-mini's health from "
+        "its vLLM metrics and spans (d3 profile). Decisions carry no prompt text.",
+        [
+            b.controls(
+                "litellm-vis-routing-controls",
+                "Filters",
+                [
+                    (TRACES, "serviceName", "Gateway"),
+                    (TRACES, route + "tier", "Tier"),
+                    (TRACES, route + "cause", "Decided by"),
+                ],
+            ),
+            b.stat("litellm-vis-routing-decisions", "Routed requests", TRACES, [("count", None, "Requests")], query=decisions, width=12),
+            b.stat(
+                "litellm-vis-routing-d3",
+                "Decided by D3-mini",
+                TRACES,
+                [("count", None, "Requests")],
+                query=f"{decisions} and {d3_answered}",
+                width=12,
+            ),
+            b.stat(
+                "litellm-vis-routing-fallbacks",
+                "D3-mini failed, heuristic used",
+                TRACES,
+                [("count", None, "Requests")],
+                query=f"{decisions} and {fallbacks}",
+                width=12,
+            ),
+            b.latest("litellm-vis-routing-d3-up", "D3-mini up (1 = yes)", "d3_up", width=12),
+            b.xy(
+                "litellm-vis-routing-tiers",
+                "Decisions by tier",
+                TRACES,
+                [("count", None, "Requests")],
+                query=decisions,
+                split=route + "tier",
+                chart="histogram",
+                stacked=True,
+                time_field="startTime",
+            ),
+            b.xy(
+                "litellm-vis-routing-causes",
+                "Decisions by mechanism",
+                TRACES,
+                [("count", None, "Requests")],
+                query=decisions,
+                split=route + "cause",
+                chart="histogram",
+                stacked=True,
+                time_field="startTime",
+            ),
+            b.hbar(
+                "litellm-vis-routing-failures",
+                "D3-mini failure reasons",
+                TRACES,
+                ("count", None, "Requests"),
+                route + "classifier_failure_reason",
+                query=fallbacks,
+            ),
+            b.hbar(
+                "litellm-vis-routing-models",
+                "Models chosen by coding-router",
+                TRACES,
+                ("count", None, "Requests"),
+                route + "routed_model",
+                query=decisions,
+            ),
+            b.metric_series(
+                "litellm-vis-routing-d3-rps",
+                "D3-mini requests / s by HTTP status",
+                "d3_requests_per_second",
+                y_label="req/s",
+                chart="histogram",
+                stacked=True,
+            ),
+            b.metric_series(
+                "litellm-vis-routing-d3-latency",
+                "D3-mini latency p95 (HTTP, queue, prefill)",
+                "d3_latency_p95_seconds d3_queue_time_p95_seconds d3_prefill_time_p95_seconds",
+                y_label="seconds",
+            ),
+            b.metric_series(
+                "litellm-vis-routing-d3-load",
+                "D3-mini requests running and waiting",
+                "d3_requests_running d3_requests_waiting",
+                y_label="requests",
+            ),
+            b.xy(
+                "litellm-vis-routing-d3-spans",
+                "D3-mini decision time p95 from spans (ms)",
+                TRACES,
+                [("percentiles", "durationInMillis", "p95 ms")],
+                query=d3_spans,
+                time_field="startTime",
+            ),
+            b.search(
+                "litellm-search-routing-recent",
+                "Recent routing decisions",
+                TRACES,
+                [
+                    "serviceName",
+                    route + "tier",
+                    route + "cause",
+                    route + "classifier_model",
+                    route + "classifier_confidence",
+                    route + "classifier_failure_reason",
+                    route + "routed_model",
+                    "traceId",
+                ],
+                query=decisions,
+                sort=[["startTime", "desc"]],
+            ),
+        ],
+        time_from="now-24h",
+        refresh_ms=60000,
+    )
+
+
 def _infrastructure(b: Builder) -> None:
     b.dashboard(
         "litellm-dash-host",
@@ -1716,6 +1845,7 @@ def build_all() -> list[dict[str, Any]]:
         _logs,
         _access_logs,
         _traces,
+        _routing,
         _infrastructure,
         _security,
         _explorer,

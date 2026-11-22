@@ -425,6 +425,34 @@ SECURITY_AUDIT_FIELDS = {
 }
 
 
+# The coding-router decision LiteLLM records on its request spans. Data
+# Prepper maps every span attribute as a keyword, numbers included.
+ROUTING_SPAN_ATTRIBUTES = tuple(
+    f"litellm@routing@{name}"
+    for name in (
+        "router_model_name",
+        "routed_model",
+        "tier",
+        "cause",
+        "classifier_model",
+        "classifier_failure_reason",
+        "classifier_error_type",
+        "classifier_confidence",
+        "request_type",
+        "escalated",
+        "context_escalated",
+    )
+)
+# Timing and size of each D3-mini decision, from vLLM's llm_request spans.
+# They carry no prompt text.
+D3_SPAN_ATTRIBUTES = (
+    "gen_ai@response@model",
+    "gen_ai@usage@prompt_tokens",
+    "gen_ai@latency@e2e",
+    "gen_ai@latency@time_in_queue",
+    "gen_ai@latency@time_in_model_prefill",
+)
+
 # Core fields of Data Prepper's trace-analytics-raw template plus the LiteLLM
 # span attributes used by the dashboards (span attributes are keywords).
 OTEL_SPAN_FIELDS = {
@@ -467,6 +495,10 @@ OTEL_SPAN_FIELDS = {
                     "litellm@service@name",
                     "db@collection@name",
                     "error@type",
+                    # coding-router decisions (LiteLLM's litellm.routing.* attributes).
+                    *ROUTING_SPAN_ATTRIBUTES,
+                    # D3-mini's vLLM llm_request spans (d3 profile).
+                    *D3_SPAN_ATTRIBUTES,
                 )
             }
         }

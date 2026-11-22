@@ -57,6 +57,18 @@ scrape_configs:
       - target_label: __address__
         replacement: blackbox:9115
 
+  # Optional d3 profile: vLLM's /metrics (no key needed; only the gateways and
+  # Prometheus share d3-local). The target exists only while d3-mini resolves.
+  - job_name: d3-mini
+    dns_sd_configs:
+      - names: ["d3-mini"]
+        type: A
+        port: 8000
+        refresh_interval: 30s
+    relabel_configs:
+      - target_label: instance
+        replacement: d3-mini:8000
+
   - job_name: blackbox-http
     metrics_path: /probe
     params: { module: [http_2xx] }

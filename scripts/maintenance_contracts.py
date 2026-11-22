@@ -559,7 +559,8 @@ def d3_compose_failures(services: Mapping[str, Any]) -> list[str]:
                 failures.append("d3-mini and d3-mini-download must use the same image")
 
     allowed = {
-        "d3-local": {"d3-mini", *D3_GATEWAYS},
+        # Telemetry collectors read d3-mini's /metrics and receive its spans.
+        "d3-local": {"d3-mini", *D3_GATEWAYS, "prometheus", "data-prepper"},
         "d3-download": {"d3-mini-download"},
     }
     for network, members in allowed.items():

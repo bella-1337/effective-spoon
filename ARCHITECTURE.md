@@ -245,7 +245,11 @@ exporters merely because a panel is currently empty.
 LiteLLM's OpenTelemetry v2 integration exports request, guardrail, model-call,
 and database spans over OTLP/gRPC to Data Prepper (`data-prepper:21890`), which
 writes OpenSearch Trace Analytics indices (`otel-v1-apm-span-*` and
-`otel-v1-apm-service-map`). When the `langfuse` profile is enabled, Langfuse
+`otel-v1-apm-service-map`). Request spans carry the `coding-router` decision
+as `litellm.routing.*` attributes. With the `d3` profile, D3-mini's vLLM also
+sends one span per decision as service `d3-mini`, and Prometheus scrapes its
+`/metrics` (job `d3-mini`); both collectors reach it on the internal
+`d3-local` network. When the `langfuse` profile is enabled, Langfuse
 receives an additional copy through the `langfuse_otel` callback; otherwise the
 runtime config removes that callback and its attribution hook. Message content
 capture stays disabled, and only `litellm_operator` can read the OpenSearch span

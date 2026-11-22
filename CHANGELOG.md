@@ -33,6 +33,22 @@ All notable changes to this stack are recorded here. The format follows
     runtime allocates on demand, so an oversized cap would fail on a request.
     The service is declared in Compose instead of started by a launcher that
     holds the Docker socket. The profile has not run on the target card yet.
+- `coding-router` and D3-mini telemetry in OpenSearch:
+  - LiteLLM's `litellm.routing.*` span attributes (tier, deciding mechanism,
+    classifier model, confidence, failure reason, routed model) are now
+    filterable fields.
+  - With the `d3` profile, Prometheus scrapes D3-mini's vLLM metrics (job
+    `d3-mini`). `opensearch-bridge` mirrors them and adds `d3_*` expressions,
+    and vLLM sends one OTLP span per decision to Data Prepper. Prometheus and
+    Data Prepper join the internal `d3-local` network for this.
+  - New **Coding Router and D3-mini** dashboard and **On-host D3-mini is
+    unavailable** alert.
+- `scripts/compare-coding-router-classifiers.py` compares LiteLLM's heuristic,
+  `heuristic_v2`, and any D3 model (such as D3-mini or d3-nano) on your own
+  labelled prompts, using LiteLLM's own router code in the pinned prod image.
+  It reports accuracy, routing too low or too high, D3 fallbacks, and latency,
+  and never prints or stores prompt text. See
+  [On-host D3-mini](docs/d3-mini-on-host.md#compare-classifiers-on-your-prompts).
 
 ### Changed
 

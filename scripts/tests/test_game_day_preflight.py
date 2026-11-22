@@ -225,10 +225,12 @@ class GameDayPreflightTests(unittest.TestCase):
                 failures = self.module.validate_compose_contracts(config)
                 self.assertTrue(any(expected in failure for failure in failures), failures)
 
-    def test_d3_gateways_may_join_d3_local(self) -> None:
+    def test_d3_gateways_and_telemetry_collectors_may_join_d3_local(self) -> None:
         config = self.valid_config()
         config["services"]["litellm-prod"]["networks"] = {"internal": {}, "d3-local": {}}
         config["services"]["litellm-dev"] = {"networks": {"d3-local": {}}}
+        config["services"]["prometheus"] = {"networks": {"internal": {}, "d3-local": {}}}
+        config["services"]["data-prepper"] = {"networks": {"internal": {}, "d3-local": {}}}
 
         failures = self.module.validate_compose_contracts(config)
 
