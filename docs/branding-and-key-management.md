@@ -15,6 +15,13 @@ the gateways:
 docker compose --profile prod up -d --force-recreate litellm-prod
 ```
 
+LiteLLM serves the favicon at `/get_favicon`, but its Admin UI also links its
+bundled `/favicon.ico`, and browsers request that path on their own. Traefik
+therefore sends `/favicon.ico` on both gateway hosts to `/get_favicon` (the
+`litellm-favicon` middleware in `traefik/dynamic.yml`), so every browser shows
+the configured favicon. Browsers cache favicons aggressively: after changing
+it, hard-reload the Admin UI or open it in a private window.
+
 API-docs and email branding (`DOCS_*`, `EMAIL_*`) also use LiteLLM's own
 variables but take effect only with a LiteLLM Enterprise licence. LiteLLM offers
 no setting for the page title, login heading, colours, or fonts, so this stack

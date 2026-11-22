@@ -24,6 +24,13 @@ All notable changes to this stack are recorded here. The format follows
   which Mermaid reads as the end of a statement, and the renderer now rejects
   `;` in sequence diagrams.
 
+### Fixed
+
+- The Admin UI tab now shows the `LITELLM_FAVICON_URL` favicon instead of
+  LiteLLM's own. LiteLLM's UI links its bundled `/favicon.ico` ahead of
+  `/get_favicon`, so Traefik now sends `/favicon.ico` on both gateway hosts to
+  `/get_favicon`.
+
 ## [v0.4.0] - 2026-11-22
 
 ### Added

@@ -18,6 +18,10 @@ an `https://` URL. LiteLLM serves local files only when they are PNG, JPEG, GIF,
 WEBP, or ICO images, and falls back to its own image otherwise. Host SVG
 artwork at an `https://` URL if you need vector images.
 
+LiteLLM serves `LITELLM_FAVICON_URL` at `/get_favicon`, while its Admin UI also
+links the bundled `/favicon.ico`. Traefik sends `/favicon.ico` to
+`/get_favicon` on both gateway hosts, so browsers show the configured favicon.
+
 LiteLLM has no setting for the page title, login heading, colours, or fonts, so
 those keep the LiteLLM defaults.
 

@@ -48,3 +48,12 @@ http:
       inFlightReq:
         amount: 1024
 
+    # LiteLLM's Admin UI links its bundled /favicon.ico (with sizes="48x48")
+    # before /get_favicon, and browsers also request /favicon.ico on their own,
+    # so they show the LiteLLM icon instead of LITELLM_FAVICON_URL. The
+    # litellm-*-favicon routers send /favicon.ico to /get_favicon, which serves
+    # the configured favicon.
+    litellm-favicon:
+      replacePath:
+        path: /get_favicon
+
