@@ -7,7 +7,7 @@ flowchart TD
   %% @mode architecture
   %% @subtitle A coding prompt is classified by D3-mini and completed by the model assigned to its tier
   %% @card cyan | Request path | The client calls model coding-router through Traefik | LiteLLM authenticates, applies budgets and guardrails, then hands off to the Auto Router | The response returns in the normal OpenAI format
-  %% @card violet | Decision | Only the classification request goes to D3-mini | Each tier maps to its CODING_ROUTER_<TIER>_MODEL from .env | A timeout after 15 seconds falls back to CODING_ROUTER_DEFAULT_MODEL
+  %% @card violet | Decision | Only the classification request goes to D3-mini | Each tier maps to its CODING_ROUTER_<TIER>_MODEL from .env | A slow or failed classification is scored locally by LiteLLM
   %% @card rose | Telemetry | Classifier and completion calls are both traced | Spans and metrics carry no prompt content | Validate tier accuracy on representative prompts before relying on savings
   %% @journey #22d3ee: CLI TR LL AR D3
   %% @journey #34d399: AR EUP

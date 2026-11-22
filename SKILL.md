@@ -34,6 +34,12 @@ configuration, observability, TLS, runtime profiles, or dependency images.
    location only to `REGION_POLICIES`, after confirming that location in the
    provider's residency documentation, and keep
    [data-sovereignty.md](docs/data-sovereignty.md) in step.
+9. For every feature request, first check how
+   [BerriAI Inference Stack](https://github.com/BerriAI/inference-stack) does
+   the same thing. Then present that approach, or say that it has none, with
+   any better fit for this stack and a recommendation, and ask the user which
+   approach to implement. Do not implement before the user chooses. Follow
+   [Reference stack](docs/reference-inference-stack.md#feature-requests).
 
 ## Change Workflow
 

@@ -252,7 +252,9 @@ def static_checks(report: Reporter) -> None:
             '"model_name": "coding-router"',
             '"model": "auto_router/complexity_router"',
             '"deployment_name": "d3-mini"',
-            '"classifier_fallback": "default_model"',
+            '"classifier_fallback": "heuristic"',
+            '"enable_context_window_escalation": True',
+            '"modality_routing": True',
         )
     ) and all(
         stale not in compose_text + prometheus + dev_text + prod_text
@@ -448,6 +450,10 @@ def sovereign_validation_environment() -> list[str]:
         "-e", "CODING_ROUTER_DEFAULT_MODEL=claude-sonnet-5-5",
         "-e", "CODING_ROUTER_SIMPLE_MODEL=gpt-5.5",
         "-e", "CODING_ROUTER_MEDIUM_MODEL=gemini-3.5-flash",
+        "-e", "CODING_ROUTER_COMPLEX_MODEL=claude-sonnet-5-5,gpt-5.5",
+        "-e", "CODING_ROUTER_REASONING_KEYWORDS=architecture,design a system",
+        "-e", "CODING_ROUTER_ADAPTIVE=true",
+        "-e", "CODING_ROUTER_SESSION_AFFINITY=true",
     ]
 
 

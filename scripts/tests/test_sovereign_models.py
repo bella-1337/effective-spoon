@@ -137,6 +137,10 @@ class SovereignModelListTests(unittest.TestCase):
             with self.subTest(overrides=overrides), self.assertRaisesRegex(ValueError, message):
                 self.module.sovereign_model_list(full_environment(**overrides))
 
+    def router_config(self, **overrides: str) -> dict[str, Any]:
+        environment = full_environment(CODING_ROUTER_DEFAULT_MODEL="claude-sonnet-5-5", **overrides)
+        return self.models(environment)["coding-router"]["complexity_router_config"]
+
     def test_coding_router_uses_configured_tier_models(self) -> None:
         models = self.models(full_environment(
             CODING_ROUTER_DEFAULT_MODEL="claude-sonnet-5-5", CODING_ROUTER_REASONING_MODEL="opus",
@@ -147,14 +151,71 @@ class SovereignModelListTests(unittest.TestCase):
             "SIMPLE": "claude-sonnet-5-5", "MEDIUM": "claude-sonnet-5-5",
             "COMPLEX": "claude-sonnet-5-5", "REASONING": "opus",
         })
-        self.assertEqual(router["complexity_router_config"]["opensource_classifier_config"]["deployment_name"], "d3-mini")
+
+    def test_coding_router_defaults(self) -> None:
+        config = self.router_config()
+        self.assertEqual(config["classifier_type"], "oss_classifier")
+        self.assertEqual(config["opensource_classifier_config"], {"deployment_name": "d3-mini", "timeout_ms": 3000})
+        self.assertEqual(config["classifier_fallback"], "heuristic")
+        self.assertFalse(config["adaptive"] or config["session_affinity"] or config["stall_escalation_enabled"])
+        self.assertTrue(config["enable_context_window_escalation"] and config["modality_routing"])
+        self.assertNotIn("keyword_tier_rules", config)
+
+    def test_coding_router_tier_pools(self) -> None:
+        config = self.router_config(
+            CODING_ROUTER_COMPLEX_MODEL="claude-sonnet-5-5, gpt-5.5, gemini-3.5-flash, gpt-5.5",
+            CODING_ROUTER_SIMPLE_MODEL="opus",
+            CODING_ROUTER_ADAPTIVE="true",
+        )
+        self.assertEqual(config["tiers"]["COMPLEX"], ["claude-sonnet-5-5", "gpt-5.5", "gemini-3.5-flash"])
+        self.assertEqual(config["tiers"]["SIMPLE"], "opus")
+        self.assertTrue(config["adaptive"])
+        with self.assertRaisesRegex(ValueError, "CODING_ROUTER_COMPLEX_MODEL: 'gpt-4o' is not a configured"):
+            self.router_config(CODING_ROUTER_COMPLEX_MODEL="gpt-5.5,gpt-4o")
+
+    def test_coding_router_heuristic_classifier_makes_no_model_call(self) -> None:
+        config = self.router_config(CODING_ROUTER_CLASSIFIER="heuristic")
+        self.assertEqual(config["classifier_type"], "heuristic")
+        self.assertNotIn("opensource_classifier_config", config)
+        self.assertEqual(self.router_config(CODING_ROUTER_CLASSIFIER_TIMEOUT_MS="1500")
+                         ["opensource_classifier_config"]["timeout_ms"], 1500)
+
+    def test_coding_router_keyword_rules(self) -> None:
+        config = self.router_config(
+            CODING_ROUTER_REASONING_KEYWORDS="architecture, design a system", CODING_ROUTER_SIMPLE_KEYWORDS="typo",
+        )
+        self.assertEqual(config["keyword_tier_rules"], [
+            {"keywords": ["typo"], "tier": "SIMPLE"},
+            {"keywords": ["architecture", "design a system"], "tier": "REASONING"},
+        ])
+
+    def test_coding_router_session_affinity_and_stall_escalation(self) -> None:
+        self.assertTrue(self.router_config(CODING_ROUTER_SESSION_AFFINITY="true")["session_affinity"])
+        self.assertTrue(self.router_config(CODING_ROUTER_STALL_ESCALATION="yes")["stall_escalation_enabled"])
+        with self.assertRaisesRegex(ValueError, "cannot both be true"):
+            self.router_config(CODING_ROUTER_SESSION_AFFINITY="true", CODING_ROUTER_STALL_ESCALATION="true")
+
+    def test_coding_router_rejects_invalid_settings(self) -> None:
+        cases = (
+            ({"CODING_ROUTER_CLASSIFIER": "gpt-5.5"}, "d3-mini or heuristic"),
+            ({"CODING_ROUTER_CLASSIFIER_TIMEOUT_MS": "50"}, "from 100 to 30000"),
+            ({"CODING_ROUTER_CLASSIFIER_TIMEOUT_MS": "-1"}, "from 100 to 30000"),
+            ({"CODING_ROUTER_CLASSIFIER": "heuristic", "CODING_ROUTER_CLASSIFIER_TIMEOUT_MS": "2000"}, "applies only"),
+            ({"CODING_ROUTER_ADAPTIVE": "maybe"}, "true or false"),
+            ({"CODING_ROUTER_REASONING_KEYWORDS": "x" * 101}, "invalid keyword"),
+            ({"CODING_ROUTER_SIMPLE_KEYWORDS": ",".join(f"k{i}" for i in range(51))}, "at most 50"),
+        )
+        for overrides, message in cases:
+            with self.subTest(overrides=overrides), self.assertRaisesRegex(ValueError, message):
+                self.router_config(**overrides)
 
     def test_coding_router_rejects_unknown_or_orphan_tiers(self) -> None:
         with self.assertRaisesRegex(ValueError, "not a configured provider model"):
             self.module.sovereign_model_list(full_environment(CODING_ROUTER_DEFAULT_MODEL="gpt-4o"))
-        with self.assertRaisesRegex(ValueError, "need CODING_ROUTER_DEFAULT_MODEL"):
-            self.module.sovereign_model_list(full_environment(CODING_ROUTER_SIMPLE_MODEL="gpt-5.5"))
-        self.assertNotIn("coding-router", self.models(full_environment()))
+        for name in ("CODING_ROUTER_SIMPLE_MODEL", "CODING_ROUTER_REASONING_KEYWORDS", "CODING_ROUTER_ADAPTIVE"):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "need CODING_ROUTER_DEFAULT_MODEL"):
+                self.module.sovereign_model_list(full_environment(**{name: "true"}))
+        self.assertNotIn("coding-router", self.models(full_environment(CODING_ROUTER_ADAPTIVE="false")))
 
 
 class LauncherWiringTests(unittest.TestCase):

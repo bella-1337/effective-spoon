@@ -82,8 +82,14 @@ locations, model-name aliases, and provider-side controls are in
 | `VERTEX_PROJECT` | With models; sensitive | Google Cloud project ID | Project billed for Vertex AI. Restrict its resource locations to the region with an organization policy. |
 | `VERTEX_CREDENTIALS_FILE` | With models; secret | File name inside `PROVIDER_SECRETS_DIR` | Service-account key with only `roles/aiplatform.user`, readable by UID 65532 (`chown 65532:65532`, `chmod 0400`). The gateway fails to start if the file is missing. Rotate by replacing the file and recreating both gateways, then deleting the old key. |
 | `PROVIDER_SECRETS_DIR` | Optional: `./litellm/provider-secrets` | Host directory path | Mounted read-only at `/app/secrets` in both gateways; ignored by Git. |
-| `CODING_ROUTER_DEFAULT_MODEL` | Optional: empty (no `coding-router`) | Configured provider model name | Enables `coding-router`, its fallback when D3-mini classification fails. |
-| `CODING_ROUTER_SIMPLE_MODEL`, `CODING_ROUTER_MEDIUM_MODEL`, `CODING_ROUTER_COMPLEX_MODEL`, `CODING_ROUTER_REASONING_MODEL` | Optional: the default model | Configured provider model name | Model for each D3-mini tier. |
+| `CODING_ROUTER_DEFAULT_MODEL` | Optional: empty (no `coding-router`) | Configured provider model name | Enables `coding-router` and fills every tier left empty. The other `CODING_ROUTER_*` variables need it. |
+| `CODING_ROUTER_SIMPLE_MODEL`, `CODING_ROUTER_MEDIUM_MODEL`, `CODING_ROUTER_COMPLEX_MODEL`, `CODING_ROUTER_REASONING_MODEL` | Optional: the default model | Comma-separated configured provider model names | Model, or pool of models, for each tier. |
+| `CODING_ROUTER_CLASSIFIER` | Optional: `d3-mini` | `d3-mini` or `heuristic` | `heuristic` classifies locally with no model call. |
+| `CODING_ROUTER_CLASSIFIER_TIMEOUT_MS` | Optional: `3000` | 100 to 30000 | D3-mini timeout; after it, the request is classified locally. Not allowed with `heuristic`. |
+| `CODING_ROUTER_SIMPLE_KEYWORDS`, `CODING_ROUTER_MEDIUM_KEYWORDS`, `CODING_ROUTER_COMPLEX_KEYWORDS`, `CODING_ROUTER_REASONING_KEYWORDS` | Optional: empty | Up to 50 comma-separated words or phrases | A prompt containing one goes straight to that tier, before classification. If several tiers match, the highest wins. |
+| `CODING_ROUTER_ADAPTIVE` | Optional: `false` | `true` or `false` | Learns which model in a tier works best and stores what it learns in the gateway's PostgreSQL database. |
+| `CODING_ROUTER_SESSION_AFFINITY` | Optional: `false` | `true` or `false` | Keeps a conversation that sends a `session_id` on one model and deployment, so provider prompt caches are reused. |
+| `CODING_ROUTER_STALL_ESCALATION` | Optional: `false` | `true` or `false` | Moves an agent task up one tier when its recent tool calls repeat or fail. Cannot be combined with `CODING_ROUTER_SESSION_AFFINITY`. |
 | `VERIFY_CHAT_MODEL` | Optional: the first provider model | Configured model name | Model that `verify-litellm-upgrade.py` and `verify-semantic-cache.py` send test prompts to. Read by those scripts only, not by the gateways. |
 
 ## Corporate branding

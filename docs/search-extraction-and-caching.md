@@ -156,12 +156,13 @@ because the embedding model is intentionally development-only.
 
 Both LiteLLM profiles register a remote `vllm-sr/d3-mini` deployment as a native
 Decisions model. The `coding-router` Auto Router sends only the classification
-request to D3, then sends the request to the model configured for its tier in
+request to D3, then sends the request to a model configured for its tier in
 `CODING_ROUTER_SIMPLE_MODEL`, `CODING_ROUTER_MEDIUM_MODEL`,
 `CODING_ROUTER_COMPLEX_MODEL`, or `CODING_ROUTER_REASONING_MODEL`. If the
-classifier is unavailable or times out after 15 seconds, routing fails safe to
-`CODING_ROUTER_DEFAULT_MODEL`. The router exists only when that default names a
-configured provider model; see
+classifier is unavailable or takes longer than
+`CODING_ROUTER_CLASSIFIER_TIMEOUT_MS` (default 3 seconds), LiteLLM scores the
+request locally instead. The router exists only when
+`CODING_ROUTER_DEFAULT_MODEL` names a configured provider model; see
 [Data sovereignty and regional models](data-sovereignty.md#coding-router). BGE-M3 is a separate remote pooling
 service; embeddings never pass through D3.
 

@@ -30,6 +30,17 @@ VERTEX_MODEL_ID = re.compile(r"[a-z0-9][a-z0-9.@_-]{0,127}")
 CREDENTIALS_FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 # Bedrock profile prefixes that route across geographies (or worldwide).
 BEDROCK_ROUTING_PREFIXES = ("global.", "us.", "eu.", "apac.", "jp.", "au.", "ca.", "us-gov.")
+DEFAULT_CLASSIFIER_TIMEOUT_MS = 3000
+MAX_TIER_KEYWORDS = 50
+ROUTER_KEYWORD = re.compile(r"[^\x00-\x1f\x7f,]{1,100}")
+FLAG_VALUES = {"": False, "false": False, "0": False, "no": False, "true": True, "1": True, "yes": True}
+# Every coding-router setting other than CODING_ROUTER_DEFAULT_MODEL.
+CODING_ROUTER_SETTINGS = (
+    *(f"CODING_ROUTER_{tier}_MODEL" for tier in TIERS),
+    *(f"CODING_ROUTER_{tier}_KEYWORDS" for tier in TIERS),
+    "CODING_ROUTER_CLASSIFIER", "CODING_ROUTER_CLASSIFIER_TIMEOUT_MS", "CODING_ROUTER_ADAPTIVE",
+    "CODING_ROUTER_SESSION_AFFINITY", "CODING_ROUTER_STALL_ESCALATION",
+)
 
 
 @dataclass(frozen=True)
@@ -199,30 +210,108 @@ def vertex_models(
     ]
 
 
+def env_flag(environ: Mapping[str, str], name: str) -> bool:
+    value = environ.get(name, "").strip().lower()
+    if value in FLAG_VALUES:
+        return FLAG_VALUES[value]
+    raise ValueError(f"{name} must be true or false")
+
+
+def env_int(environ: Mapping[str, str], name: str, default: int, minimum: int, maximum: int) -> int:
+    value = environ.get(name, "").strip()
+    if not value:
+        return default
+    if not value.isdigit() or not minimum <= int(value) <= maximum:
+        raise ValueError(f"{name} must be a whole number from {minimum} to {maximum}")
+    return int(value)
+
+
+def tier_keywords(environ: Mapping[str, str], name: str) -> list[str]:
+    keywords = [item.strip() for item in environ.get(name, "").split(",") if item.strip()]
+    if len(keywords) > MAX_TIER_KEYWORDS:
+        raise ValueError(f"{name}: at most {MAX_TIER_KEYWORDS} keywords")
+    for keyword in keywords:
+        if not ROUTER_KEYWORD.fullmatch(keyword):
+            raise ValueError(f"{name}: invalid keyword {keyword!r}")
+    return keywords
+
+
+def router_classifier(environ: Mapping[str, str]) -> dict[str, Any]:
+    """Classifier settings: D3-mini with a short timeout, or the call-free heuristic."""
+    classifier = environ.get("CODING_ROUTER_CLASSIFIER", "").strip().lower() or "d3-mini"
+    timeout_ms = env_int(environ, "CODING_ROUTER_CLASSIFIER_TIMEOUT_MS", DEFAULT_CLASSIFIER_TIMEOUT_MS, 100, 30000)
+    if classifier == "heuristic":
+        if environ.get("CODING_ROUTER_CLASSIFIER_TIMEOUT_MS", "").strip():
+            raise ValueError("CODING_ROUTER_CLASSIFIER_TIMEOUT_MS applies only to CODING_ROUTER_CLASSIFIER=d3-mini")
+        return {"classifier_type": "heuristic"}
+    if classifier != "d3-mini":
+        raise ValueError("CODING_ROUTER_CLASSIFIER must be d3-mini or heuristic")
+    return {
+        "classifier_type": "oss_classifier",
+        "opensource_classifier_config": {"deployment_name": "d3-mini", "timeout_ms": timeout_ms},
+        # A timed-out or failed classification is scored locally instead of
+        # sending every such request to the default model.
+        "classifier_fallback": "heuristic",
+    }
+
+
 def coding_router(environ: Mapping[str, str], available: set[str]) -> list[dict[str, Any]]:
-    """Return the coding-router entry when CODING_ROUTER_DEFAULT_MODEL is set."""
+    """Return the coding-router entry when CODING_ROUTER_DEFAULT_MODEL is set.
+
+    Every model a tier names must be a generated provider model, so routing can
+    only choose between deployments that already passed the region check.
+    """
     default = environ.get("CODING_ROUTER_DEFAULT_MODEL", "").strip()
-    tier_variables = {tier: f"CODING_ROUTER_{tier}_MODEL" for tier in TIERS}
     if not default:
-        stray = [name for name in tier_variables.values() if environ.get(name, "").strip()]
+        stray = [
+            name for name in CODING_ROUTER_SETTINGS
+            if environ.get(name, "").strip().lower() not in ("", "false", "0", "no")
+        ]
         if stray:
             raise ValueError(f"{', '.join(stray)} need CODING_ROUTER_DEFAULT_MODEL")
         return []
-    tiers = {tier: environ.get(name, "").strip() or default for tier, name in tier_variables.items()}
-    for name, model in (("CODING_ROUTER_DEFAULT_MODEL", default), *((tier_variables[t], m) for t, m in tiers.items())):
-        if model not in available:
-            raise ValueError(f"{name}={model!r} is not a configured provider model")
+    if default not in available:
+        raise ValueError(f"CODING_ROUTER_DEFAULT_MODEL={default!r} is not a configured provider model")
+    tiers: dict[str, str | list[str]] = {}
+    for tier in TIERS:
+        name = f"CODING_ROUTER_{tier}_MODEL"
+        pool = list(dict.fromkeys(item.strip() for item in environ.get(name, "").split(",") if item.strip()))
+        for model in pool:
+            if model not in available:
+                raise ValueError(f"{name}: {model!r} is not a configured provider model")
+        tiers[tier] = pool[0] if len(pool) == 1 else pool or default
+    keyword_rules = [
+        {"keywords": keywords, "tier": tier}
+        for tier in TIERS
+        if (keywords := tier_keywords(environ, f"CODING_ROUTER_{tier}_KEYWORDS"))
+    ]
+    session_affinity = env_flag(environ, "CODING_ROUTER_SESSION_AFFINITY")
+    stall_escalation = env_flag(environ, "CODING_ROUTER_STALL_ESCALATION")
+    if session_affinity and stall_escalation:
+        raise ValueError(
+            "CODING_ROUTER_SESSION_AFFINITY and CODING_ROUTER_STALL_ESCALATION cannot both be true; "
+            "a pinned session is never reclassified, so a stall could not be detected"
+        )
+    config: dict[str, Any] = {
+        **router_classifier(environ),
+        "tiers": tiers,
+        "adaptive": env_flag(environ, "CODING_ROUTER_ADAPTIVE"),
+        "session_affinity": session_affinity,
+        "stall_escalation_enabled": stall_escalation,
+        # Both only act on a request that would otherwise fail: a prompt larger
+        # than every model of its tier, or an image sent to a text-only model.
+        "enable_context_window_escalation": True,
+        "modality_routing": True,
+        "modality_pin_override": True,
+    }
+    if keyword_rules:
+        config["keyword_tier_rules"] = keyword_rules
     return [{
         "model_name": "coding-router",
         "litellm_params": {
             "model": "auto_router/complexity_router",
             "complexity_router_default_model": default,
-            "complexity_router_config": {
-                "classifier_type": "oss_classifier",
-                "opensource_classifier_config": {"deployment_name": "d3-mini", "timeout_ms": 15000},
-                "tiers": tiers,
-                "classifier_fallback": "default_model",
-            },
+            "complexity_router_config": config,
         },
     }]
 

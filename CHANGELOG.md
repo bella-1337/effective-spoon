@@ -8,6 +8,13 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- [Reference stack: BerriAI Inference Stack](docs/reference-inference-stack.md)
+  compares this stack with LiteLLM's reference deployment. Feature requests are
+  now checked against it, and the requester chooses the approach before it is
+  implemented (SKILL.md guardrail 9).
+
 ### Changed
 
 - **Breaking:** The project is now the Sovereign LLM Gateway, a region-locked
@@ -27,6 +34,19 @@ All notable changes to this stack are recorded here. The format follows
 - **Breaking:** `coding-router` exists only when `CODING_ROUTER_DEFAULT_MODEL`
   names a configured model. Its tiers come from the `CODING_ROUTER_*_MODEL`
   variables.
+- `coding-router` can route more efficiently, all set from `.env`:
+  - A tier can list several models.
+  - `CODING_ROUTER_ADAPTIVE` learns which model in a tier works best.
+  - `CODING_ROUTER_SESSION_AFFINITY` keeps a conversation on one model so
+    provider prompt caches are reused.
+  - `CODING_ROUTER_*_KEYWORDS` send matching prompts straight to a tier.
+  - `CODING_ROUTER_CLASSIFIER=heuristic` classifies with no model call.
+  - `CODING_ROUTER_STALL_ESCALATION` moves a stuck agent task up a tier.
+  - A prompt too long for its tier, or an image sent to a text-only tier, now
+    moves to a model that can take it.
+- **Breaking:** The D3-mini classifier timeout drops from 15 to 3 seconds
+  (`CODING_ROUTER_CLASSIFIER_TIMEOUT_MS`). A failed or slow classification is
+  now scored locally instead of going to `CODING_ROUTER_DEFAULT_MODEL`.
 - Provider key files live in `PROVIDER_SECRETS_DIR` (default
   `./litellm/provider-secrets`, ignored by Git), which is mounted read-only into both
   gateways.

@@ -2,6 +2,11 @@
 
 Follow [SKILL.md](SKILL.md) for every change to this stack.
 
+Before implementing a feature request, compare it with
+[BerriAI Inference Stack](https://github.com/BerriAI/inference-stack). Then ask
+the user which approach to implement, following
+[Reference stack](docs/reference-inference-stack.md#feature-requests).
+
 Keep the diagrams current. When a change adds, removes, renames, or reconnects
 a service, network, profile, data store, external dependency, or flow step,
 update the affected Mermaid sources in [diagrams/](diagrams/README.md) in the

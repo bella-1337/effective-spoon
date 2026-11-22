@@ -128,9 +128,10 @@ dedicated mkcert CA; the LiteLLM hosts trust that CA through
 - **About 23 GiB at worst** leaves more than 20 GB free. Neither engine reserves
   memory up front, so no per-process fractions are needed.
 - **D3-mini is on prod's request path.** `coding-router` calls it on every
-  request; if it fails or takes longer than 15 seconds, routing falls back to
-  `CODING_ROUTER_DEFAULT_MODEL`. Keep the host on the same site network and firewalled to both
-  LiteLLM hosts.
+  request unless `CODING_ROUTER_CLASSIFIER=heuristic`. If it fails or takes
+  longer than `CODING_ROUTER_CLASSIFIER_TIMEOUT_MS` (default 3 seconds), LiteLLM
+  scores the request locally. Keep the host on the same site network and
+  firewalled to both LiteLLM hosts.
 - **BGE-M3** has its own API key, which guards every compute route. Keep its
   port firewalled to the dev host. Promoting the semantic cache or RAG to prod
   adds prod load to this GPU.

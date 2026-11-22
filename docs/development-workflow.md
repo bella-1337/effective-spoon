@@ -2,6 +2,16 @@
 
 [← Back to the README](../README.md#documentation). Run all commands from the repository root.
 
+## Feature requests
+
+Before implementing a feature request, check how
+[BerriAI Inference Stack](https://github.com/BerriAI/inference-stack), the
+LiteLLM maintainers' reference deployment, does the same thing. Then give the
+requester the reference approach (or say that it has none), any approach that
+fits this stack better, and a recommendation, and ask which one to implement.
+Implement only after they choose. The steps and a comparison of the two stacks
+are in [Reference stack: BerriAI Inference Stack](reference-inference-stack.md).
+
 ## Development container
 
 Open the repository in VS Code and select **Dev Containers: Reopen in

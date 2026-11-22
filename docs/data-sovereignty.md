@@ -141,15 +141,55 @@ multi-regions offer the most models.
 ## coding-router
 
 `coding-router` exists only when `CODING_ROUTER_DEFAULT_MODEL` names a
-configured provider model. D3-mini classifies each request, and the router sends
-it to the model for its tier. Each tier defaults to the default model, which is
-also the fallback when classification fails.
+configured provider model. Each request is classified into a tier (SIMPLE,
+MEDIUM, COMPLEX, or REASONING) and sent to a model for that tier. A tier left
+empty uses the default model. Every model a tier names must be a configured
+provider model, so routing only ever chooses between models that passed the
+region check.
 
 ```sh
 CODING_ROUTER_DEFAULT_MODEL=claude-sonnet-5-5
 CODING_ROUTER_SIMPLE_MODEL=claude-haiku-5-5
+CODING_ROUTER_COMPLEX_MODEL=claude-sonnet-5-5,gpt-5.5,gemini-3.5-flash
 CODING_ROUTER_REASONING_MODEL=claude-opus-5-5
+CODING_ROUTER_REASONING_KEYWORDS=architecture,design a system
+CODING_ROUTER_ADAPTIVE=true
+CODING_ROUTER_SESSION_AFFINITY=true
 ```
+
+How each request is routed:
+
+1. **Keywords.** A prompt containing a word from `CODING_ROUTER_<TIER>_KEYWORDS`
+   goes straight to that tier, with no classification. If several tiers match,
+   the highest wins.
+2. **Classification.** D3-mini classifies the prompt. With
+   `CODING_ROUTER_CLASSIFIER=heuristic`, LiteLLM scores it locally instead, with
+   no model call. If D3-mini fails or takes longer than
+   `CODING_ROUTER_CLASSIFIER_TIMEOUT_MS` (default 3000), the request is scored
+   locally.
+3. **Choosing a model in the tier.** A tier that lists several models picks one
+   at random. With `CODING_ROUTER_ADAPTIVE=true`, it learns from results which
+   model works best, and stores what it learns in the gateway's PostgreSQL
+   database.
+4. **Keeping a conversation together.** Clients that send a `session_id` keep
+   each tier on the same model and deployment, which helps provider prompt
+   caches. `CODING_ROUTER_SESSION_AFFINITY=true` goes further: the whole
+   conversation stays on the model its first turn chose, with no
+   reclassification. Keywords then apply only to a conversation's first turn.
+   A user can still move a pinned conversation up one tier by including
+   `LITELLM ESCALATE` in a message.
+5. **Requests a model cannot take.** A prompt larger than every model in its
+   tier moves to the lowest tier with a model that fits. An image sent to a
+   text-only model moves to a higher tier with a model that accepts images.
+
+`CODING_ROUTER_STALL_ESCALATION=true` moves an agent task up one tier when its
+recent tool calls keep repeating or failing. It needs every turn classified, so
+it cannot be combined with `CODING_ROUTER_SESSION_AFFINITY`.
+
+The router itself is beta in LiteLLM, and its settings can change between
+releases. `check-litellm-upgrade-compatibility.py` starts the candidate image
+with tier pools, keywords, adaptive selection, and session affinity enabled, so
+an upgrade that drops one of them fails the check.
 
 ## Verify a deployment
 
@@ -169,6 +209,11 @@ CODING_ROUTER_REASONING_MODEL=claude-opus-5-5
    ```
 
 ## What this does not cover
+
+The region lock checks only the models wired from the environment at startup.
+Both configs set `store_model_in_db: true`, so an administrator can still add a
+model through the LiteLLM admin UI or the `/model/new` API, and that model is
+not checked. Restrict the master key and admin roles accordingly.
 
 The region lock controls where a provider processes requests. On its own, it
 does not establish legal data sovereignty. AWS, Microsoft, and Google are

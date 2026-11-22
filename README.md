@@ -111,7 +111,8 @@ see [Documentation site](docs/documentation-site.md).
 | [Data sovereignty and regional models](docs/data-sovereignty.md) | `DATA_SOVEREIGNTY_REGION`, allowed provider locations per region, wiring Bedrock, Azure OpenAI, and Vertex AI models from `.env`, coding-router, provider-side controls |
 | [Getting started](docs/getting-started.md) | Environment files, `STACK_DOMAIN` hostnames, TLS certificates, host resolution, Prometheus authentication, validation, starting and verifying profiles, stopping and removing the stack |
 | [Hardware sizing](docs/hardware-sizing.md) | Prod, dev, and remote GPU host specifications, memory, CPU, and disk budgets, prod resource limits |
-| [Development and delivery workflow](docs/development-workflow.md) | Development container, local, GitHub Actions, and GitLab CI checks, release delivery |
+| [Development and delivery workflow](docs/development-workflow.md) | Feature requests, development container, local, GitHub Actions, and GitLab CI checks, release delivery |
+| [Reference stack: BerriAI Inference Stack](docs/reference-inference-stack.md) | How to check feature requests against LiteLLM's reference deployment, and how the two stacks differ |
 | [Documentation site](docs/documentation-site.md) | Local preview, versions and the dev switch, GitHub Pages and GitLab Pages publishing |
 | [Corporate branding and virtual-key management](docs/branding-and-key-management.md) | Admin UI branding, Enterprise virtual-key rotation, key email notifications |
 | [Observability](docs/observability.md) | OpenSearch users, roles, tenants, alerting and recovery; optional Langfuse and Grafana profiles; demonstration data and telemetry stores |

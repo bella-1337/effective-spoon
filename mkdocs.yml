@@ -192,6 +192,7 @@ nav:
   - Development:
       - Changelog: CHANGELOG.md
       - Development workflow: docs/development-workflow.md
+      - Reference stack: docs/reference-inference-stack.md
       - Documentation site: docs/documentation-site.md
       - Stack maintenance skill: SKILL.md
       - Agent instructions: AGENTS.md

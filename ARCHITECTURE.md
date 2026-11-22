@@ -143,9 +143,11 @@ not running. An enabled integration with missing credentials fails closed.
    LiteLLM's authenticated `searxng-search` tool.
 3. LiteLLM authenticates API requests with `LITELLM_MASTER_KEY`.
 4. Requests for `coding-router` are classified by the remote authenticated D3-mini
-   Decisions endpoint. LiteLLM selects the tier model configured in
-   `CODING_ROUTER_*_MODEL` and falls back to `CODING_ROUTER_DEFAULT_MODEL` if
-   classification fails. The router exists only when that default is set.
+   Decisions endpoint, or by LiteLLM's local heuristic when
+   `CODING_ROUTER_CLASSIFIER=heuristic`. LiteLLM selects a model from the tier's
+   `CODING_ROUTER_*_MODEL` list and scores the request locally if D3-mini
+   fails or times out. The router exists only when
+   `CODING_ROUTER_DEFAULT_MODEL` is set.
 5. The production guardrail calls Presidio analyzer and anonymizer services.
 6. LiteLLM stores request/spend telemetry in its profile-specific PostgreSQL
    database and emits Prometheus metrics.
