@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,7 +14,9 @@ from unittest import mock
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
+import diagram_controls  # noqa: E402
 import diagram_layout  # noqa: E402
+import mermaid_viewer  # noqa: E402
 from maintenance_common import ScriptError  # noqa: E402
 
 SPEC = importlib.util.spec_from_file_location("render_diagrams", SCRIPTS / "render-diagrams.py")
@@ -202,6 +205,11 @@ class SequenceTests(unittest.TestCase):
         problems = diagrams.sequence_diagrams.fidelity_problems(result, content)
         self.assertEqual(problems, ["label missing from the diagram: 'completion'"])
 
+    def test_semicolon_outside_a_comment_is_rejected(self) -> None:
+        source = "---\ntitle: T\n---\nsequenceDiagram\n  %% @subtitle one; two\n  A->>B: one; two\n"
+        with self.assertRaisesRegex(diagrams.DiagramError, "end of a statement"):
+            diagrams.parse_graph(source, "semicolon")
+
     def test_invalid_sequences_are_rejected(self) -> None:
         cases = {
             "  else orphan\n": "outside a matching block",
@@ -305,6 +313,137 @@ class GeneratedHtmlTests(unittest.TestCase):
             self.skipTest("Git metadata is unavailable")
         self.assertEqual(tracked.stdout.strip(), "")
         self.assertIn("/diagrams/*.html", (diagrams.ROOT / ".gitignore").read_text(encoding="utf-8").splitlines())
+
+
+class MermaidDownloadTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.bodies = {name: f"// {name}\n".encode() for name in mermaid_viewer.MERMAID_FILES}
+        digests = {name: mermaid_viewer.hashlib.sha256(body).hexdigest() for name, body in self.bodies.items()}
+        patcher = mock.patch.dict(mermaid_viewer.MERMAID_FILES, digests)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def serve(self, bodies: dict[str, bytes]) -> mock.MagicMock:
+        def urlopen(url: str, timeout: float) -> io.BytesIO:
+            self.assertTrue(url.startswith(mermaid_viewer.MERMAID_URL))
+            return io.BytesIO(bodies[url.removeprefix(mermaid_viewer.MERMAID_URL)])
+        return mock.patch.object(mermaid_viewer.urllib.request, "urlopen", side_effect=urlopen)
+
+    def test_downloads_once_and_installs_the_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, self.serve(self.bodies) as urlopen:
+            cache = mermaid_viewer.fetch_mermaid(Path(temporary) / "cache")
+            mermaid_viewer.fetch_mermaid(cache)
+            self.assertEqual(urlopen.call_count, len(self.bodies))
+            assets = mermaid_viewer.install_assets(Path(temporary), cache)
+            self.assertEqual((assets / "mermaid.min.js").read_bytes(), self.bodies["dist/mermaid.min.js"])
+            self.assertEqual((assets / "mermaid-LICENSE.txt").read_bytes(), self.bodies["LICENSE"])
+            self.assertIn("mermaid.run", (assets / mermaid_viewer.VIEWER_SCRIPT_NAME).read_text(encoding="utf-8"))
+            self.assertEqual((assets / diagram_controls.SCRIPT_NAME).read_text(encoding="utf-8"),
+                             diagram_controls.CONTROLS_SCRIPT)
+
+    def test_refuses_a_download_that_does_not_match_its_digest(self) -> None:
+        tampered = {**self.bodies, "dist/mermaid.min.js": b"alert(1)\n"}
+        with tempfile.TemporaryDirectory() as temporary, self.serve(tampered):
+            cache = Path(temporary) / "cache"
+            with self.assertRaisesRegex(ScriptError, "does not match its pinned SHA-256"):
+                mermaid_viewer.fetch_mermaid(cache)
+            self.assertFalse((cache / "dist_mermaid.min.js").exists())
+
+    def test_pinned_version_and_digests_are_well_formed(self) -> None:
+        self.assertRegex(mermaid_viewer.MERMAID_VERSION, r"^\d+\.\d+\.\d+$")
+        self.assertIn(f"@{mermaid_viewer.MERMAID_VERSION}/", mermaid_viewer.MERMAID_URL)
+        for digest in mermaid_viewer.MERMAID_FILES.values():
+            self.assertRegex(digest, r"^[0-9a-f]{64}$")
+        self.assertEqual(set(mermaid_viewer.PUBLISHED_NAMES), set(mermaid_viewer.MERMAID_FILES))
+
+
+class MermaidViewerTests(unittest.TestCase):
+    def test_page_escapes_the_source_and_links_its_siblings(self) -> None:
+        source = FLOW + '  A --> X["</pre><script>alert(1)</script>"]\n'
+        page = mermaid_viewer.viewer_html("12-sample.mmd", source, "Sample <flow>", "A & B")
+        self.assertNotIn("<script>alert", page)
+        self.assertIn("&lt;/pre&gt;&lt;script&gt;", page)
+        self.assertIn("<title>Sample &lt;flow&gt; — Mermaid</title>", page)
+        self.assertIn('<p class="lead">A &amp; B</p>', page)
+        self.assertIn('<a href="12-sample.html">Animated version</a>', page)
+        self.assertIn('<a href="12-sample.mmd" download>', page)
+        self.assertEqual(page.count('<pre class="mermaid">'), 1)
+        scripts = [line for line in page.splitlines() if "<script" in line]
+        self.assertEqual(scripts, ['<script src="assets/mermaid.min.js"></script>',
+                                   '<script src="assets/diagram-controls.js"></script>',
+                                   '<script src="assets/mermaid-viewer.js"></script>'])
+        self.assertIn("script-src 'self';", page)
+        self.assertIn("img-src 'self' data: blob:;", page)
+        self.assertIn('<figure class="dc" data-dc-name="12-sample"', page)
+        self.assertIn('<div class="dc-viewport"><pre class="mermaid">', page)
+        self.assertIn('data-dc="png"', page)
+
+    def test_writes_the_page_beside_the_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "12-sample.mmd"
+            source.write_text(FLOW, encoding="utf-8")
+            page = mermaid_viewer.write_viewer(source, "Sample flow")
+            self.assertEqual(page.name, "12-sample.mmd.html")
+            self.assertIn("Do work", page.read_text(encoding="utf-8"))
+
+    def test_assets_are_ignored_and_published(self) -> None:
+        root = diagrams.ROOT
+        self.assertIn("/diagrams/assets/", (root / ".gitignore").read_text(encoding="utf-8").splitlines())
+        self.assertIn("!/diagrams/assets/**", (root / "mkdocs.yml").read_text(encoding="utf-8"))
+
+    def test_guide_links_every_source_to_its_viewer(self) -> None:
+        guide = (diagrams.ROOT / "diagrams" / "README.md").read_text(encoding="utf-8")
+        for source in sorted((diagrams.ROOT / "diagrams").glob("*.mmd")):
+            with self.subTest(source=source.name):
+                self.assertIn(f"[{source.name}]({source.name}.html)", guide)
+        self.assertNotRegex(guide, r"\]\([^)]*\.mmd\)")
+
+
+ARCH_PAGE = """<html><head><style>.flow { stroke-dasharray: 5 5; }</style></head><body>
+<div class="container">
+  <div class="diagram-card">
+    <button class="pause-btn" id="pauseBtn" aria-pressed="false">⏸ pause</button>
+    <svg id="flowsvg" width="100%" viewBox="0 0 400 300" role="img" aria-roledescription="architecture diagram"><g fill="none"><path d="M0 0 L10 10"/></g><g font-family="Mono, 'SF Mono'" font-size="11"><rect x="34" y="270" width="12" height="12" rx="3"/><text x="52" y="280">frontend</text></g></svg>
+  </div>
+</div>
+<script>/* pause */</script>
+</body>
+</html>
+"""
+
+
+class DiagramControlsTests(unittest.TestCase):
+    def test_architecture_legend_moves_out_of_the_zoomed_diagram(self) -> None:
+        page = diagram_controls.enhance_animated(ARCH_PAGE, "01-sample.mmd")
+        diagram = re.search(r'<svg id="flowsvg".*?</svg>', page, re.DOTALL).group(0)
+        self.assertIn('viewBox="0 0 400 266" data-dc-viewbox="0 0 400 300"', diagram)
+        self.assertNotIn("frontend", diagram)
+        self.assertIn(f'<div class="dc-viewport">{diagram}</div><svg class="dc-legend" viewBox="0 266 400 24"', page)
+        self.assertIn(">frontend</text></g></svg>", page)
+
+    def test_toolbar_pause_button_style_and_script_are_added(self) -> None:
+        page = diagram_controls.enhance_animated(ARCH_PAGE, "01-sample.mmd")
+        self.assertIn('<div class="diagram-card dc" data-dc-name="01-sample" data-dc-style="page" data-dc-auto>', page)
+        self.assertRegex(page, r'<div class="dc-bar"><div class="dc-toolbar"[^>]*hidden>.*</div><button class="pause-btn"')
+        self.assertEqual(page.count('id="pauseBtn"'), 1)
+        self.assertIn('<a class="dc-btn" href="01-sample.mmd" download', page)
+        self.assertIn(".dc-viewport.dc-zoomed", page.split("</style>")[0])
+        self.assertTrue(page.rstrip().endswith(f"<script>\n{diagram_controls.CONTROLS_SCRIPT}</script>\n</body>\n</html>"))
+
+    def test_sequence_page_keeps_its_html_legend_outside_the_zoom_area(self) -> None:
+        content = diagrams.sequence_diagrams.render_html(graph(SEQUENCE))
+        page = diagram_controls.enhance_animated(content, "10-sample.mmd")
+        self.assertNotIn('class="dc-legend"', page.split("<script>\n")[0])
+        viewport = page.index('<div class="dc-viewport"><svg id="flowsvg"')
+        self.assertGreater(page.index('<div class="legend">'), page.index("</svg></div>", viewport))
+        self.assertNotIn("data-dc-viewbox", page)
+
+    def test_unexpected_page_structure_is_refused(self) -> None:
+        with self.assertRaisesRegex(ScriptError, "unexpected page structure"):
+            diagram_controls.enhance_animated(ARCH_PAGE.replace('id="pauseBtn"', ""), "01-sample.mmd")
+
+    def test_toolbar_escapes_the_source_name(self) -> None:
+        self.assertIn('href="a&quot;b.mmd"', diagram_controls.toolbar_html('a"b.mmd'))
 
 
 class RepositoryDiagramTests(unittest.TestCase):

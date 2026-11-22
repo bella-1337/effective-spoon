@@ -8,6 +8,22 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The **Source** links in the [diagram guide](diagrams/README.md) open a
+  viewer page that draws the Mermaid source in the browser, instead of
+  downloading the `.mmd` file. `scripts/render-diagrams.py` writes the pages
+  as `diagrams/NN-name.mmd.html`. They run Mermaid.js 12.3.0 (MIT), which is
+  pinned by SHA-256 and served from the documentation site, so the site still
+  makes no third-party requests.
+- Every diagram page, animated or Mermaid, has zoom buttons (50% to 400%, also
+  Ctrl or ⌘ with the wheel, drag to pan) and downloads of the diagram as SVG
+  or PNG and of its `.mmd` source. Only the diagram zooms: the architecture
+  diagrams' legend now sits in its own SVG below the zoom area.
+- The notes in the Xberg and search tool-call flows no longer contain `;`,
+  which Mermaid reads as the end of a statement, and the renderer now rejects
+  `;` in sequence diagrams.
+
 ## [v0.4.0] - 2026-11-22
 
 ### Added

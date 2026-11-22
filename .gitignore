@@ -52,6 +52,7 @@ dist/
 
 # Diagrams rendered from diagrams/*.mmd by scripts/render-diagrams.py
 /diagrams/*.html
+/diagrams/assets/
 
 # Documentation site build output and toolchain cache
 /site/

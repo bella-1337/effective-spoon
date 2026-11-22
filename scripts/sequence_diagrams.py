@@ -133,6 +133,8 @@ def parse(text: str, name: str = "diagram") -> Sequence:
                 else:
                     raise SequenceError(f"{where}: unknown directive {key}")
             continue
+        if ";" in line:
+            raise SequenceError(f"{where}: Mermaid reads ';' as the end of a statement; reword without it")
         if not header_seen:
             if line != "sequenceDiagram":
                 raise SequenceError(f"{where}: expected 'sequenceDiagram'")
