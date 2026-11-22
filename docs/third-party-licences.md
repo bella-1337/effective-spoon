@@ -148,12 +148,14 @@ emoji, whose CC BY 4.0 licence would require attribution.
 | `tomli` | 2.5.0 | MIT | None. |
 
 The build also renders the diagrams with these tools, which are likewise
-build-time only. The published site contains their output, not their code.
+build-time only. The published site contains their output, not their code,
+except for Mermaid.js, which the diagram viewer pages run in the browser.
 
 | Tool | Version | Licence | Notes |
 | --- | --- | --- | --- |
 | dashmotion `layout.py` and `check_diagram.py` | 2.2.4, commit `ae2fe4f` | MIT | Downloaded by `scripts/render-diagrams.py` and checked against pinned SHA-256 digests; not redistributed. |
 | Graphviz (`dot`) | Debian bookworm package in CI | EPL-1.0 | Installed by `scripts/ci/docs.sh` in the CI image; a workstation uses its own. |
+| Mermaid.js (`mermaid` npm package, `dist/mermaid.min.js`) | 12.3.0 | MIT | Downloaded by `scripts/mermaid_viewer.py` and checked against pinned SHA-256 digests. Published unmodified on the site, with its licence as `diagrams/assets/mermaid-LICENSE.txt`, for the diagram viewer pages. The bundle includes libraries under their own licences, such as DOMPurify (Apache-2.0 or MPL-2.0), d3 (ISC), and lodash-es and Cytoscape.js (MIT), and keeps the licence comments its build preserves. |
 
 The CI jobs build the site in `ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm`
 (uv: MIT OR Apache-2.0; Python: PSF-2.0; Debian packages under their own

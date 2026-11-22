@@ -25,19 +25,19 @@ sequenceDiagram
   Note over APP: the app, not the user, adds the xberg MCP tools (server_url litellm_proxy, require_approval never)
   APP->>TR: POST /v1/chat/completions: prompt + mcp tool
   TR->>LL: route by host
-  Note over LL: authenticate the key; the key or team must be granted xberg
+  Note over LL: authenticate the key, which (or whose team) must be granted xberg
   LL->>PR: pre_call: mask PII in the prompt
   PR-->>LL: masked prompt
   LL->>XB: MCP tools/list
   XB-->>LL: tool definitions
-  Note over LL: keep the four allowed_tools; in dev, BGE-M3 keeps the 3 that best match the prompt
+  Note over LL: keep the four allowed_tools. In dev, BGE-M3 keeps the 3 that best match the prompt
   LL->>EUP: prompt + tool definitions
   Note over EUP: the model decides whether a tool is needed and writes its arguments from the prompt
   alt model answers directly
     EUP-->>LL: completion, no tool call
   else model requests the tool
     EUP-->>LL: tool_call: xberg-extract(uri)
-    Note over LL: LiteLLM executes the call itself; the app never sees the tool_call
+    Note over LL: LiteLLM executes the call itself, so the app never sees the tool_call
     LL->>XB: MCP tools/call extract
     XB->>XB: check the URL against the SSRF allowlist
     XB->>EG: resolve the host, HTTPS CONNECT :443

@@ -17,6 +17,10 @@ dashmotion's structural checker.
 dashmotion (MIT, github.com/csthink/dashmotion) is downloaded at a pinned
 commit and verified against the SHA-256 digests below, so every machine renders
 with the same code.
+
+Each source also gets a viewer page, NN-name.mmd.html, that draws it with
+Mermaid.js served from the site (see mermaid_viewer.py), so a link to the
+source opens in the browser instead of downloading.
 """
 
 from __future__ import annotations
@@ -34,17 +38,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import diagram_controls
 import diagram_layout
+import mermaid_viewer
 import sequence_diagrams
 from maintenance_common import LOG, ROOT, fail, run_main
 
 USAGE = """Usage:
-  ./scripts/render-diagrams.py [DIAGRAM.mmd ...]   render all (or the named) diagrams beside their sources
+  ./scripts/render-diagrams.py [DIAGRAM.mmd ...]   render all (or the named) diagrams and their
+                                                   Mermaid viewer pages beside their sources
   ./scripts/render-diagrams.py --json DIAGRAM.mmd  print the semantic graph without rendering
 
 Rendering needs Graphviz (dot) and downloads the pinned dashmotion scripts once
 into the user cache directory. Offline, set DASHMOTION_SKILL_DIR to a dashmotion
-skill directory instead. --json needs only Python.
+skill directory instead. The pinned Mermaid.js for the viewer pages is also
+downloaded once into the user cache directory. --json needs only Python.
 """
 
 DIAGRAMS_DIR = ROOT / "diagrams"
@@ -455,8 +463,12 @@ def render(path: Path, scripts: Path) -> None:
         problems = (sequence_diagrams.fidelity_problems if sequence else fidelity_problems)(graph, content)
         if problems:
             fail(f"{path.name} does not match its Mermaid source:\n  " + "\n  ".join(problems))
+        # The checks above ran on dashmotion's page; the controls only add chrome around it.
+        rendered.write_text(diagram_controls.enhance_animated(content, path.name), encoding="utf-8")
         os.replace(rendered, html)
-    LOG.info(f"rendered {html.relative_to(ROOT) if html.is_relative_to(ROOT) else html}")
+    viewer = mermaid_viewer.write_viewer(path, graph["title"], graph.get("subtitle", ""))
+    for output in (html, viewer):
+        LOG.info(f"rendered {output.relative_to(ROOT) if output.is_relative_to(ROOT) else output}")
 
 
 def main() -> None:
@@ -475,6 +487,9 @@ def main() -> None:
     if not paths:
         fail(f"no .mmd files found in {DIAGRAMS_DIR}")
     scripts = dashmotion_scripts()
+    mermaid = mermaid_viewer.fetch_mermaid(mermaid_viewer.mermaid_cache())
+    for directory in sorted({path.parent for path in paths}):
+        mermaid_viewer.install_assets(directory, mermaid)
     for path in paths:
         render(path, scripts)
 

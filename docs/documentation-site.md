@@ -77,8 +77,9 @@ Zensical reads `mkdocs.yml` with the repository root as its `docs_dir`, so
 every page keeps its repository path and the relative links between guides
 work unchanged. `README.md` is the home page, and each other `README.md` is the
 index page of its directory. `exclude_docs` first excludes everything, then
-re-includes only Markdown, the rendered diagrams and their Mermaid sources,
-images under `docs/`, and the site assets; hidden directories, build output,
+re-includes only Markdown, the rendered diagrams, their Mermaid sources and
+viewer pages, the self-hosted Mermaid.js in `diagrams/assets/`, images under
+`docs/`, and the site assets; hidden directories, build output,
 and runtime state stay excluded. Compose files, scripts, and other source
 files are not published, so a guide links to them only as code (for example
 `searxng/settings.yml`) or with an absolute link to the repository.
@@ -180,7 +181,14 @@ publish unchecked.
   uses none.
 - **Diagrams.** The build renders `diagrams/*.mmd` into animated HTML with
   `scripts/render-diagrams.py` before Zensical runs, so the HTML is never
-  committed. It needs Graphviz (`dot`): `scripts/ci/docs.sh` installs it in
-  the CI image, and a local `build` or `serve` needs it on the workstation.
+  committed. Rendering needs Graphviz (`dot`): `scripts/ci/docs.sh` installs
+  it in the CI image, and a local `build` or `serve` needs it on the
+  workstation. The same script writes a viewer page for each source,
+  `NN-name.mmd.html`, which draws it with Mermaid.js served from the site,
+  because GitHub Pages serves a bare `.mmd` file as a download. Mermaid.js is
+  downloaded once at a pinned version, checked against its SHA-256 digests,
+  and copied into the ignored `diagrams/assets/` directory. Every diagram
+  page, animated or Mermaid, has zoom controls and SVG, PNG, and source
+  downloads.
   Releases that committed their HTML are published as tagged. See the
   [diagram guide](../diagrams/README.md#updating-diagrams).
