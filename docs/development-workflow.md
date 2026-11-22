@@ -123,7 +123,10 @@ Both report under **Security > Code scanning**. Neither is a required check.
 
 When Gitleaks reports a committed secret, rotate the credential first. Then
 allowlist the finding's fingerprint in a `.gitleaksignore` file; rewriting
-history alone does not revoke a leaked credential.
+history alone does not revoke a leaked credential. When a finding is not a
+secret, for example an environment variable name, add a narrow allowlist to
+`.gitleaks.toml`, limited to its rule, file, and shape, and check that a real
+key in the same file is still reported.
 
 The development container job builds `.devcontainer/` with the Dev Containers
 CLI. It proves the pinned base image, the copied `uv`, and the locked

@@ -24,3 +24,16 @@ condition = "AND"
 paths = ['''^deploy/helm/''']
 regexTarget = "line"
 regexes = ['''^\s*key:\s*["']?[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+["']?\s*$''']
+
+[[allowlists]]
+# The maintenance contracts list which environment variables belong in .env,
+# for example D3_CORE_ENV_KEYS = frozenset({"D3_DECISION_API_BASE",
+# "D3_DECISION_API_KEY"}), and the generic-api-key rule reads the second name
+# as a key. Only a "secret" that is itself an upper-case variable name with at
+# least one underscore is skipped, only in scripts/maintenance_contracts.py,
+# and only for that rule; a real key there is still reported.
+description = "Environment variable names in maintenance contract constants, not credentials"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^scripts/maintenance_contracts\.py$''']
+regexes = ['''^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$''']
