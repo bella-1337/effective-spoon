@@ -10,3 +10,307 @@ version = 1
 # expires = "2026-12-31"
 # reason = "Vulnerable code path is unreachable; upstream fix is pending."
 # reviewed_by = "operator-name"
+
+# Reviewed 2026-11-23 from the image-security scan. No upstream image fixes
+# these findings yet; remove each entry once a fixed image is pinned.
+
+# PostgreSQL images: gosu entrypoint helper.
+
+[[exceptions]]
+service = "postgres"
+vulnerability = "CVE-2025-68121"
+package = "stdlib"
+installed_version = "v1.24.6"
+expires = "2027-02-28"
+reason = "gosu is built with Go stdlib 1.24.6. It only drops privileges once at container start and makes no TLS connections, so the crypto/tls flaw is unreachable. Current upstream postgres 16.16-alpine3.24 and 17.12 rebuilds still ship this gosu."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "postgres-init"
+vulnerability = "CVE-2025-68121"
+package = "stdlib"
+installed_version = "v1.24.6"
+expires = "2027-02-28"
+reason = "gosu is built with Go stdlib 1.24.6. It only drops privileges once at container start and makes no TLS connections, so the crypto/tls flaw is unreachable. Current upstream postgres 16.16-alpine3.24 and 17.12 rebuilds still ship this gosu."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "pgvector-migrate"
+vulnerability = "CVE-2025-68121"
+package = "stdlib"
+installed_version = "v1.24.6"
+expires = "2027-02-28"
+reason = "gosu is built with Go stdlib 1.24.6. It only drops privileges once at container start and makes no TLS connections, so the crypto/tls flaw is unreachable. Current upstream postgres 16.16-alpine3.24 and 17.12 rebuilds still ship this gosu."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "pgvector-access-init"
+vulnerability = "CVE-2025-68121"
+package = "stdlib"
+installed_version = "v1.24.6"
+expires = "2027-02-28"
+reason = "gosu is built with Go stdlib 1.24.6. It only drops privileges once at container start and makes no TLS connections, so the crypto/tls flaw is unreachable. Current upstream postgres 16.16-alpine3.24 and 17.12 rebuilds still ship this gosu."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "litellm-demo-data-prod"
+vulnerability = "CVE-2025-68121"
+package = "stdlib"
+installed_version = "v1.24.6"
+expires = "2027-02-28"
+reason = "gosu is built with Go stdlib 1.24.6. It only drops privileges once at container start and makes no TLS connections, so the crypto/tls flaw is unreachable. Current upstream postgres 16.16-alpine3.24 and 17.12 rebuilds still ship this gosu."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "litellm-demo-data-dev"
+vulnerability = "CVE-2025-68121"
+package = "stdlib"
+installed_version = "v1.24.6"
+expires = "2027-02-28"
+reason = "gosu is built with Go stdlib 1.24.6. It only drops privileges once at container start and makes no TLS connections, so the crypto/tls flaw is unreachable. Current upstream postgres 16.16-alpine3.24 and 17.12 rebuilds still ship this gosu."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "langfuse-postgres"
+vulnerability = "CVE-2025-68121"
+package = "stdlib"
+installed_version = "v1.24.6"
+expires = "2027-02-28"
+reason = "gosu is built with Go stdlib 1.24.6. It only drops privileges once at container start and makes no TLS connections, so the crypto/tls flaw is unreachable. Current upstream postgres 16.16-alpine3.24 and 17.12 rebuilds still ship this gosu."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "langfuse-preflight"
+vulnerability = "CVE-2025-68121"
+package = "stdlib"
+installed_version = "v1.24.6"
+expires = "2027-02-28"
+reason = "gosu is built with Go stdlib 1.24.6. It only drops privileges once at container start and makes no TLS connections, so the crypto/tls flaw is unreachable. Current upstream postgres 16.16-alpine3.24 and 17.12 rebuilds still ship this gosu."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "grafana-db-init"
+vulnerability = "CVE-2025-68121"
+package = "stdlib"
+installed_version = "v1.24.6"
+expires = "2027-02-28"
+reason = "gosu is built with Go stdlib 1.24.6. It only drops privileges once at container start and makes no TLS connections, so the crypto/tls flaw is unreachable. Current upstream postgres 16.16-alpine3.24 and 17.12 rebuilds still ship this gosu."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "lens-preflight"
+vulnerability = "CVE-2025-68121"
+package = "stdlib"
+installed_version = "v1.24.6"
+expires = "2027-02-28"
+reason = "gosu is built with Go stdlib 1.24.6. It only drops privileges once at container start and makes no TLS connections, so the crypto/tls flaw is unreachable. Current upstream postgres 16.16-alpine3.24 and 17.12 rebuilds still ship this gosu."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "d3-mini-preflight"
+vulnerability = "CVE-2025-68121"
+package = "stdlib"
+installed_version = "v1.24.6"
+expires = "2027-02-28"
+reason = "gosu is built with Go stdlib 1.24.6. It only drops privileges once at container start and makes no TLS connections, so the crypto/tls flaw is unreachable. Current upstream postgres 16.16-alpine3.24 and 17.12 rebuilds still ship this gosu."
+reviewed_by = "pi-dotcom"
+
+# Presidio 2.2.362 analyzer and anonymizer.
+
+[[exceptions]]
+service = "presidio-analyzer"
+vulnerability = "CVE-2026-111497"
+package = "libbrotli1"
+installed_version = "1.1.0-2+b7"
+expires = "2026-12-31"
+reason = "Known exploited (KEV). Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-analyzer"
+vulnerability = "CVE-2026-33845"
+package = "libgnutls30t64"
+installed_version = "3.8.9-3+deb13u2"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-analyzer"
+vulnerability = "CVE-2026-42010"
+package = "libgnutls30t64"
+installed_version = "3.8.9-3+deb13u2"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-analyzer"
+vulnerability = "CVE-2026-31789"
+package = "libssl3t64"
+installed_version = "3.5.4-1~deb13u2"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-analyzer"
+vulnerability = "CVE-2026-31789"
+package = "openssl"
+installed_version = "3.5.4-1~deb13u2"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-analyzer"
+vulnerability = "CVE-2026-31789"
+package = "openssl-provider-legacy"
+installed_version = "3.5.4-1~deb13u2"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-analyzer"
+vulnerability = "CVE-2026-13221"
+package = "perl-base"
+installed_version = "5.40.1-6"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-analyzer"
+vulnerability = "CVE-2026-42496"
+package = "perl-base"
+installed_version = "5.40.1-6"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-analyzer"
+vulnerability = "CVE-2026-8376"
+package = "perl-base"
+installed_version = "5.40.1-6"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-analyzer"
+vulnerability = "CVE-2026-63374"
+package = "anyio"
+installed_version = "4.12.1"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-analyzer"
+vulnerability = "GHSA-6q48-6c7w-9gw2"
+package = "certifi"
+installed_version = "2026.2.25"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-anonymizer"
+vulnerability = "CVE-2026-111497"
+package = "libbrotli1"
+installed_version = "1.1.0-2+b7"
+expires = "2026-12-31"
+reason = "Known exploited (KEV). Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-anonymizer"
+vulnerability = "CVE-2026-33845"
+package = "libgnutls30t64"
+installed_version = "3.8.9-3+deb13u2"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-anonymizer"
+vulnerability = "CVE-2026-42010"
+package = "libgnutls30t64"
+installed_version = "3.8.9-3+deb13u2"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-anonymizer"
+vulnerability = "CVE-2026-31789"
+package = "libssl3t64"
+installed_version = "3.5.4-1~deb13u2"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-anonymizer"
+vulnerability = "CVE-2026-31789"
+package = "openssl"
+installed_version = "3.5.4-1~deb13u2"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-anonymizer"
+vulnerability = "CVE-2026-31789"
+package = "openssl-provider-legacy"
+installed_version = "3.5.4-1~deb13u2"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-anonymizer"
+vulnerability = "CVE-2026-13221"
+package = "perl-base"
+installed_version = "5.40.1-6"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-anonymizer"
+vulnerability = "CVE-2026-42496"
+package = "perl-base"
+installed_version = "5.40.1-6"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-anonymizer"
+vulnerability = "CVE-2026-8376"
+package = "perl-base"
+installed_version = "5.40.1-6"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-anonymizer"
+vulnerability = "CVE-2026-63374"
+package = "anyio"
+installed_version = "4.12.1"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"
+
+[[exceptions]]
+service = "presidio-anonymizer"
+vulnerability = "GHSA-6q48-6c7w-9gw2"
+package = "certifi"
+installed_version = "2026.2.25"
+expires = "2026-12-31"
+reason = "Presidio 2.2.362 is the newest release and Microsoft has not rebuilt it, so no fixed image exists. The service joins only the internal network. Replace the image as soon as upstream ships the fix."
+reviewed_by = "pi-dotcom"

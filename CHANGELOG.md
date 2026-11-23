@@ -8,6 +8,22 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- `security/exceptions.toml` records time-limited exceptions for the fixable
+  Critical findings that no upstream image fixes yet, reviewed on 2026-11-23:
+  - Presidio `2.2.362` analyzer and anonymizer, until 2026-12-31: Brotli
+    (CVE-2026-111497, on the CISA KEV list), GnuTLS, OpenSSL, Perl, `anyio`,
+    and `certifi`. It is the newest Presidio release and Microsoft has not
+    rebuilt it.
+  - The `gosu` helper in the PostgreSQL `16.16-alpine3.24` and `17.12` images,
+    until 2027-02-28: CVE-2025-68121 in Go's `crypto/tls`. `gosu` only drops
+    privileges at container start and makes no TLS connections. The current
+    upstream rebuilds of both tags still ship it.
+
+  Raw reports still list every finding; the exceptions only clear the policy
+  metrics. Remove each entry once a fixed image is pinned.
+
 ## [v0.4.1] - 2026-11-23
 
 ### Added
