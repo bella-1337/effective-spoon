@@ -52,11 +52,11 @@ text, and returns the masked text in `response_text`:
 curl --fail --silent "https://$LITELLM_PROD_HOST/guardrails/apply_guardrail" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"guardrail_name":"presidio-pii","text":"Email Jane Example at jane@example.test"}'
+  -d '{"guardrail_name":"presidio-pii","text":"Write to Jane Example at jane@example.com"}'
 ```
 
 ```json
-{"response_text": "Email <PERSON> at <EMAIL_ADDRESS>"}
+{"response_text": "Write to <PERSON> at <EMAIL_ADDRESS>"}
 ```
 
 Use them to check the gateway's exact result, for example after adding
@@ -71,7 +71,7 @@ The analyzer (`presidio-analyzer`) serves English, German, and French:
 | `presidio/Dockerfile`, `presidio/spacy-models.txt` | The upstream analyzer image plus the German and French spaCy pipelines (`de_core_news_lg`, `fr_core_news_lg` 3.8.0), pinned by hash. |
 | `presidio/analyzer-engine.yaml` | The languages the analyzer accepts. |
 | `presidio/analyzer.yaml` | The spaCy model per language and the label mapping. `ORG` is deliberately not mapped. |
-| `presidio/recognizers.yaml` | Presidio's default recognizers for these languages, credit cards also in German and French, and UK National Insurance numbers (`UK_NINO`), passports (`UK_PASSPORT`), and postcodes (`UK_POSTCODE`) switched on. The NHS number (`UK_NHS`) was already on. UK vehicle registrations stay off because their short codes cause many false positives. Two custom recognizers mask whole German and French street addresses (street, house number, and an optional postcode and city) as `LOCATION`; the NER models alone find only the street or city. |
+| `presidio/recognizers.yaml` | Presidio's default recognizers for these languages, credit cards also in German and French, and UK National Insurance numbers (`UK_NINO`), passports (`UK_PASSPORT`), and postcodes (`UK_POSTCODE`) switched on. The NHS number (`UK_NHS`) was already on. UK vehicle registrations stay off because their short codes cause many false positives. Two custom recognizers mask whole German and French street addresses (street, house number, and an optional postcode and city) as `LOCATION`; the NER models alone find only the street or city. Stricter URL and IP address recognizers replace the defaults; see [Code, file names, and paths](#code-file-names-and-paths). |
 
 A request is analysed in English unless its language is set, either by the
 `pii-assist` guardrail or by the client in the request metadata:
@@ -102,6 +102,35 @@ The German and French pipelines make the analyzer larger: about 2.4 GiB,
 shared by its workers because gunicorn preloads them (`GUNICORN_CMD_ARGS:
 --preload`). Two workers use about 2.7 GiB; keep `PRESIDIO_ANALYZER_MEMORY_LIMIT`
 at 4g or more.
+
+## Code, file names, and paths
+
+Coding prompts used to produce many false detections. Three of Presidio's
+default recognizers are changed so that code, file names, and paths stay
+readable:
+
+| Was masked | Cause | Change |
+| --- | --- | --- |
+| `main.rs`, `config.py`, `README.md`, `self.name` as `URL` | `UrlRecognizer` matches any `name.tld` without a scheme, and `.rs`, `.py`, `.md`, and `.sh` are country domains. | `WebUrlRecognizer` in `presidio/recognizers.yaml` needs `https://`, `http://`, `ftp://`, or `www.` and a dotted host. |
+| `::` in `std::io`, `de::` in `serde::de`, `f32::` as `IP_ADDRESS` | `IpRecognizer`'s IPv6 pattern matches a bare `::`. | `IpAddressRecognizer` keeps the IPv4 pattern and needs two hex groups and a digit for IPv6. It also masks whole compressed addresses such as `2001:db8::1`, which the default cut short. |
+| `i64`, `u128`, `f32`, `E0382` as `US_DRIVER_LICENSE` | A weak pattern (score 0.3) matches any letter followed by digits. | `presidio_score_thresholds` in `litellm/modules/guardrails/presidio.yaml` ignores it below 0.4; a context word such as "license" raises a real one to 0.65. |
+
+Xberg auto-indexing uses the same analyzer and gets the same recognizers.
+
+What still happens:
+
+- Bare domains such as `example.com` are no longer masked as URLs. Email
+  addresses are still masked by `EMAIL_ADDRESS`.
+- The spaCy models still guess on code: identifiers such as `Vec` or `tokio`
+  can be masked as `PERSON` or `NRP`, and a whole Windows path as `LOCATION`.
+  Their score (0.85) is the same as for real names, so a threshold cannot
+  separate them.
+- Other weak patterns, such as `US_SSN`, `US_BANK_NUMBER`, and `UK_POSTCODE`
+  without a context word, still mask long numbers. A higher threshold for them
+  would also stop masking bare UK postcodes and passport numbers.
+
+`scripts/tests/test_presidio_recognizers.py` lists the URLs, addresses, file
+names, and code that must and must not match.
 
 ## Local-model assist
 
@@ -191,6 +220,7 @@ guardrails:
       presidio_language: en
       presidio_filter_scope: both
       presidio_score_thresholds:
+        US_DRIVER_LICENSE: 0.4  # configured; see "Code, file names, and paths"
         PERSON: 0.7  # example: ignore person matches below 0.7
 ```
 

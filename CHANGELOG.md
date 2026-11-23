@@ -89,6 +89,31 @@ All notable changes to this stack are recorded here. The format follows
   gateway masks organisation names with a 0.7 threshold. The analyzer has
   never mapped spaCy's `ORG` label, and the upgrade check asserts that it
   does not, so the guide now says the gateway does not mask organisations.
+- The Presidio guardrail no longer masks file names, paths, and Rust or C++
+  code as personal data. See
+  [Code, file names, and paths](docs/presidio-guardrails.md#code-file-names-and-paths).
+  On sample coding prompts, detections fell from 39 to 11; the URLs, IP
+  addresses, and other personal data in the samples are still masked.
+  - `WebUrlRecognizer` replaces Presidio's `UrlRecognizer`, which matched any
+    `name.tld`: `.rs`, `.py`, `.md`, and `.sh` are country domains, so
+    `main.rs` and `self.name` were masked as URLs. A URL now needs a scheme or
+    `www.`. Bare domains such as `example.com` are no longer masked.
+  - `IpAddressRecognizer` replaces `IpRecognizer`, whose IPv6 pattern matched
+    the `::` in `std::io`. IPv6 now needs two hex groups and a digit, and
+    compressed addresses such as `2001:db8::1` are masked whole.
+  - `presidio_score_thresholds` ignores `US_DRIVER_LICENSE` below 0.4. Its
+    weak pattern matched Rust types (`i64`, `f32`) and compiler codes
+    (`E0382`). With a context word such as "license", a real one still scores
+    0.65.
+  - spaCy can still mask code identifiers as `PERSON` or `NRP` and paths as
+    `LOCATION`; the guide lists what remains.
+  - Approach: the BerriAI Inference Stack has no data protection to compare.
+    Stricter recognizers and one threshold were chosen over a code-aware
+    filter in LiteLLM, which would need custom code checked on every upgrade.
+- The guide's `apply_guardrail` example used `jane@example.test`, which
+  Presidio does not detect as an email address because `.test` is not a
+  public top-level domain. It now uses `example.com` and shows the real
+  output.
 
 ## [v0.4.0] - 2026-11-22
 

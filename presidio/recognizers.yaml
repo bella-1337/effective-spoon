@@ -5,7 +5,9 @@
 # - UK National Insurance numbers, passports, and postcodes switched on (the
 #   NHS number already was). UK vehicle registrations stay off: their short
 #   letter-number codes produce too many false positives;
-# - German and French street-address recognizers (at the end of this file).
+# - German and French street-address recognizers (at the end of this file);
+# - UrlRecognizer and IpRecognizer replaced by stricter custom recognizers (at
+#   the end of this file) that do not match file names, paths, or code.
 # Compare with the upstream file when upgrading the Presidio image.
 supported_languages:
   - en
@@ -260,8 +262,11 @@ recognizers:
   - name: IbanRecognizer
     type: predefined
 
+  # Replaced by IpAddressRecognizer at the end of this file: its IPv6 pattern
+  # matches a bare "::", the Rust and C++ path separator (std::io).
   - name: IpRecognizer
     type: predefined
+    enabled: false
 
   - name: MedicalLicenseRecognizer
     type: predefined
@@ -272,8 +277,13 @@ recognizers:
   - name: PhoneRecognizer
     type: predefined
 
+  # Replaced by WebUrlRecognizer at the end of this file: it matches any
+  # name.tld without a scheme, and file extensions such as .rs, .py, .md, and
+  # .sh are country domains, so file names (main.rs) and code (self.name)
+  # were masked as URLs.
   - name: UrlRecognizer
     type: predefined
+    enabled: false
 
   - name: InVoterRecognizer
     type: predefined
@@ -317,3 +327,39 @@ recognizers:
         regex: "\\b\\d{1,4}(?:\\s?(?:bis|ter))?,?\\s(?:rue|avenue|av\\.|boulevard|bd|place|allée|allee|chemin|impasse|quai|route|cours|square|passage|rond-point|esplanade|faubourg)\\s(?:de la |de l'|de l’|du |des |de |d'|d’|la |le |les |l'|l’)?(?-i:[A-ZÉÈÊÀÂÎÔÛÇ][a-zéèêëàâîïôöûüç'’]{0,30}(?:-[A-ZÉÈÊÀÂÎÔÛÇa-zéèêàâîôûç][a-zéèêëàâîïôöûüç'’]{0,30}){0,4})(?: (?:de la |de l'|de l’|du |des |de |d'|d’|la |le |les |l'|l’)?(?-i:[A-ZÉÈÊÀÂÎÔÛÇ][a-zéèêëàâîïôöûüç'’]{0,30}(?:-[A-ZÉÈÊÀÂÎÔÛÇa-zéèêàâîôûç][a-zéèêëàâîïôöûüç'’]{0,30}){0,4})){0,3}(?:(?:\\s*,\\s*|\\s*\\n\\s*|\\s+)\\d{5}\\s(?-i:[A-ZÉÈÊÀÂÎÔÛÇ][a-zéèêëàâîïôöûüç]{1,30}(?:-(?:sur|sous|en|le|la|les|de|du|des|lès|[A-ZÉÈÊÀÂÎÔÛÇ][a-zéèêëàâîïôöûüç]{1,30})){0,4})(?:\\s(?-i:CEDEX)(?:\\s\\d{1,2})?)?)?"
         score: 0.7
     context: [adresse, domicile, habite, demeurant, rue, code postal]
+
+  # URLs and IP addresses, replacing UrlRecognizer and IpRecognizer, which
+  # masked file names, paths, and code. Every repetition is bounded
+  # (CWE-1333); scripts/tests/test_presidio_recognizers.py lists the matched
+  # and rejected examples and times them on 100 KB inputs.
+  # - A URL needs a scheme (https://, http://, ftp://) or www. and a dotted
+  #   host with an alphabetic top-level domain. Scores are the upstream ones.
+  #   Bare domains (example.com) are no longer masked; localhost and
+  #   single-label hosts (http://presidio-analyzer:3000) never were.
+  - name: WebUrlRecognizer
+    supported_entity: URL
+    type: custom
+    patterns:
+      - name: URL with a scheme
+        regex: "\\b(?:https?|ftp)://(?:[a-z0-9-]{1,63}\\.){1,10}[a-z]{2,63}(?::[0-9]{1,5})?(?:[/?#][^\\s<>\\\"'`]{0,2048})?"
+        score: 0.6
+      - name: URL starting with www
+        regex: "\\bwww[0-9]{0,3}\\.(?:[a-z0-9-]{1,63}\\.){1,10}[a-z]{2,63}(?::[0-9]{1,5})?(?:[/?#][^\\s<>\\\"'`]{0,2048})?"
+        score: 0.5
+    context: [url, website, link]
+
+  # - IPv4 is the upstream pattern. IPv6 needs at least two hex groups and a
+  #   digit, so "::" (std::io), "de::" (serde::de), and "f32::" (f32::MAX) are
+  #   not addresses; the unspecified "::" and loopback "::1" are not personal
+  #   data.
+  - name: IpAddressRecognizer
+    supported_entity: IP_ADDRESS
+    type: custom
+    patterns:
+      - name: IPv4
+        regex: "\\b(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}\\b"
+        score: 0.6
+      - name: IPv6
+        regex: "(?<![\\w:.])(?=[0-9a-f:]{0,45}[0-9])(?:(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,6}(?::[0-9a-f]{1,4}){1,6})(?![\\w:])"
+        score: 0.6
+    context: [ip, ipv4, ipv6]
