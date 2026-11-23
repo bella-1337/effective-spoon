@@ -32,7 +32,7 @@ Profile `core` services run without a profile. Other profiles are described in
 | Presidio analyzer | `2.2.362` | `mcr.microsoft.com/presidio-analyzer` | `presidio-analyzer` (core) |
 | Presidio anonymizer | `2.2.362` | `mcr.microsoft.com/presidio-anonymizer` | `presidio-anonymizer` (core) |
 | SearXNG | `2026.11.15-2d500cb6b` | `searxng/searxng` | `searxng` (core) |
-| Xberg | `1.3.10-core` | `ghcr.io/xberg-io/xberg` | `xberg` (prod, dev) |
+| Xberg | `1.4.2-core` | `ghcr.io/xberg-io/xberg` | `xberg` (prod, dev) |
 | BIND 9 (Xberg DNS) | `9.20-26.04_stable` | `ubuntu/bind9` | `xberg-dns` (prod, dev) |
 | Squid (Xberg egress proxy) | `7.2-26.04_edge` | `ubuntu/squid` | `xberg-egress-proxy` (core) |
 

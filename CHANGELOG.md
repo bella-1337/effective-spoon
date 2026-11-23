@@ -8,6 +8,8 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+## [v0.4.1] - 2026-11-23
+
 ### Added
 
 - Optional `docs` profile that serves this documentation from the stack at
@@ -39,6 +41,10 @@ All notable changes to this stack are recorded here. The format follows
 - The notes in the Xberg and search tool-call flows no longer contain `;`,
   which Mermaid reads as the end of a statement, and the renderer now rejects
   `;` in sequence diagrams.
+- Xberg moves from `1.3.10-core` to `1.4.2-core`, still pinned by digest. The
+  version table and third-party licence register now list it too.
+- The documentation site builds with Zensical `0.1.1` (was `0.1.0`), and the
+  OpenSearch tools use psycopg `3.3.9` (was `3.3.6`).
 
 ### Fixed
 
@@ -461,7 +467,8 @@ Initial release of the self-hosted LiteLLM gateway stack.
   versioned documentation site built with Zensical and published to GitHub
   Pages or GitLab Pages.
 
-[Unreleased]: https://github.com/bella-1337/effective-spoon/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/bella-1337/effective-spoon/compare/v0.4.1...HEAD
+[v0.4.1]: https://github.com/bella-1337/effective-spoon/compare/v0.4.0...v0.4.1
 [v0.4.0]: https://github.com/bella-1337/effective-spoon/compare/v0.3.1...v0.4.0
 [v0.3.1]: https://github.com/bella-1337/effective-spoon/compare/v0.3.0...v0.3.1
 [v0.3.0]: https://github.com/bella-1337/effective-spoon/compare/v0.2.1...v0.3.0
