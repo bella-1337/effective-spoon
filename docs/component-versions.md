@@ -138,7 +138,7 @@ Deployed separately with [`gpu-host/`](../gpu-host/README.md).
 | `spacy/en_core_web_lg` | Bundled in Presidio analyzer `2.2.362` | `presidio-analyzer` |
 | `spacy/de_core_news_lg` | `3.8.0` (`presidio/spacy-models.txt`) | `presidio-analyzer` |
 | `spacy/fr_core_news_lg` | `3.8.0` (`presidio/spacy-models.txt`) | `presidio-analyzer` |
-| `qwen3.5:4b` (Ollama, outside the stack) | As pulled on the Docker host (`PII_ASSIST_OLLAMA_MODEL`) | `pii-assist` model of both gateways, when `PII_ASSIST_API_BASE` is set |
+| `pii-assist` model (your vLLM server, outside the stack) | As served under `PII_ASSIST_VLLM_MODEL` (default `gemma4`); the revision is pinned by the operator | `pii-assist` model of both gateways, when `PII_ASSIST_API_BASE` is set |
 
 ## Host tools
 

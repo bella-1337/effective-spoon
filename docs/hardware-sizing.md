@@ -111,9 +111,10 @@ the default resource limits.
 | **Total** | **~46 GB** | **~20** |
 
 BGE-M3 runs on the remote GPU host, so the dev host needs no GPU. The optional
-local `pii-assist` model runs outside the stack, for example in Ollama on the
-Docker host: `qwen3.5:4b` needs about 4 GB of memory (or GPU memory) of its
-own.
+local `pii-assist` model runs outside the stack, in your own vLLM server on
+the Docker host or a private network. vLLM needs a GPU, sized for the chosen
+model's weights plus its KV cache; on the stack host it also competes with the
+optional `d3` profile for GPU memory (`--gpu-memory-utilization`).
 
 ## Remote GPU host
 

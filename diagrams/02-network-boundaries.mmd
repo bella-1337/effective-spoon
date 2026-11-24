@@ -53,7 +53,7 @@ flowchart TD
   end
   subgraph EX["External services — outside the stack"]
     PROV["Model providers<br/>region-locked Bedrock · Azure OpenAI · Vertex AI<br/>remote GPU host"]:::external
-    OLL["Local model server (optional)<br/>Ollama on the Docker host · host.docker.internal"]:::external
+    VLM["Your vLLM server (optional)<br/>host.docker.internal or private address"]:::external
     NET["Allowlisted Internet<br/>public DNS + websites"]:::external
   end
 
@@ -80,7 +80,7 @@ flowchart TD
   ADP --> DOCK
   SDP --> DOCK
   LL ==> PROV
-  LL -->|"pii-assist, unmasked, on-host only"| OLL
+  LL -->|"pii-assist, unmasked, on-host or private, API key"| VLM
   SQ --> NET
   DNS --> NET
 

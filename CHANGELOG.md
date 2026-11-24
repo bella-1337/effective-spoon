@@ -37,15 +37,19 @@ All notable changes to this stack are recorded here. The format follows
 - Optional local-model assist (`pii-assist` guardrail,
   `litellm/modules/pii_assist.py`). See
   [Local-model assist](docs/presidio-guardrails.md#local-model-assist).
-  - Before Presidio, a local model, such as Ollama's `qwen3.5:4b` on the Docker
-    host, detects each prompt's language and personal data. The guardrail sets
+  - Before Presidio, a model served by your own vLLM server on the Docker host
+    or a private network detects each prompt's language and personal data. The guardrail sets
     the request's Presidio language and masks what the model found, except
     organisation names. Presidio then masks the rest, so it remains the
     baseline; on any model failure the request continues with Presidio alone.
-  - Enable it with `PII_ASSIST_API_BASE` (and `PII_ASSIST_OLLAMA_MODEL`) in
-    `.env`. The gateways accept only `host.docker.internal`, a Compose service,
-    or a private address, because the model reads prompts unmasked, and reach
-    the Docker host through `extra_hosts: host.docker.internal:host-gateway`.
+  - Enable it with `PII_ASSIST_API_BASE`, `PII_ASSIST_API_KEY`, and
+    `PII_ASSIST_VLLM_MODEL` (the served model name, default `gemma4`) in
+    `.env`; the gateways add it as `hosted_vllm/<name>`. They accept only
+    `host.docker.internal`, a Compose service, or a private address, and
+    require the vLLM server's API key, because the model reads prompts
+    unmasked. They reach the Docker host through
+    `extra_hosts: host.docker.internal:host-gateway`. Answers are constrained
+    to a JSON schema with vLLM's structured output.
     `PII_ASSIST_MAX_CHUNK_CHARS`, `PII_ASSIST_MAX_CALLS`, and
     `PII_ASSIST_TIMEOUT_SECONDS` bound the cost; results are cached per text.
   - LiteLLM (checked up to 1.111.0-dev.4) ignores the per-request Presidio
@@ -59,7 +63,12 @@ All notable changes to this stack are recorded here. The format follows
     in the prompt are masked.
   - Approach: the BerriAI Inference Stack has no data protection to compare.
     LiteLLM cannot detect a request's language, so a local model through
-    LiteLLM was chosen; D3-mini was considered and not used.
+    LiteLLM was chosen; D3-mini was considered and not used. The model is
+    served by an operator-run vLLM server rather than Ollama, and the stack
+    does not run it: an on-host Compose profile like `d3` and the remote GPU
+    host were considered. The reference stack deploys vLLM through its
+    launcher and registers models at runtime, which this stack's static,
+    pinned model configuration does not allow.
 
 ### Changed
 
@@ -79,8 +88,9 @@ All notable changes to this stack are recorded here. The format follows
   the German and French pipelines, and masking stops.
 - Build the new analyzer image (`docker compose build presidio-analyzer`) and
   recreate `presidio-analyzer` and both gateways.
-- To use the local-model assist, run Ollama on the Docker host, pull the model,
-  and set `PII_ASSIST_API_BASE`. Without it, nothing else changes: Presidio
+- To use the local-model assist, run a vLLM server with an API key on the
+  Docker host or a private network, and set `PII_ASSIST_API_BASE`,
+  `PII_ASSIST_API_KEY`, and `PII_ASSIST_VLLM_MODEL`. Without it, nothing else changes: Presidio
   runs alone, in English, unless a client sets the language.
 
 ### Fixed

@@ -161,8 +161,9 @@ It also refuses a `D3_DECISION_API_BASE` that is not an HTTPS base URL, except
    `CODING_ROUTER_DEFAULT_MODEL` is set.
 5. The `eu-data-protection` policy runs two guardrails. When
    `PII_ASSIST_API_BASE` is set, `pii-assist` first asks the local
-   `pii-assist` model (for example Ollama on the Docker host, never a cloud
-   API) for the prompt's language and personal data and masks what it finds.
+   `pii-assist` model (served by your own vLLM server on the Docker host or a
+   private network, never a cloud API) for the prompt's language and personal
+   data and masks what it finds.
    `presidio-pii` then calls the Presidio analyzer, in English, German, or
    French, and the anonymizer.
 6. LiteLLM stores request/spend telemetry in its profile-specific PostgreSQL

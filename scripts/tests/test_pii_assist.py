@@ -135,7 +135,9 @@ class AssistHookTests(unittest.TestCase):
         )
         call = router.calls[0]
         self.assertEqual(call["model"], "pii-assist")
-        self.assertEqual(call["reasoning_effort"], "none")
+        # LiteLLM forwards reasoning_effort to vLLM unchanged; vLLM may reject "none".
+        self.assertNotIn("reasoning_effort", call)
+        self.assertEqual(call["extra_body"], {"chat_template_kwargs": {"enable_thinking": False}})
         self.assertEqual(call["response_format"]["type"], "json_schema")
 
     def test_text_parts_and_roles(self) -> None:
@@ -300,35 +302,64 @@ class RuntimeConfigTests(unittest.TestCase):
         self.assertIsNone(self.module.with_pii_assist(config, {}))
         self.assertEqual(config["model_list"], [])
 
-    def test_adds_local_model(self) -> None:
+    KEY = "k" * 64
+
+    def test_adds_local_vllm_model(self) -> None:
         config: dict[str, Any] = {"model_list": [{"model_name": "d3-mini"}]}
-        model = self.module.with_pii_assist(config, {"PII_ASSIST_API_BASE": "http://host.docker.internal:11434/"})
-        self.assertEqual(model, "qwen3.5:4b")
+        environ = {"PII_ASSIST_API_BASE": "http://host.docker.internal:8000/", "PII_ASSIST_API_KEY": self.KEY}
+        model = self.module.with_pii_assist(config, environ)
+        self.assertEqual(model, "gemma4")
         entry = config["model_list"][-1]
         self.assertEqual(entry["model_name"], "pii-assist")
-        self.assertEqual(entry["litellm_params"]["model"], "ollama_chat/qwen3.5:4b")
-        self.assertEqual(entry["litellm_params"]["api_base"], "http://host.docker.internal:11434")
+        self.assertEqual(entry["litellm_params"]["model"], "hosted_vllm/gemma4")
+        self.assertEqual(entry["litellm_params"]["api_base"], "http://host.docker.internal:8000/v1")
+        # The key stays in the environment, not in the written runtime config.
+        self.assertEqual(entry["litellm_params"]["api_key"], "os.environ/PII_ASSIST_API_KEY")
+        self.assertNotIn(self.KEY, repr(config))
+
+    def test_served_model_name_or_repository_id(self) -> None:
+        base = {"PII_ASSIST_API_BASE": "http://vllm:8000", "PII_ASSIST_API_KEY": self.KEY}
+        for name in ("gemma4", "pii-model_2", "google/some-model-it"):
+            with self.subTest(name=name):
+                config: dict[str, Any] = {"model_list": []}
+                self.assertEqual(self.module.with_pii_assist(config, {**base, "PII_ASSIST_VLLM_MODEL": name}), name)
+                self.assertEqual(config["model_list"][0]["litellm_params"]["model"], f"hosted_vllm/{name}")
 
     def test_accepts_only_local_addresses(self) -> None:
-        for base in ("http://host.docker.internal:11434", "http://ollama:11434", "https://10.0.0.5", "http://192.168.1.20:11434"):
+        for base, expected in (
+            ("http://host.docker.internal:8000", "http://host.docker.internal:8000/v1"),
+            ("http://vllm:8000/v1", "http://vllm:8000/v1"),
+            ("http://vllm:8000/v1/", "http://vllm:8000/v1"),
+            ("https://10.0.0.5", "https://10.0.0.5/v1"),
+            ("http://192.168.1.20:8000/", "http://192.168.1.20:8000/v1"),
+        ):
             with self.subTest(base=base):
-                self.module.validate_local_api_base(base)
+                self.assertEqual(self.module.validate_local_api_base(base), expected)
         for base in (
             "https://api.openai.com",
-            "http://ollama.example.com:11434",
-            "http://8.8.8.8:11434",
+            "http://vllm.example.com:8000",
+            "http://8.8.8.8:8000",
             "http://169.254.169.254",
-            "http://host.docker.internal:11434/v1",
-            "http://user:pass@ollama:11434",
-            "ftp://ollama",
+            "http://host.docker.internal:8000/v2",
+            "http://host.docker.internal:8000/v1/chat/completions",
+            "http://user:pass@vllm:8000",
+            "ftp://vllm",
         ):
             with self.subTest(base=base), self.assertRaises(ValueError):
                 self.module.validate_local_api_base(base)
 
+    def test_requires_an_api_key(self) -> None:
+        base = {"PII_ASSIST_API_BASE": "http://vllm:8000"}
+        for key in (None, "", "short", "k" * 31, "replace_with_" + "k" * 32, "k" * 40 + " x", "k" * 513):
+            environ = base if key is None else {**base, "PII_ASSIST_API_KEY": key}
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                self.module.with_pii_assist({"model_list": []}, environ)
+
     def test_rejects_bad_model_names_and_name_clashes(self) -> None:
-        base = {"PII_ASSIST_API_BASE": "http://ollama:11434"}
-        with self.assertRaises(ValueError):
-            self.module.with_pii_assist({"model_list": []}, {**base, "PII_ASSIST_OLLAMA_MODEL": "qwen; rm -rf"})
+        base = {"PII_ASSIST_API_BASE": "http://vllm:8000", "PII_ASSIST_API_KEY": self.KEY}
+        for name in ("gemma; rm -rf", "a/b/c", "../gemma", "gemma4:latest"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                self.module.with_pii_assist({"model_list": []}, {**base, "PII_ASSIST_VLLM_MODEL": name})
         with self.assertRaises(ValueError):
             self.module.with_pii_assist({"model_list": [{"model_name": "pii-assist"}]}, base)
 

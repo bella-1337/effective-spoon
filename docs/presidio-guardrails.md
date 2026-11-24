@@ -150,32 +150,52 @@ about every new prompt text before Presidio runs:
    recognizers.
 3. **Presidio** then masks everything else its recognizers find, as before.
 
-Enable it by pointing the gateways at a model server on the Docker host or a
-private network, for example Ollama:
+Enable it by running your own [vLLM](https://docs.vllm.ai/) server on the
+Docker host or a private network and pointing the gateways at it. The stack
+does not run or pin this server. For example, on the Docker host:
 
 ```sh
-ollama pull qwen3.5:4b
+openssl rand -hex 32   # the key, also set as PII_ASSIST_API_KEY
+vllm serve <Hugging Face repository> --served-model-name gemma4 \
+  --api-key "$PII_ASSIST_API_KEY" --port 8000
 # .env
-PII_ASSIST_API_BASE=http://host.docker.internal:11434
-PII_ASSIST_OLLAMA_MODEL=qwen3.5:4b
+PII_ASSIST_API_BASE=http://host.docker.internal:8000
+PII_ASSIST_API_KEY=<the same key>
+PII_ASSIST_VLLM_MODEL=gemma4
 ```
 
+`PII_ASSIST_VLLM_MODEL` is the name vLLM serves the model under: the
+`--served-model-name`, or the repository id when that flag is not given.
+`/v1` is added to the base URL. Pin the repository to a revision
+(`--revision`), check its licence, and test its detection in English, German,
+and French before relying on it.
+
 Then recreate both gateways. At start-up, `prepare_runtime_config.py` adds the
-model as `pii-assist` and logs `PII assist model: pii-assist (ollama
-qwen3.5:4b)`. Without `PII_ASSIST_API_BASE` the guardrail does nothing and
-Presidio runs alone, in English. The gateways reach the Docker host through
-`host.docker.internal` (built into Docker Desktop, added by `extra_hosts` on
-Linux).
+model as `pii-assist` (`hosted_vllm/<name>`) and logs `PII assist model:
+pii-assist (vLLM gemma4)`. Without `PII_ASSIST_API_BASE` the guardrail does
+nothing and Presidio runs alone, in English. With it, the gateways refuse to
+start unless `PII_ASSIST_API_KEY` is 32-512 URL-safe characters. The key is
+read from the environment and not written into the runtime config. The
+gateways reach the Docker host through `host.docker.internal` (built into
+Docker Desktop, added by `extra_hosts` on Linux). For an `https` base, the
+server's certificate must be trusted by the gateways' `SSL_CERT_FILE` bundle.
+
+Each call asks for JSON that matches the guardrail's schema
+(`response_format`), which vLLM enforces with structured output. It also sends
+`chat_template_kwargs: {"enable_thinking": false}`, which chat templates with
+a thinking mode (such as Qwen3) read and others ignore. It does not send
+`reasoning_effort`.
 
 Things to know:
 
 - **Data stays on the host.** Prompts reach this model unmasked. The gateways
   refuse a `PII_ASSIST_API_BASE` that is not `host.docker.internal`, a Compose
-  service name, or a private address, so it cannot point at a cloud API.
-- **Latency.** With `qwen3.5:4b` on the test host, a new prompt took about 1-4
-  seconds more; the first call after the model unloads takes up to about
-  9 seconds (`keep_alive` holds it for 30 minutes). Results are cached per
-  text, so a conversation's history is not analysed again.
+  service name, or a private address, so it cannot point at a cloud API, and
+  they require the server's API key.
+- **Latency.** Not yet measured with vLLM. vLLM keeps the model loaded, so
+  there is no cold load after start-up; measure a new prompt's added time on
+  your host. Results are cached per text, so a conversation's history is not
+  analysed again.
 - **Budget.** Long prompts are split into `PII_ASSIST_MAX_CHUNK_CHARS` pieces,
   and at most `PII_ASSIST_MAX_CALLS` new pieces per request go to the model,
   newest first. The rest is masked by Presidio alone.

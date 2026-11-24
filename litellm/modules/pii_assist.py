@@ -1,8 +1,9 @@
 """Local-model language and personal-data assist for the presidio-pii guardrail.
 
 Runs as the `pii-assist` guardrail in pre_call, before `presidio-pii`. For each
-request it asks the local `pii-assist` model (an on-host model such as Ollama's
-qwen3.5:4b, never a cloud provider) for the language of the prompt and the
+request it asks the local `pii-assist` model (served by a vLLM server on the
+host or the private network, never a cloud provider) for the language of the
+prompt and the
 personal data in it, then:
 
 1. sets the request's Presidio language (`metadata.guardrail_config.language`)
@@ -288,8 +289,13 @@ class PiiAssistGuardrail(CustomGuardrail):
             router.acompletion(
                 model=self.assist_model,
                 messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": chunk}],
+                # vLLM's structured output constrains the answer to this schema.
                 response_format={"type": "json_schema", "json_schema": {"name": "personal_data", "schema": response_schema()}},
-                reasoning_effort="none",
+                # No reasoning: chat templates that support thinking (Qwen3 and
+                # similar) read enable_thinking; other templates ignore it.
+                # reasoning_effort is not sent, because LiteLLM forwards it to
+                # vLLM unchanged and vLLM may reject "none".
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
                 temperature=0,
             ),
             timeout=self.timeout,

@@ -201,9 +201,13 @@ def with_sovereign_models(config: dict[str, Any], environ: Mapping[str, str]) ->
 
 PII_ASSIST_MODEL_NAME = "pii-assist"
 PII_ASSIST_API_BASE_ENV = "PII_ASSIST_API_BASE"
-PII_ASSIST_OLLAMA_MODEL_ENV = "PII_ASSIST_OLLAMA_MODEL"
-PII_ASSIST_DEFAULT_OLLAMA_MODEL = "qwen3.5:4b"
-OLLAMA_MODEL_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}(?::[a-z0-9][a-z0-9._-]{0,63})?")
+PII_ASSIST_API_KEY_ENV = "PII_ASSIST_API_KEY"
+PII_ASSIST_VLLM_MODEL_ENV = "PII_ASSIST_VLLM_MODEL"
+# The name the vLLM server serves (vllm serve ... --served-model-name gemma4).
+PII_ASSIST_DEFAULT_VLLM_MODEL = "gemma4"
+# A served model name or a Hugging Face repository id (organisation/name).
+VLLM_MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,95})?")
+API_KEY_RE = re.compile(r"[A-Za-z0-9._~-]{32,512}")
 
 
 def validate_local_api_base(value: str) -> str:
@@ -213,13 +217,16 @@ def validate_local_api_base(value: str) -> str:
     if (
         parsed.scheme not in {"http", "https"}
         or not host
-        or parsed.path not in {"", "/"}
+        or parsed.path not in {"", "/", "/v1", "/v1/"}
         or parsed.query
         or parsed.fragment
         or parsed.username
         or parsed.password
     ):
-        raise ValueError(f"{PII_ASSIST_API_BASE_ENV} must be an http(s) base URL without a path or credentials")
+        raise ValueError(
+            f"{PII_ASSIST_API_BASE_ENV} must be an http(s) base URL, optionally ending in /v1, "
+            "without other path segments or credentials"
+        )
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
@@ -235,18 +242,28 @@ def validate_local_api_base(value: str) -> str:
             "private address: personal data is sent to this model unmasked, so it must not be a "
             "cloud API (cloud models come only from the region-locked provider variables)"
         )
-    return value.rstrip("/")
+    # vLLM serves its OpenAI-compatible API under /v1.
+    return f"{parsed.scheme}://{parsed.netloc}/v1"
 
 
 def with_pii_assist(config: dict[str, Any], environ: Mapping[str, str]) -> str | None:
-    """Add the local pii-assist model when configured; return its Ollama model name."""
+    """Add the local pii-assist model when configured; return its vLLM model name."""
     api_base = environ.get(PII_ASSIST_API_BASE_ENV, "").strip()
     if not api_base:
         return None
     api_base = validate_local_api_base(api_base)
-    model = environ.get(PII_ASSIST_OLLAMA_MODEL_ENV, "").strip() or PII_ASSIST_DEFAULT_OLLAMA_MODEL
-    if not OLLAMA_MODEL_RE.fullmatch(model):
-        raise ValueError(f"{PII_ASSIST_OLLAMA_MODEL_ENV} must be an Ollama model name such as qwen3.5:4b")
+    model = environ.get(PII_ASSIST_VLLM_MODEL_ENV, "").strip() or PII_ASSIST_DEFAULT_VLLM_MODEL
+    if not VLLM_MODEL_RE.fullmatch(model):
+        raise ValueError(
+            f"{PII_ASSIST_VLLM_MODEL_ENV} must be the model name the vLLM server serves, such as gemma4"
+        )
+    # The model reads prompts unmasked, so its server must require a key.
+    api_key = environ.get(PII_ASSIST_API_KEY_ENV, "")
+    if not API_KEY_RE.fullmatch(api_key) or api_key.startswith("replace_with_"):
+        raise ValueError(
+            f"{PII_ASSIST_API_KEY_ENV} must be 32-512 URL-safe random characters, the key the vLLM "
+            "server was started with (vllm serve ... --api-key); generate one with 'openssl rand -hex 32'"
+        )
     static = config.get("model_list") or []
     if any(isinstance(item, dict) and item.get("model_name") == PII_ASSIST_MODEL_NAME for item in static):
         raise ValueError(f"model name {PII_ASSIST_MODEL_NAME} is reserved for the PII assist model")
@@ -255,10 +272,11 @@ def with_pii_assist(config: dict[str, Any], environ: Mapping[str, str]) -> str |
         {
             "model_name": PII_ASSIST_MODEL_NAME,
             "litellm_params": {
-                "model": f"ollama_chat/{model}",
+                "model": f"hosted_vllm/{model}",
                 "api_base": api_base,
-                # Keep the model loaded: a cold load adds seconds to a request.
-                "keep_alive": "30m",
+                # Resolved by LiteLLM at start-up, so the key is not written
+                # into the runtime config file.
+                "api_key": f"os.environ/{PII_ASSIST_API_KEY_ENV}",
             },
             "model_info": {
                 "mode": "chat",
@@ -312,7 +330,7 @@ def prepare_config(
     )
     print(
         "PII assist model: "
-        + (f"{PII_ASSIST_MODEL_NAME} (ollama {assist_model})" if assist_model else "not configured; Presidio runs alone")
+        + (f"{PII_ASSIST_MODEL_NAME} (vLLM {assist_model})" if assist_model else "not configured; Presidio runs alone")
     )
     return langfuse_enabled, lens_enabled
 

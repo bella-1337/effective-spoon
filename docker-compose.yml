@@ -243,10 +243,12 @@ services:
       CODING_ROUTER_STALL_ESCALATION: ${CODING_ROUTER_STALL_ESCALATION:-}
       D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
       D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
-      # Optional local model for language and personal-data detection before
-      # Presidio (pii-assist guardrail); empty disables it. Never a cloud API.
+      # Optional local model, served by your own vLLM server, for language and
+      # personal-data detection before Presidio (pii-assist guardrail); empty
+      # disables it. Never a cloud API. The key is required when it is set.
       PII_ASSIST_API_BASE: ${PII_ASSIST_API_BASE:-}
-      PII_ASSIST_OLLAMA_MODEL: ${PII_ASSIST_OLLAMA_MODEL:-qwen3.5:4b}
+      PII_ASSIST_API_KEY: ${PII_ASSIST_API_KEY:-}
+      PII_ASSIST_VLLM_MODEL: ${PII_ASSIST_VLLM_MODEL:-gemma4}
       PII_ASSIST_MAX_CHUNK_CHARS: "${PII_ASSIST_MAX_CHUNK_CHARS:-4000}"
       PII_ASSIST_MAX_CALLS: "${PII_ASSIST_MAX_CALLS:-3}"
       PII_ASSIST_TIMEOUT_SECONDS: "${PII_ASSIST_TIMEOUT_SECONDS:-20}"
@@ -290,7 +292,7 @@ services:
         condition: service_healthy
         required: false
     cap_drop: [NET_RAW]
-    # Reaches a model server on the Docker host, such as Ollama for
+    # Reaches a model server on the Docker host, such as the vLLM server for
     # PII_ASSIST_API_BASE (built in on Docker Desktop; needed on Linux).
     extra_hosts:
       - host.docker.internal:host-gateway
@@ -415,10 +417,12 @@ services:
       CODING_ROUTER_STALL_ESCALATION: ${CODING_ROUTER_STALL_ESCALATION:-}
       D3_DECISION_API_BASE: ${D3_DECISION_API_BASE:?Set D3_DECISION_API_BASE in .env}
       D3_DECISION_API_KEY: ${D3_DECISION_API_KEY:?Set D3_DECISION_API_KEY in .env}
-      # Optional local model for language and personal-data detection before
-      # Presidio (pii-assist guardrail); empty disables it. Never a cloud API.
+      # Optional local model, served by your own vLLM server, for language and
+      # personal-data detection before Presidio (pii-assist guardrail); empty
+      # disables it. Never a cloud API. The key is required when it is set.
       PII_ASSIST_API_BASE: ${PII_ASSIST_API_BASE:-}
-      PII_ASSIST_OLLAMA_MODEL: ${PII_ASSIST_OLLAMA_MODEL:-qwen3.5:4b}
+      PII_ASSIST_API_KEY: ${PII_ASSIST_API_KEY:-}
+      PII_ASSIST_VLLM_MODEL: ${PII_ASSIST_VLLM_MODEL:-gemma4}
       PII_ASSIST_MAX_CHUNK_CHARS: "${PII_ASSIST_MAX_CHUNK_CHARS:-4000}"
       PII_ASSIST_MAX_CALLS: "${PII_ASSIST_MAX_CALLS:-3}"
       PII_ASSIST_TIMEOUT_SECONDS: "${PII_ASSIST_TIMEOUT_SECONDS:-20}"
@@ -480,7 +484,7 @@ services:
         condition: service_healthy
         required: false
     cap_drop: [NET_RAW]
-    # Reaches a model server on the Docker host, such as Ollama for
+    # Reaches a model server on the Docker host, such as the vLLM server for
     # PII_ASSIST_API_BASE (built in on Docker Desktop; needed on Linux).
     extra_hosts:
       - host.docker.internal:host-gateway

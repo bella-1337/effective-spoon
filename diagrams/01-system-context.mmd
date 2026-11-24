@@ -33,7 +33,7 @@ flowchart TD
   subgraph EX["External services — outside the stack"]
     EUP["Regional model providers<br/>in DATA_SOVEREIGNTY_REGION<br/>Bedrock · Azure OpenAI · Vertex AI"]:::external
     D3["Remote GPU host<br/>D3-mini classifier · dev BGE-M3"]:::external
-    OLL["Local model server<br/>e.g. Ollama on the Docker host · pii-assist"]:::external
+    VLM["Your vLLM server<br/>Docker host or private network · pii-assist"]:::external
     SE["Public search engines<br/>scraped by SearXNG"]:::external
     WEB["Allowlisted websites<br/>security/xberg-destinations.toml"]:::external
   end
@@ -54,7 +54,7 @@ flowchart TD
   XB --> SQ
   LL ==>|"HTTPS"| EUP
   LL -->|"TLS + bearer"| D3
-  LL -->|"pii-assist: language + personal data"| OLL
+  LL -->|"pii-assist: language + personal data, API key"| VLM
   SX --> SE
   SQ --> WEB
 
