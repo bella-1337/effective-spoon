@@ -165,7 +165,10 @@ It also refuses a `D3_DECISION_API_BASE` that is not an HTTPS base URL, except
    private network, never a cloud API) for the prompt's language and personal
    data and masks what it finds.
    `presidio-pii` then calls the Presidio analyzer, in English, German, or
-   French, and the anonymizer.
+   French, and the anonymizer. With `PII_REVERSIBLE_MASKING=true`, both send
+   numbered tokens such as `<PERSON_1>` to the provider instead of
+   placeholders, and `pii-restore` puts the request's own values back into the
+   response after `presidio-pii` has masked it.
 6. LiteLLM stores request/spend telemetry in its profile-specific PostgreSQL
    database and emits Prometheus metrics.
 

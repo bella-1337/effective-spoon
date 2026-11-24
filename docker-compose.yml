@@ -252,6 +252,11 @@ services:
       PII_ASSIST_MAX_CHUNK_CHARS: "${PII_ASSIST_MAX_CHUNK_CHARS:-4000}"
       PII_ASSIST_MAX_CALLS: "${PII_ASSIST_MAX_CALLS:-3}"
       PII_ASSIST_TIMEOUT_SECONDS: "${PII_ASSIST_TIMEOUT_SECONDS:-20}"
+      # true: masked values go to the provider as numbered tokens (<PERSON_1>)
+      # and come back as the original values in the response; the request
+      # keeps them AES-GCM encrypted with a per-process key. See
+      # litellm/modules/pii_vault.py.
+      PII_REVERSIBLE_MASKING: "${PII_REVERSIBLE_MASKING:-false}"
       # Public roots plus the GPU host mkcert CA (D3-mini and BGE-M3 over TLS).
       SSL_CERT_FILE: /etc/ssl/certs/gpu-host-ca-bundle.pem
       LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"
@@ -426,6 +431,11 @@ services:
       PII_ASSIST_MAX_CHUNK_CHARS: "${PII_ASSIST_MAX_CHUNK_CHARS:-4000}"
       PII_ASSIST_MAX_CALLS: "${PII_ASSIST_MAX_CALLS:-3}"
       PII_ASSIST_TIMEOUT_SECONDS: "${PII_ASSIST_TIMEOUT_SECONDS:-20}"
+      # true: masked values go to the provider as numbered tokens (<PERSON_1>)
+      # and come back as the original values in the response; the request
+      # keeps them AES-GCM encrypted with a per-process key. See
+      # litellm/modules/pii_vault.py.
+      PII_REVERSIBLE_MASKING: "${PII_REVERSIBLE_MASKING:-false}"
       # Public roots plus the GPU host mkcert CA (D3-mini and BGE-M3 over TLS).
       SSL_CERT_FILE: /etc/ssl/certs/gpu-host-ca-bundle.pem
       LITELLM_OTEL_V2: "${LITELLM_OTEL_V2:-true}"

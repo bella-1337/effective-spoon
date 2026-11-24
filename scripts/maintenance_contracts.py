@@ -1372,6 +1372,7 @@ DATA_PROTECTION_POLICY_LINES = (
     "      add:",
     "        - pii-assist",
     "        - presidio-pii",
+    "        - pii-restore",
     "  local-pii-assist:",
     "    description: *",
     "    guardrails:",
@@ -1391,7 +1392,9 @@ def data_protection_policy_failures(source: str) -> list[str]:
     The global attachment is a default (it applies when nothing else matches), so
     any other attachment would silently remove masking from the requests it
     matches. The only other one allowed exempts the on-host detection model,
-    which must see text unmasked; pii-assist must run before presidio-pii.
+    which must see text unmasked; pii-assist must run before presidio-pii, and
+    pii-restore (which puts reversibly masked values back into the response)
+    after it.
     """
     lines = [
         line.rstrip()
@@ -1407,7 +1410,7 @@ def data_protection_policy_failures(source: str) -> list[str]:
         return []
     return [
         "litellm/modules/policies/eu-data-protection.yaml must attach eu-data-protection "
-        "(pii-assist, then presidio-pii) as the global default and exempt only the "
+        "(pii-assist, presidio-pii, then pii-restore) as the global default and exempt only the "
         f"{PII_ASSIST_MODEL} model; any other attachment would remove masking from the "
         "requests it matches"
     ]

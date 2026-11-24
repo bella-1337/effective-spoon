@@ -16,6 +16,9 @@ configured, slow, or unavailable, the request continues with Presidio alone in
 the default language. Organisation names are not masked. Nothing from the
 prompt is logged.
 
+With PII_REVERSIBLE_MASKING=true, items become numbered tokens such as
+`<PERSON_1>` that the gateway restores in the response (pii_vault.py).
+
 Settings (gateway environment):
   PII_ASSIST_MAX_CHUNK_CHARS  characters sent to the model per call (default 4000)
   PII_ASSIST_MAX_CALLS        model calls per request for uncached text (default 3)
@@ -26,17 +29,40 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import json
 import os
 import re
+import sys
 import time
 from collections import OrderedDict
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 from litellm._logging import verbose_proxy_logger
 from litellm.integrations.custom_guardrail import CustomGuardrail
 from litellm.types.guardrails import GuardrailEventHooks
+
+
+
+def _load_vault() -> ModuleType:
+    """pii_vault.py, loaded once per process under one name: it holds the key."""
+    name = "litellm_stack_pii_vault"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name("pii_vault.py"))
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            del sys.modules[name]
+            raise
+    return sys.modules[name]
+
+
+pii_vault = _load_vault()
 
 ASSIST_MODEL = "pii-assist"
 DEFAULT_LANGUAGE = "en"
@@ -61,8 +87,9 @@ PLACEHOLDER_NAMES = (
     "US_ITIN", "US_PASSPORT", "US_SSN", "ID_NUMBER", "CUSTOM_TERM",
 )
 # Case-sensitive even under the analyzer's IGNORECASE default, and only a whole
-# detection that is nothing but one placeholder (with brackets or punctuation).
-PLACEHOLDER_ALLOW_PATTERN = r"^[\W_]*(?-i:(?:%s))[\W_]*$" % "|".join(PLACEHOLDER_NAMES)
+# detection that is nothing but one placeholder (with brackets or punctuation),
+# numbered (PERSON_1) when reversible masking is on.
+PLACEHOLDER_ALLOW_PATTERN = r"^[\W_]*(?-i:(?:%s))(?:_[1-9][0-9]{0,4})?[\W_]*$" % "|".join(PLACEHOLDER_NAMES)
 MAX_ITEMS_PER_CALL = 200
 MAX_ITEM_CHARS = 200
 CACHE_ENTRIES = 2048
@@ -137,19 +164,22 @@ def parse_answer(content: Any, source: str) -> tuple[str | None, list[tuple[str,
 
 
 def masking_pattern(items: list[tuple[str, str]], ignored: frozenset[str]) -> tuple[re.Pattern[str], dict[str, str]] | None:
-    """One regex for every term to mask, longest first, never inside a longer word."""
-    placeholders: dict[str, str] = {}
+    """One regex for every term to mask, longest first, never inside a longer word.
+
+    Returns the regex and, per term, its entity name (PERSON, LOCATION, ...).
+    """
+    entities: dict[str, str] = {}
     for text, kind in items:
         if kind not in ignored:
-            placeholders.setdefault(text, f"<{PLACEHOLDER_TYPES.get(kind, kind)}>")
-    if not placeholders:
+            entities.setdefault(text, PLACEHOLDER_TYPES.get(kind, kind))
+    if not entities:
         return None
     alternatives = []
-    for text in sorted(placeholders, key=len, reverse=True):
+    for text in sorted(entities, key=len, reverse=True):
         before = r"(?<!\w)" if re.match(r"\w", text) else ""
         after = r"(?!\w)" if re.search(r"\w$", text) else ""
         alternatives.append(f"{before}{re.escape(text)}{after}")
-    return re.compile("|".join(alternatives)), placeholders
+    return re.compile("|".join(alternatives)), entities
 
 
 # Address parts the model can leave between its placeholders. Masking its
@@ -158,18 +188,33 @@ def masking_pattern(items: list[tuple[str, str]], ignored: frozenset[str]) -> tu
 # A five-digit number directly before a masked city is a postcode, and a short
 # number directly after a masked street, at the end of the line or before a
 # comma, is a house number.
-POSTCODE_BEFORE_CITY = re.compile(r"\b\d{5}[ \t]+<LOCATION>")
-HOUSE_NUMBER_AFTER_STREET = re.compile(r"<LOCATION>[ \t]\d{1,3}[a-zA-Z]?(?=[ \t]*(?:,|\n|$))")
+POSTCODE_BEFORE_CITY = re.compile(r"\b(\d{5})([ \t]+)(<LOCATION(?:_[1-9][0-9]{0,4})?>)")
+HOUSE_NUMBER_AFTER_STREET = re.compile(
+    r"(<LOCATION(?:_[1-9][0-9]{0,4})?>)([ \t])(\d{1,3}[a-zA-Z]?)(?=[ \t]*(?:,|\n|$))"
+)
 
 
-def mask(text: str, compiled: tuple[re.Pattern[str], dict[str, str]] | None) -> str:
+def mask(text: str, compiled: tuple[re.Pattern[str], dict[str, str]] | None, vault: Any = None) -> str:
+    """Replace each term with <ENTITY>, or with the request vault's numbered token."""
     if compiled is None:
         return text
-    pattern, placeholders = compiled
-    masked = pattern.sub(lambda match: placeholders[match.group(0)], text)
-    if "<LOCATION>" in masked:
-        masked = POSTCODE_BEFORE_CITY.sub("<LOCATION>", masked)
-        masked = HOUSE_NUMBER_AFTER_STREET.sub("<LOCATION>", masked)
+    pattern, entities = compiled
+
+    def placeholder(value: str, entity: str) -> str:
+        return vault.token_for(value, entity) if vault is not None else f"<{entity}>"
+
+    masked = pattern.sub(lambda match: placeholder(match.group(0), entities[match.group(0)]), text)
+    if "<LOCATION" in masked:
+
+        def joined(token: str, before: str, after: str) -> str:
+            # With a vault, the whole address part becomes one restorable token.
+            if vault is None:
+                return "<LOCATION>"
+            value = vault.original(token)
+            return placeholder(f"{before}{value}{after}", "LOCATION") if value is not None else token
+
+        masked = POSTCODE_BEFORE_CITY.sub(lambda m: joined(m.group(3), m.group(1) + m.group(2), ""), masked)
+        masked = HOUSE_NUMBER_AFTER_STREET.sub(lambda m: joined(m.group(1), "", m.group(2) + m.group(3)), masked)
     return masked
 
 
@@ -258,6 +303,7 @@ def install_presidio_language_shim() -> bool:
 class PiiAssistGuardrail(CustomGuardrail):
     def __init__(self, **kwargs: Any) -> None:
         install_presidio_language_shim()
+        pii_vault.install_reversible_masking_shim()
         self.assist_model = ASSIST_MODEL
         self.chunk_chars = _int_setting("PII_ASSIST_MAX_CHUNK_CHARS", 4000, 500, 16000)
         self.max_calls = _int_setting("PII_ASSIST_MAX_CALLS", 3, 0, 10)
@@ -359,8 +405,9 @@ class PiiAssistGuardrail(CustomGuardrail):
         compiled = masking_pattern(items, GATEWAY_IGNORED_TYPES)
         masked = 0
         if compiled is not None:
+            vault = pii_vault.request_vault(data)
             for container, key, text in parts:
-                new_text = mask(text, compiled)
+                new_text = mask(text, compiled, vault)
                 if new_text != text:
                     container[key] = new_text
                     masked += 1

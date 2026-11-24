@@ -647,10 +647,12 @@ WHERE vector_store_id = 'sme-knowledge'
                                               {"Authorization": headers["Authorization"], "Content-Type": "application/json"},
                                               {"model": verification_chat_model() or "d3-mini"})
                 guards = resolution.get("effective_guardrails", []) if isinstance(resolution, dict) else []
-                if guards == ["pii-assist", "presidio-pii"]:
-                    self.pass_(f"presidio: {profile} policy resolution runs pii-assist, then presidio-pii")
+                if guards == ["pii-assist", "presidio-pii", "pii-restore"]:
+                    self.pass_(f"presidio: {profile} policy resolution runs pii-assist, presidio-pii, then pii-restore")
                 else:
-                    self.fail_(f"presidio: {profile} policy resolution is not pii-assist, then presidio-pii: {guards}")
+                    self.fail_(
+                        f"presidio: {profile} policy resolution is not pii-assist, presidio-pii, then pii-restore: {guards}"
+                    )
                     bad = True
         return int(bad)
 

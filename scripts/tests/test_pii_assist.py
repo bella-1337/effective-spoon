@@ -379,6 +379,8 @@ class PolicyContractTests(unittest.TestCase):
         for changed in (
             self.source + "  - policy: eu-data-protection\n    teams: [research]\n",
             self.source.replace("        - pii-assist\n        - presidio-pii", "        - presidio-pii\n        - pii-assist"),
+            self.source.replace("        - pii-restore\n", ""),
+            self.source.replace("        - presidio-pii\n        - pii-restore", "        - pii-restore\n        - presidio-pii"),
             self.source.replace("    default: true\n", ""),
             self.source.replace('models: ["pii-assist"]', 'models: ["gpt-4o"]'),
             self.source.replace("      add: []", "      add: [presidio-pii]"),

@@ -5,8 +5,11 @@ policies:
       add:
         # Order matters: pii-assist sets the language Presidio analyzes in and
         # masks what the local model finds; presidio-pii then masks the rest.
+        # pii-restore puts the request's own values back into the response
+        # when PII_REVERSIBLE_MASKING is on, after presidio-pii masked it.
         - pii-assist
         - presidio-pii
+        - pii-restore
   # The local pii-assist model must see text unmasked to find personal data in
   # it. It runs on this host or a private network (prepare_runtime_config.py
   # refuses anything else), so nothing leaves the stack unmasked.

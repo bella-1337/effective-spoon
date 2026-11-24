@@ -26,7 +26,7 @@ sequenceDiagram
     alt key invalid or model not allowed
       LL--xC: 401 / 403 through Traefik
     else authorized
-      Note over LL: resolve the eu-data-protection policy: pii-assist, then presidio-pii
+      Note over LL: resolve the eu-data-protection policy: pii-assist, presidio-pii, pii-restore
       opt PII_ASSIST_API_BASE is set and the text is new (cached otherwise)
         LL->>VLM: pre_call: language and personal data in the input
         VLM-->>LL: language (en, de, fr) and items
@@ -34,6 +34,9 @@ sequenceDiagram
       end
       LL->>PR: pre_call: mask PII in the input, in that language
       PR-->>LL: masked input
+      opt PII_REVERSIBLE_MASKING is true
+        Note over LL: numbered tokens (PERSON_1) instead of placeholders, originals AES-GCM encrypted in the request
+      end
       opt model is coding-router
         LL->>D3: classify the request (routing sequence)
         D3-->>LL: tier
@@ -42,6 +45,9 @@ sequenceDiagram
       EUP-->>LL: completion
       LL->>PR: post_call: mask PII in the output
       PR-->>LL: masked output
+      opt PII_REVERSIBLE_MASKING is true
+        Note over LL: pii-restore decrypts the request's tokens back to its own values
+      end
       LL-)OBS: spend log, metrics, content-free span
       LL-->>TR: response
       TR-->>C: response

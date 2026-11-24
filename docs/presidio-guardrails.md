@@ -132,6 +132,52 @@ What still happens:
 `scripts/tests/test_presidio_recognizers.py` lists the URLs, addresses, file
 names, and code that must and must not match.
 
+## Reversible masking
+
+By default, masking is one-way: the provider gets `<PERSON>`, and so does the
+client, because the answer can only repeat the placeholder. With
+`PII_REVERSIBLE_MASKING=true` in `.env` (recreate both gateways), the gateway
+encrypts what it masks and decrypts it again in the response:
+
+| Step | What happens |
+| --- | --- |
+| Request | `pii-assist` and `presidio-pii` replace each value with a numbered token: `Please write to John Smith at john.smith@example.com` becomes `Please write to <PERSON_1> at <EMAIL_ADDRESS_1>`. The same value keeps the same token in every message of the request, so the model can tell two people apart. |
+| Vault | Each original is encrypted with AES-256-GCM, with its token as authenticated data, and kept in the request's metadata (`metadata.pii_vault`) together with an HMAC-SHA-256 of each value to find repeats. Nothing in the vault is readable without the key. |
+| Provider | Sees only the tokens. |
+| Response | `presidio-pii` masks personal data the model produced itself, as before, with plain placeholders. Then the `pii-restore` guardrail decrypts the request's tokens back to their values: `Dear <PERSON_1>` reaches the client as `Dear John Smith`. Tokens that are not in the request's vault stay as they are. |
+
+The key is 256 random bits, created when a gateway process starts, never
+written to disk, logs, or `.env`, and lost when the process stops. The request
+and its response are handled by the same process, so nothing needs to share
+it. A vault copied into a log or trace cannot be decrypted after the
+request, and the gateway cannot decrypt anything later either: there is no
+decryption endpoint or stored key.
+
+`litellm/modules/pii_vault.py` implements it. It wraps two methods of
+LiteLLM's Presidio guardrail (checked with 1.108.9 and 1.111.0-dev.4); if an
+upgrade changes them, the wrapper is not installed, a warning is logged, and
+masking stays one-way. `pii-restore` is defined right after `presidio-pii` in
+`litellm/modules/guardrails/presidio.yaml` and listed after it in the policy,
+so it runs after the output masking.
+
+Things to know:
+
+- **Chat completions only.** Restoring covers `/v1/chat/completions`, streamed
+  or not: message text and tool-call arguments. Other APIs, such as
+  `/v1/responses` or `/v1/messages`, return the tokens unrestored.
+- **The model must copy the token.** A token the model changes (`<PERSON 1>`)
+  or splits is not restored. Short tokens are copied reliably; check with your
+  models.
+- **Streaming** holds back an unfinished `<TYPE_n` at the end of a chunk until
+  the next chunk shows whether it is a token, at most 48 characters.
+- **Every request is masked afresh.** The client sends its conversation with
+  the restored values, and the next request tokenises them again; numbering
+  follows the order of detection, so it usually stays the same between turns.
+- **Still pseudonymisation.** The provider gets text with personal data
+  replaced, not anonymised text, and the client gets the originals back.
+  The admin `apply_guardrail` test shows the tokens, because it covers only
+  the request side.
+
 ## Local-model assist
 
 The `pii-assist` guardrail (`litellm/modules/pii_assist.py`) asks a local model
@@ -291,9 +337,15 @@ policies:
   eu-data-protection:
     guardrails:
       add:
+        - pii-assist
         - presidio-pii
+        - pii-restore
         - new-guardrail-name
 ```
+
+The repository contract in `scripts/maintenance_contracts.py`
+(`DATA_PROTECTION_POLICY_LINES`) pins this list, so update it in the same
+change.
 
 Defining a guardrail does not apply it globally by itself. It must be added by
 an attached policy, selected explicitly in a request, or attached through

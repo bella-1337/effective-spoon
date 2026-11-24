@@ -17,3 +17,13 @@ guardrails:
       # masked. A context word such as "license" raises a real one to 0.65.
       presidio_score_thresholds:
         US_DRIVER_LICENSE: 0.4
+
+  # With PII_REVERSIBLE_MASKING=true, presidio-pii and pii-assist send numbered
+  # tokens (<PERSON_1>) to the provider, and this guardrail puts the request's
+  # own values back into the response. Defined after presidio-pii so it runs
+  # after presidio-pii's output masking. Does nothing when the setting is off.
+  # See litellm/modules/pii_vault.py.
+  - guardrail_name: pii-restore
+    litellm_params:
+      guardrail: modules.pii_vault.PiiRestoreGuardrail
+      mode: post_call

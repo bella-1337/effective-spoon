@@ -70,11 +70,36 @@ All notable changes to this stack are recorded here. The format follows
     launcher and registers models at runtime, which this stack's static,
     pinned model configuration does not allow.
 
+- Optional reversible masking (`PII_REVERSIBLE_MASKING=true`). See
+  [Reversible masking](docs/presidio-guardrails.md#reversible-masking).
+  - `pii-assist` and `presidio-pii` send numbered tokens such as `<PERSON_1>`
+    to the provider instead of `<PERSON>`; the same value keeps its token
+    across the request's messages.
+  - The originals are kept in the request's metadata, encrypted with
+    AES-256-GCM under a random key that exists only in the gateway process;
+    repeats are found by HMAC-SHA-256. Nothing is decryptable after the
+    request, and there is no decryption endpoint or stored key.
+  - The new `pii-restore` guardrail (`litellm/modules/pii_vault.py`), listed
+    after `presidio-pii` in the policy, decrypts the request's tokens in the
+    response after `presidio-pii` has masked what the model produced itself.
+    It covers chat completions, streamed (tokens split across chunks
+    included) or not, message text and tool-call arguments.
+  - Checked end to end with LiteLLM 1.108.9 and 1.111.0-dev.4, the stack's
+    Presidio services, and a recording fake provider: the provider received
+    only tokens, and the client received its own values back.
+  - Approach: the BerriAI Inference Stack has no data protection to compare.
+    LiteLLM can neither switch Presidio to its `encrypt` operator nor keep
+    tokens apart across messages (its `output_parse_pii` numbers each message
+    from 1 and keeps the originals in plain text), so a module wraps its
+    Presidio guardrail. Short tokens with an encrypted map were chosen over
+    putting AES ciphertext in the prompt, which models corrupt when they copy
+    it, and restoring in the response over an admin decryption endpoint.
+
 ### Changed
 
-- The `eu-data-protection` policy now runs `pii-assist`, then `presidio-pii`,
-  and is the default attachment. A new `local-pii-assist` policy exempts only
-  the local `pii-assist` model, which must see text unmasked. A repository
+- The `eu-data-protection` policy now runs `pii-assist`, `presidio-pii`, then
+  `pii-restore`, and is the default attachment. A new `local-pii-assist`
+  policy exempts only the local `pii-assist` model, which must see text unmasked. A repository
   contract allows no other policy attachment, because any other would replace
   the default masking for the requests it matches.
 - `PRESIDIO_ANALYZER_MEMORY_LIMIT` defaults to `4g` (was `2g`), and
