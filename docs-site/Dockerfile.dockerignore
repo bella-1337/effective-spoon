@@ -1,0 +1,30 @@
+# Build context of docs-site/Dockerfile; BuildKit reads this file instead of
+# the repository's .dockerignore for that Dockerfile. Allowlist only what the
+# documentation build reads, then drop hidden paths, build output, and runtime
+# state again, so .env, certificates, and local state never enter the image.
+**
+!**/*.md
+!mkdocs.yml
+!diagrams/*.mmd
+!docs/**/*.png
+!docs/**/*.svg
+!docs-site/
+!scripts/maintenance_common.py
+!scripts/render-diagrams.py
+!scripts/diagram_controls.py
+!scripts/diagram_layout.py
+!scripts/mermaid_viewer.py
+!scripts/sequence_diagrams.py
+**/.*
+site/
+public/
+dist/
+logs/
+backups/
+upgrade-state/
+security-metrics/
+security-reports/
+security-state/
+gpu-host/state/
+**/node_modules/
+**/__pycache__/

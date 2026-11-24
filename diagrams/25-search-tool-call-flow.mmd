@@ -33,7 +33,7 @@ sequenceDiagram
   PR-->>LL: masked output
   LL-)OBS: spend log, metrics, content-free span
   LL-->>APP: tool_calls through Traefik
-  Note over APP,LL: LiteLLM does not run the search for the model; the app executes the tool call
+  Note over APP,LL: LiteLLM does not run the search for the model. The app executes the tool call
   APP->>TR: POST /v1/search/searxng-search {query}
   TR->>LL: route by host
   alt key invalid or search tool not permitted

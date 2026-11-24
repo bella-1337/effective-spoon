@@ -17,6 +17,26 @@ The HTML files are self-contained, with inline SVG and no external assets.
 Use the ⏯ button to pause the animation. Animation is turned off when the
 operating system requests reduced motion.
 
+Every diagram page, animated or Mermaid, has a toolbar above the diagram:
+
+- **− / 100% / +** zooms the diagram from 50% to 400%; the percentage button
+  resets it. Ctrl or ⌘ with the mouse wheel, or a trackpad pinch, zooms too.
+  When zoomed in, drag the diagram or scroll to pan.
+- Only the diagram zooms. The legend keeps its size: an architecture diagram's
+  legend sits below the zoom area, and a sequence diagram's legend is below the
+  diagram card.
+- **⤓ SVG** and **⤓ PNG** download the whole diagram, legend included, with
+  its background. The animated SVG keeps its animation; the PNG is a still
+  image at twice the diagram's size. **⤓ NN-name.mmd** downloads the source.
+
+The links in the **Source** column open a viewer page, `NN-name.mmd.html`,
+that draws the source with Mermaid itself and shows its text. A bare `.mmd` link would download the file, because
+GitHub Pages serves it with a generic content type. The script generates the
+viewer pages beside the sources too. They load Mermaid.js and the toolbar
+script from `diagrams/assets/`, not from a CDN, so they make no third-party
+requests. The animated pages carry the toolbar script inline
+(`scripts/diagram_controls.py` adds it after dashmotion's structural check).
+
 ## Conventions
 
 In the architecture diagrams:
@@ -42,38 +62,39 @@ loops, and parallel work (`par`/`and`). A dot replays the messages in order.
 
 | Diagram | Source | Shows |
 | --- | --- | --- |
-| [System context](01-system-context.html) | [01-system-context.mmd](01-system-context.mmd) | Clients, the services inside the stack, and the external providers, search engines, and websites it calls |
-| [Network boundaries](02-network-boundaries.html) | [02-network-boundaries.mmd](02-network-boundaries.mmd) | The `edge`, `internal`, `lens-storage`, `d3-local`, `xberg-sandbox`, `egress`, and Docker-monitor networks, and what each one can reach |
-| [Observability pipeline](03-observability-pipeline.html) | [03-observability-pipeline.mmd](03-observability-pipeline.mmd) | How logs, metrics, traces, and LiteLLM usage reach OpenSearch, and how alerts leave the stack |
-| [Langfuse profile](04-langfuse-profile.html) | [04-langfuse-profile.mmd](04-langfuse-profile.mmd) | The optional Langfuse services and the `langfuse_otel` trace path |
-| [LiteLLM Lens profile](26-lens-profile.html) | [26-lens-profile.mmd](26-lens-profile.mmd) | The optional Lens service, its private ClickHouse store, agent trace uploads, and the gateway connection |
-| [On-host D3-mini profile](27-d3-profile.html) | [27-d3-profile.mmd](27-d3-profile.mmd) | The optional `d3` profile: D3-mini on the stack host's GPU, its preflight and one-shot download, and the internal `d3-local` network |
-| [Grafana profile](05-grafana-profile.html) | [05-grafana-profile.mmd](05-grafana-profile.mmd) | The optional Grafana, Loki, and `alloy-loki` services and their read-only data sources |
-| [Xberg MCP sandbox](06-xberg-mcp-sandbox.html) | [06-xberg-mcp-sandbox.mmd](06-xberg-mcp-sandbox.mmd) | MCP extraction through LiteLLM, the sandbox network, and allowlisted egress |
-| [Development model plane](07-dev-model-plane.html) | [07-dev-model-plane.mmd](07-dev-model-plane.mmd) | The dev-only Qdrant cache, remote BGE-M3 embeddings, and pgvector knowledge store |
-| [Image-security monitor](08-image-security.html) | [08-image-security.mmd](08-image-security.mmd) | Trivy and CISA KEV scanning, private evidence, and the alert path |
-| [Data layer and backups](09-data-layer.html) | [09-data-layer.mmd](09-data-layer.mmd) | Database owners, read-only readers, and the backup path to off-host storage |
-| [Production profile](21-prod-profile.html) | [21-prod-profile.mmd](21-prod-profile.mmd) | Everything the `prod` profile runs, with its clients and external providers |
-| [Development profile](22-dev-profile.html) | [22-dev-profile.mmd](22-dev-profile.mmd) | Everything the `dev` profile adds, including the local model services |
-| [Coding request path](23-coding-request-path.html) | [23-coding-request-path.mmd](23-coding-request-path.mmd) | The components a `coding-router` request passes through |
+| [System context](01-system-context.html) | [01-system-context.mmd](01-system-context.mmd.html) | Clients, the services inside the stack, and the external providers, search engines, and websites it calls |
+| [Network boundaries](02-network-boundaries.html) | [02-network-boundaries.mmd](02-network-boundaries.mmd.html) | The `edge`, `internal`, `lens-storage`, `d3-local`, `xberg-sandbox`, `egress`, and Docker-monitor networks, and what each one can reach |
+| [Observability pipeline](03-observability-pipeline.html) | [03-observability-pipeline.mmd](03-observability-pipeline.mmd.html) | How logs, metrics, traces, and LiteLLM usage reach OpenSearch, and how alerts leave the stack |
+| [Langfuse profile](04-langfuse-profile.html) | [04-langfuse-profile.mmd](04-langfuse-profile.mmd.html) | The optional Langfuse services and the `langfuse_otel` trace path |
+| [LiteLLM Lens profile](26-lens-profile.html) | [26-lens-profile.mmd](26-lens-profile.mmd.html) | The optional Lens service, its private ClickHouse store, agent trace uploads, and the gateway connection |
+| [Documentation site profile](28-docs-profile.html) | [28-docs-profile.mmd](28-docs-profile.mmd.html) | The optional `docs` profile: `zensical serve` on the deployed revision behind Traefik at `DOCS_HOST`, and how its image is built |
+| [On-host D3-mini profile](27-d3-profile.html) | [27-d3-profile.mmd](27-d3-profile.mmd.html) | The optional `d3` profile: D3-mini on the stack host's GPU, its preflight and one-shot download, and the internal `d3-local` network |
+| [Grafana profile](05-grafana-profile.html) | [05-grafana-profile.mmd](05-grafana-profile.mmd.html) | The optional Grafana, Loki, and `alloy-loki` services and their read-only data sources |
+| [Xberg MCP sandbox](06-xberg-mcp-sandbox.html) | [06-xberg-mcp-sandbox.mmd](06-xberg-mcp-sandbox.mmd.html) | MCP extraction through LiteLLM, the sandbox network, and allowlisted egress |
+| [Development model plane](07-dev-model-plane.html) | [07-dev-model-plane.mmd](07-dev-model-plane.mmd.html) | The dev-only Qdrant cache, remote BGE-M3 embeddings, and pgvector knowledge store |
+| [Image-security monitor](08-image-security.html) | [08-image-security.mmd](08-image-security.mmd.html) | Trivy and CISA KEV scanning, private evidence, and the alert path |
+| [Data layer and backups](09-data-layer.html) | [09-data-layer.mmd](09-data-layer.mmd.html) | Database owners, read-only readers, and the backup path to off-host storage |
+| [Production profile](21-prod-profile.html) | [21-prod-profile.mmd](21-prod-profile.mmd.html) | Everything the `prod` profile runs, with its clients and external providers |
+| [Development profile](22-dev-profile.html) | [22-dev-profile.mmd](22-dev-profile.mmd.html) | Everything the `dev` profile adds, including the local model services |
+| [Coding request path](23-coding-request-path.html) | [23-coding-request-path.mmd](23-coding-request-path.mmd.html) | The components a `coding-router` request passes through |
 
 ## Flows (sequence diagrams)
 
 | Diagram | Source | Shows |
 | --- | --- | --- |
-| [Chat completion request](10-chat-request-flow.html) | [10-chat-request-flow.mmd](10-chat-request-flow.mmd) | Authentication, policy, Presidio masking, routing, provider call, and telemetry for one request |
-| [coding-router tier selection](11-coding-router-flow.html) | [11-coding-router-flow.mmd](11-coding-router-flow.mmd) | D3-mini classification, environment-configured tier mapping, and the default-model fallback |
-| [Semantic cache](12-semantic-cache-flow.html) | [12-semantic-cache-flow.mmd](12-semantic-cache-flow.mmd) | The development cache opt-in, similarity threshold, hit, and miss paths |
-| [Xberg auto-indexing](13-xberg-auto-index-flow.html) | [13-xberg-auto-index-flow.mmd](13-xberg-auto-index-flow.mmd) | Extraction, the background indexing task, and its fail-closed Presidio step |
-| [Prompt that triggers an Xberg tool call](24-xberg-tool-call-flow.html) | [24-xberg-tool-call-flow.mmd](24-xberg-tool-call-flow.mmd) | From the user's prompt: the app offers the xberg tools, the model decides to call `extract`, and LiteLLM runs it through the egress allowlist and asks the model again |
-| [Prompt that triggers a search tool call](25-search-tool-call-flow.html) | [25-search-tool-call-flow.mmd](25-search-tool-call-flow.mmd) | From the user's prompt: the model decides to search, the agent runs `/v1/search/searxng-search`, and the model answers from the results |
-| [Stack start-up order](14-stack-startup-flow.html) | [14-stack-startup-flow.mmd](14-stack-startup-flow.mmd) | One-shot init jobs and health-check dependencies when a profile starts |
-| [Alerting](15-alerting-flow.html) | [15-alerting-flow.mmd](15-alerting-flow.mmd) | Rule evaluation, OpenSearch monitors, and notification routing |
-| [Image-security scan](16-image-scan-flow.html) | [16-image-scan-flow.mmd](16-image-scan-flow.mmd) | One scanner run, from the lock to SBOM generation and the release gate |
-| [Upgrade and rollback](17-upgrade-rollback-flow.html) | [17-upgrade-rollback-flow.mmd](17-upgrade-rollback-flow.mmd) | Compatibility check, rollback point, regression suite, and both rollback modes |
-| [Backup and restore](18-backup-restore-flow.html) | [18-backup-restore-flow.mmd](18-backup-restore-flow.mmd) | Validated backups and the staging-database restore |
-| [First deployment](19-first-deployment-flow.html) | [19-first-deployment-flow.mmd](19-first-deployment-flow.mmd) | The getting-started steps, including the TLS and Grafana choices |
-| [CI and release](20-ci-release-flow.html) | [20-ci-release-flow.mmd](20-ci-release-flow.mmd) | GitHub Actions and GitLab CI checks, tagged releases, publishing of the documentation site, and the manual on-prem deployment |
+| [Chat completion request](10-chat-request-flow.html) | [10-chat-request-flow.mmd](10-chat-request-flow.mmd.html) | Authentication, policy, Presidio masking, routing, provider call, and telemetry for one request |
+| [coding-router tier selection](11-coding-router-flow.html) | [11-coding-router-flow.mmd](11-coding-router-flow.mmd.html) | D3-mini classification, environment-configured tier mapping, and the default-model fallback |
+| [Semantic cache](12-semantic-cache-flow.html) | [12-semantic-cache-flow.mmd](12-semantic-cache-flow.mmd.html) | The development cache opt-in, similarity threshold, hit, and miss paths |
+| [Xberg auto-indexing](13-xberg-auto-index-flow.html) | [13-xberg-auto-index-flow.mmd](13-xberg-auto-index-flow.mmd.html) | Extraction, the background indexing task, and its fail-closed Presidio step |
+| [Prompt that triggers an Xberg tool call](24-xberg-tool-call-flow.html) | [24-xberg-tool-call-flow.mmd](24-xberg-tool-call-flow.mmd.html) | From the user's prompt: the app offers the xberg tools, the model decides to call `extract`, and LiteLLM runs it through the egress allowlist and asks the model again |
+| [Prompt that triggers a search tool call](25-search-tool-call-flow.html) | [25-search-tool-call-flow.mmd](25-search-tool-call-flow.mmd.html) | From the user's prompt: the model decides to search, the agent runs `/v1/search/searxng-search`, and the model answers from the results |
+| [Stack start-up order](14-stack-startup-flow.html) | [14-stack-startup-flow.mmd](14-stack-startup-flow.mmd.html) | One-shot init jobs and health-check dependencies when a profile starts |
+| [Alerting](15-alerting-flow.html) | [15-alerting-flow.mmd](15-alerting-flow.mmd.html) | Rule evaluation, OpenSearch monitors, and notification routing |
+| [Image-security scan](16-image-scan-flow.html) | [16-image-scan-flow.mmd](16-image-scan-flow.mmd.html) | One scanner run, from the lock to SBOM generation and the release gate |
+| [Upgrade and rollback](17-upgrade-rollback-flow.html) | [17-upgrade-rollback-flow.mmd](17-upgrade-rollback-flow.mmd.html) | Compatibility check, rollback point, regression suite, and both rollback modes |
+| [Backup and restore](18-backup-restore-flow.html) | [18-backup-restore-flow.mmd](18-backup-restore-flow.mmd.html) | Validated backups and the staging-database restore |
+| [First deployment](19-first-deployment-flow.html) | [19-first-deployment-flow.mmd](19-first-deployment-flow.mmd.html) | The getting-started steps, including the TLS and Grafana choices |
+| [CI and release](20-ci-release-flow.html) | [20-ci-release-flow.mmd](20-ci-release-flow.mmd.html) | GitHub Actions and GitLab CI checks, tagged releases, publishing of the documentation site, and the manual on-prem deployment |
 
 ## Updating diagrams
 
@@ -96,7 +117,9 @@ renderer (MIT, [csthink/dashmotion](https://github.com/csthink/dashmotion)) is
 downloaded once into `~/.cache/litellm-stack/` at the commit pinned in
 `scripts/render-diagrams.py` and checked against its SHA-256 digests, so every
 machine renders with the same code. Offline, set `DASHMOTION_SKILL_DIR` to a
-dashmotion skill directory instead.
+dashmotion skill directory instead. Mermaid.js for the viewer pages (MIT,
+[mermaid-js/mermaid](https://github.com/mermaid-js/mermaid)) is pinned the
+same way in `scripts/mermaid_viewer.py` and cached beside dashmotion.
 
 The documentation build in CI (`scripts/ci/docs.sh`, on every pull request,
 merge request, and default-branch pipeline) renders every diagram the same
@@ -175,8 +198,10 @@ The renderer supports this `sequenceDiagram` subset:
 | Numbered messages | `autonumber` |
 
 Activation markers (`+`/`-` and `activate`/`deactivate`) are accepted and not
-drawn. Keep message labels short; they wrap at 24 characters. The directives
-`%% @subtitle`, `%% @footer`, and this one apply:
+drawn. Keep message labels short; they wrap at 24 characters. Do not use `;`
+outside a `%%` comment: Mermaid reads it as the end of a statement, so the
+renderer rejects it. The directives `%% @subtitle`, `%% @footer`, and this
+one apply:
 
 | Directive | Meaning |
 | --- | --- |

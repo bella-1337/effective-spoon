@@ -2,7 +2,8 @@
 #
 # The pages are the repository's own Markdown files, published from where
 # they live: docs_dir is the repository root and exclude_docs keeps everything
-# except Markdown, the rendered diagrams, and the site assets out of the site.
+# except Markdown, the rendered diagrams with their Mermaid viewer pages and
+# self-hosted Mermaid.js, and the site assets out of the site.
 # Build and preview with scripts/build-docs.py, which installs the hash-locked
 # toolchain from docs-site/requirements.txt. Guide: docs/documentation-site.md
 
@@ -34,6 +35,7 @@ exclude_docs: |
   !*.md
   !/diagrams/*.html
   !/diagrams/*.mmd
+  !/diagrams/assets/**
   !/docs/**/*.png
   !/docs/**/*.svg
   !/docs-site/assets/**
@@ -106,8 +108,10 @@ extra:
   # Version selector: scripts/build-docs.py writes versions.json next to the
   # version directories. Pages of any version other than the latest release
   # and dev show the "outdated" banner (patterns are regular expressions).
+  # The docs profile serves one version and sets DOCS_VERSION_PROVIDER=none,
+  # which turns the selector off.
   version:
-    provider: mike
+    provider: !ENV [DOCS_VERSION_PROVIDER, mike]
     default:
       - ^latest$
       - ^dev$

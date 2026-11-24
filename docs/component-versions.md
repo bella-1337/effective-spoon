@@ -32,7 +32,7 @@ Profile `core` services run without a profile. Other profiles are described in
 | Presidio analyzer, English, German, and French (local build) | `2.2.362-1` | `litellm-presidio-analyzer` | `presidio-analyzer` (core) |
 | Presidio anonymizer | `2.2.362` | `mcr.microsoft.com/presidio-anonymizer` | `presidio-anonymizer` (core) |
 | SearXNG | `2026.11.15-2d500cb6b` | `searxng/searxng` | `searxng` (core) |
-| Xberg | `1.3.10-core` | `ghcr.io/xberg-io/xberg` | `xberg` (prod, dev) |
+| Xberg | `1.4.2-core` | `ghcr.io/xberg-io/xberg` | `xberg` (prod, dev) |
 | BIND 9 (Xberg DNS) | `9.20-26.04_stable` | `ubuntu/bind9` | `xberg-dns` (prod, dev) |
 | Squid (Xberg egress proxy) | `7.2-26.04_edge` | `ubuntu/squid` | `xberg-egress-proxy` (core) |
 
@@ -105,13 +105,19 @@ listed under Langfuse. See [On-host D3-mini](d3-mini-on-host.md).
 | Trivy | `0.76.2` | `aquasec/trivy` | Copied into the monitor image; host-mode scans |
 | Docker CLI and buildx | `29.9.3-cli` | `docker` | Copied into the monitor image |
 
+## Documentation site
+
+| Component | Version | Image | Used by (profile) |
+| --- | --- | --- | --- |
+| Documentation site (local build, Zensical serve) | `0.1.0` | `litellm-stack-docs` | `docs` (docs), built on the uv image listed under [Build base images](#build-base-images) with the Zensical toolchain pinned in `docs-site/requirements.txt` |
+
 ## Build base images
 
 | Component | Version | Image | Used by (profile) |
 | --- | --- | --- | --- |
 | Python | `3.11-slim-bookworm` | `python` | Base of `pgvector/Dockerfile` |
 | Presidio analyzer (upstream) | `2.2.362` | `mcr.microsoft.com/presidio-analyzer` | Base of `presidio/Dockerfile` |
-| uv with Python 3.13 | `0.9.30-python3.13-bookworm-slim` | `ghcr.io/astral-sh/uv` | Base of `opensearch/tools/Dockerfile` and `security/image-monitor.Dockerfile` |
+| uv with Python 3.13 | `0.9.30-python3.13-bookworm-slim` | `ghcr.io/astral-sh/uv` | Base of `opensearch/tools/Dockerfile`, `security/image-monitor.Dockerfile`, and `docs-site/Dockerfile` |
 
 ## Remote GPU host
 

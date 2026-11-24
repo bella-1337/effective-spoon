@@ -66,19 +66,21 @@ file at the release tag for a release.
 | Path | Purpose |
 | --- | --- |
 | `mkdocs.yml` | Site configuration, theme, navigation, and the rules for which files are published |
-| `docs-site/overrides/main.html` | The home page banner, the dev, local, and older-release banners, and the `noindex` header |
+| `docs-site/overrides/main.html` | The home page banner, the dev, local, deployment, and older-release banners, and the `noindex` header |
 | `docs-site/overrides/partials/` | The footer with the warranty disclaimer, licence notice, and build information, a repository link without the GitHub API call, a fix for the older-release banner script, and page content without the README's status badges, which would load third-party images |
 | `docs-site/assets/` | Logo, favicon, banner illustration, and stylesheet |
 | `docs-site/requirements.in`, `requirements.txt` | The toolchain and its hash-locked pins |
 | `scripts/build-docs.py` | Installs the toolchain, previews, builds, and assembles the versioned site |
 | `scripts/ci/docs.sh` | The single build entry point shared by GitHub Actions and GitLab CI |
+| `docs-site/Dockerfile`, `Dockerfile.dockerignore` | The image of the optional [`docs` profile](#serve-the-site-from-the-stack), which runs `zensical serve` |
 
 Zensical reads `mkdocs.yml` with the repository root as its `docs_dir`, so
 every page keeps its repository path and the relative links between guides
 work unchanged. `README.md` is the home page, and each other `README.md` is the
 index page of its directory. `exclude_docs` first excludes everything, then
-re-includes only Markdown, the rendered diagrams and their Mermaid sources,
-images under `docs/`, and the site assets; hidden directories, build output,
+re-includes only Markdown, the rendered diagrams, their Mermaid sources and
+viewer pages, the self-hosted Mermaid.js in `diagrams/assets/`, images under
+`docs/`, and the site assets; hidden directories, build output,
 and runtime state stay excluded. Compose files, scripts, and other source
 files are not published, so a guide links to them only as code (for example
 `searxng/settings.yml`) or with an absolute link to the repository.
@@ -99,6 +101,67 @@ Use relative links between Markdown files, as GitHub and GitLab expect, and
 link to a heading with its GitHub-style anchor; the site uses the same
 anchors. Do not link to a line number (`#L12`) of a page or to a source file
 with a relative link: neither exists on the site.
+
+## Serve the site from the stack
+
+The optional `docs` profile serves this documentation from the stack itself,
+at `https://$DOCS_HOST`. `DOCS_HOST` is set in `.env.optional` and defaults to
+`gateway-deployment-docs.${STACK_DOMAIN}`. The container runs `zensical serve`
+on the checked-out revision the stack was built from, and Traefik routes
+`DOCS_HOST` to it. It serves that one version, without the version selector;
+the versioned site with `dev`, the releases, and `latest` stays on Pages. Every
+page's banner names the commit, and its edit buttons open the file at that
+commit.
+
+```sh
+cp .env.optional.example .env.optional   # if it does not exist yet; keep DOCS_HOST
+export STACK_REPOSITORY_REVISION="$(git rev-parse HEAD)"
+docker compose --env-file .env --env-file .env.optional \
+  --profile docs up -d --build --wait docs
+curl --fail --silent --output /dev/null "https://$DOCS_HOST/"
+```
+
+Add `DOCS_HOST` to the TLS certificate and to host resolution, as in
+[Getting started](getting-started.md#2-deliver-tls-certificates). Rebuild the
+image after each upgrade (`up -d --build docs`), so the site keeps matching the
+deployment. Without `STACK_REPOSITORY_REVISION`, the banner says that the
+revision is unknown; a value that is not a commit SHA fails the build.
+
+How it works:
+
+- `docs-site/Dockerfile` renders the diagrams and installs the hash-locked
+  toolchain from `docs-site/requirements.txt` in a build stage, outside the
+  docs directory, and runs the same strict build as `build`, because
+  `zensical serve` does not support strict mode. A broken link therefore fails
+  the image build. Graphviz stays in the build stage. The build needs network
+  access to install the toolchain and to download the pinned diagram renderer
+  and Mermaid.js, as `build` does.
+- `docs-site/Dockerfile.dockerignore` limits the build context to the
+  published files and the build scripts, so `.env`, certificates, and runtime
+  state never reach the image.
+- The container builds the site once when it starts, in a few seconds, and
+  then serves it. It runs as a non-root user with a read-only root filesystem
+  and no capabilities; only Zensical's output (`/src/site`) and cache
+  (`/src/.cache`) are small `tmpfs` mounts. It joins only the `edge` network,
+  so it reaches no other service, and it mounts no volumes.
+- Traefik answers only `GET` and `HEAD` (the router rule) and adds a
+  same-origin Content Security Policy, `X-Frame-Options: SAMEORIGIN`,
+  `X-Robots-Tag: noindex`, and a `Permissions-Policy` through the `docs-headers`
+  middleware in the service's labels, on top of the HSTS, `nosniff`, referrer
+  policy, and rate limits it applies to every route.
+- `zensical serve` is Zensical's preview server. Every page keeps a live-reload
+  WebSocket to the same host, which Traefik passes through; the files never
+  change inside the container, so it only reloads the page after a container
+  restart. The Mermaid viewer pages carry their own stricter policy, which
+  blocks only that live-reload script.
+
+The site has **no sign-in**. Anyone who can reach Traefik can read it. The
+pages contain no secrets, but they do describe the stack's hostnames,
+networks, and security controls, so expose `DOCS_HOST` only on the private
+network that already reaches the other stack hostnames. The maintenance
+contracts fail if the `docs` service leaves its profile, joins another
+network, publishes a port, mounts a volume, or becomes a dependency of another
+service.
 
 ## Publishing
 
@@ -173,6 +236,8 @@ publish unchecked.
   [licence register](third-party-licences.md#documentation-toolchain).
 - **Image updates.** `DOCS_IMAGE` appears in `.github/workflows/docs.yml` and
   `.gitlab/ci/images.yml`; update both digests together.
+  The `docs` profile's `docs-site/Dockerfile` pins the same uv image as the
+  other local builds; Dependabot proposes its updates.
 - **Why Zensical.** Material for MkDocs receives only security fixes until
   5 May 2027, MkDocs 1.x has had no release since August 2024, and MkDocs 2.0
   supports neither Material nor plugins. Zensical reads the same `mkdocs.yml`
@@ -180,7 +245,14 @@ publish unchecked.
   uses none.
 - **Diagrams.** The build renders `diagrams/*.mmd` into animated HTML with
   `scripts/render-diagrams.py` before Zensical runs, so the HTML is never
-  committed. It needs Graphviz (`dot`): `scripts/ci/docs.sh` installs it in
-  the CI image, and a local `build` or `serve` needs it on the workstation.
+  committed. Rendering needs Graphviz (`dot`): `scripts/ci/docs.sh` installs
+  it in the CI image, and a local `build` or `serve` needs it on the
+  workstation. The same script writes a viewer page for each source,
+  `NN-name.mmd.html`, which draws it with Mermaid.js served from the site,
+  because GitHub Pages serves a bare `.mmd` file as a download. Mermaid.js is
+  downloaded once at a pinned version, checked against its SHA-256 digests,
+  and copied into the ignored `diagrams/assets/` directory. Every diagram
+  page, animated or Mermaid, has zoom controls and SVG, PNG, and source
+  downloads.
   Releases that committed their HTML are published as tagged. See the
   [diagram guide](../diagrams/README.md#updating-diagrams).

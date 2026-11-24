@@ -31,7 +31,10 @@ It provides:
 - optional LiteLLM Lens (`lens` profile), embedded in the LiteLLM dashboard,
   for AI review of agent traces, backed by its own ClickHouse;
 - optional on-host D3-mini (`d3` profile) on the stack host's NVIDIA GPU, in
-  place of the remote GPU host, for `coding-router` decisions.
+  place of the remote GPU host, for `coding-router` decisions;
+- an optional documentation site (`docs` profile) at `DOCS_HOST`
+  (`gateway-deployment-docs.${STACK_DOMAIN}`), served by `zensical serve` from
+  the deployed revision.
 
 The bundled `mkcert` configuration is for a trusted local workstation or
 private network. It is not a public Internet TLS solution.
@@ -80,7 +83,7 @@ Docker metadata access, image-security monitoring, and untrusted fetch egress.
 
 | Network | Members | Purpose |
 | --- | --- | --- |
-| `edge` | Traefik, OpenSearch Dashboards, optional Grafana, Langfuse web/MinIO, and Lens, LiteLLM prod/dev | Services reachable through Traefik routes |
+| `edge` | Traefik, OpenSearch Dashboards, optional Grafana, Langfuse web/MinIO, Lens, and the documentation site, LiteLLM prod/dev | Services reachable through Traefik routes |
 | `internal` | Trusted application, data, and observability services, including SearXNG | Databases, telemetry, Presidio, SearXNG (internal-only, reached through LiteLLM), and service-to-service calls |
 | `xberg-sandbox` | Xberg, its DNS and egress proxies, LiteLLM prod/dev | Internal-only MCP traffic; Xberg has no direct route to `internal` or the Internet |
 | `lens-storage` | Optional Lens and its ClickHouse store | Internal-only trace storage; no other service, including Prometheus, can reach Lens ClickHouse |
@@ -105,7 +108,7 @@ docker compose --profile prod --profile dev up -d
 ```
 
 The root `docker-compose.yml` includes `compose.optional.yml`, which owns
-Grafana/Loki, Langfuse, Lens, on-host D3-mini, and image-security services and state. The core file
+Grafana/Loki, Langfuse, Lens, on-host D3-mini, documentation site, and image-security services and state. The core file
 groups its services along the request path (edge, LiteLLM, guardrails and
 tools, data stores, the dev model plane, observability); the optional file
 groups them by profile. YAML anchors cannot cross the include boundary, so the
@@ -124,6 +127,7 @@ commands pass it after `.env`.
 | `langfuse` | Langfuse web/worker, PostgreSQL, ClickHouse, Redis, MinIO | Langfuse-specific stores | Optional LLM trace UI, datasets, prompt management, and evaluations |
 | `lens` | `lens`, `lens-clickhouse`, `lens-preflight` | Lens ClickHouse (`lens-clickhouse-data`) | Optional AI review of agent traces, findings, and datasets inside the LiteLLM dashboard; see [LiteLLM Lens](docs/lens.md) |
 | `d3` | `d3-mini`, `d3-mini-download`, `d3-mini-preflight` | Model weights (`d3-mini-models`) | Optional D3-mini on this host's NVIDIA GPU, reached by both gateways on the internal `d3-local` network; see [On-host D3-mini](docs/d3-mini-on-host.md) |
+| `docs` | `docs` | None; the sources are built into the image | Optional documentation site at `DOCS_HOST`: `zensical serve` on the deployed revision, non-root and read-only on the `edge` network only, behind Traefik's GET/HEAD-only route and `docs-headers` middleware, without sign-in; see [Documentation site](docs/documentation-site.md#serve-the-site-from-the-stack) |
 | `security` | Image scanner and read-only Docker socket proxy | Bind-mounted reports and state | Optional scheduled image inventory and vulnerability policy |
 
 `postgres-init` is a required one-shot service, not redundant: it creates the
@@ -145,7 +149,7 @@ It also refuses a `D3_DECISION_API_BASE` that is not an HTTPS base URL, except
 
 1. A client connects to a configured hostname over HTTPS.
 2. Traefik selects the matching LiteLLM, OpenSearch Dashboards, or optional
-   Grafana, Langfuse, or Lens route. SearXNG has no route; it is reachable only through
+   Grafana, Langfuse, Lens, or documentation route. SearXNG has no route; it is reachable only through
    LiteLLM's authenticated `searxng-search` tool.
 3. LiteLLM authenticates API requests with `LITELLM_MASTER_KEY`.
 4. Requests for `coding-router` are classified by the authenticated D3-mini
@@ -347,6 +351,8 @@ docker compose --env-file .env --env-file .env.optional \
   --profile prod --profile lens config --quiet
 docker compose --env-file .env --env-file .env.optional \
   --profile prod --profile d3 config --quiet
+docker compose --env-file .env --env-file .env.optional \
+  --profile prod --profile docs config --quiet
 docker compose --profile prod --profile dev up -d --wait --wait-timeout 150
 ```
 

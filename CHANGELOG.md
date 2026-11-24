@@ -115,6 +115,67 @@ All notable changes to this stack are recorded here. The format follows
   public top-level domain. It now uses `example.com` and shows the real
   output.
 
+### Security
+
+- `security/exceptions.toml` records time-limited exceptions for the fixable
+  Critical findings that no upstream image fixes yet, reviewed on 2026-11-23:
+  - Presidio `2.2.362` analyzer and anonymizer, until 2026-12-31: Brotli
+    (CVE-2026-111497, on the CISA KEV list), GnuTLS, OpenSSL, Perl, `anyio`,
+    and `certifi`. It is the newest Presidio release and Microsoft has not
+    rebuilt it.
+  - The `gosu` helper in the PostgreSQL `16.16-alpine3.24` and `17.12` images,
+    until 2027-02-28: CVE-2025-68121 in Go's `crypto/tls`. `gosu` only drops
+    privileges at container start and makes no TLS connections. The current
+    upstream rebuilds of both tags still ship it.
+
+  Raw reports still list every finding; the exceptions only clear the policy
+  metrics. Remove each entry once a fixed image is pinned.
+
+## [v0.4.1] - 2026-11-23
+
+### Added
+
+- Optional `docs` profile that serves this documentation from the stack at
+  `DOCS_HOST`, by default `gateway-deployment-docs.${STACK_DOMAIN}`. The
+  `litellm-stack-docs` image runs `zensical serve` on the checked-out revision,
+  and every page's banner names that commit (`STACK_REPOSITORY_REVISION`). It
+  serves one version without the version selector; the versioned site stays on
+  Pages. The container is non-root and read-only on the `edge` network only;
+  Traefik answers only `GET` and `HEAD` and adds a same-origin Content Security
+  Policy through a `docs-headers` middleware. There is no sign-in. The BerriAI
+  Inference Stack has no documentation site to compare with; building the
+  sources into the image was chosen over mounting a host checkout or
+  redirecting to Pages, so the docs cannot drift from the running stack, and
+  `zensical serve` was chosen over a separate static web server. See
+  [Documentation site](docs/documentation-site.md#serve-the-site-from-the-stack).
+
+### Changed
+
+- The **Source** links in the [diagram guide](diagrams/README.md) open a
+  viewer page that draws the Mermaid source in the browser, instead of
+  downloading the `.mmd` file. `scripts/render-diagrams.py` writes the pages
+  as `diagrams/NN-name.mmd.html`. They run Mermaid.js 12.3.0 (MIT), which is
+  pinned by SHA-256 and served from the documentation site, so the site still
+  makes no third-party requests.
+- Every diagram page, animated or Mermaid, has zoom buttons (50% to 400%, also
+  Ctrl or ⌘ with the wheel, drag to pan) and downloads of the diagram as SVG
+  or PNG and of its `.mmd` source. Only the diagram zooms: the architecture
+  diagrams' legend now sits in its own SVG below the zoom area.
+- The notes in the Xberg and search tool-call flows no longer contain `;`,
+  which Mermaid reads as the end of a statement, and the renderer now rejects
+  `;` in sequence diagrams.
+- Xberg moves from `1.3.10-core` to `1.4.2-core`, still pinned by digest. The
+  version table and third-party licence register now list it too.
+- The documentation site builds with Zensical `0.1.1` (was `0.1.0`), and the
+  OpenSearch tools use psycopg `3.3.9` (was `3.3.6`).
+
+### Fixed
+
+- The Admin UI tab now shows the `LITELLM_FAVICON_URL` favicon instead of
+  LiteLLM's own. LiteLLM's UI links its bundled `/favicon.ico` ahead of
+  `/get_favicon`, so Traefik now sends `/favicon.ico` on both gateway hosts to
+  `/get_favicon`.
+
 ## [v0.4.0] - 2026-11-22
 
 ### Added
@@ -529,7 +590,8 @@ Initial release of the self-hosted LiteLLM gateway stack.
   versioned documentation site built with Zensical and published to GitHub
   Pages or GitLab Pages.
 
-[Unreleased]: https://github.com/bella-1337/effective-spoon/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/bella-1337/effective-spoon/compare/v0.4.1...HEAD
+[v0.4.1]: https://github.com/bella-1337/effective-spoon/compare/v0.4.0...v0.4.1
 [v0.4.0]: https://github.com/bella-1337/effective-spoon/compare/v0.3.1...v0.4.0
 [v0.3.1]: https://github.com/bella-1337/effective-spoon/compare/v0.3.0...v0.3.1
 [v0.3.0]: https://github.com/bella-1337/effective-spoon/compare/v0.2.1...v0.3.0

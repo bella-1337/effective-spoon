@@ -49,6 +49,7 @@ Licence categories: **permissive** (MIT, Apache-2.0, BSD, PostgreSQL, PSF),
 | `litellm-lens:1.108.0-rc.1` | `lens` (lens) | MIT (`BerriAI/lens`; no `enterprise/` directory exists at the pinned commit), built on `cgr.dev/chainguard/wolfi-base` with Node.js (MIT) and Python 3.13 (PSF-2.0); bundled npm packages and Rust crates under their own licences | Permissive | Local build of upstream release-candidate commit `b2ac5f8a289c3f77f02b81d67ca1ee075bfead6d` (tag `v1.108.0-rc.1`) with the upstream `deploy/runtime/Dockerfile`, because Lens publishes no image yet; the image carries OCI source, revision, and licence labels. Investigations send selected trace content to the configured analysis model; see [LiteLLM Lens](lens.md#data-protection). |
 | `vllm/vllm-openai:v0.33.0` | `d3-mini`, `d3-mini-download` (d3) | vLLM: Apache-2.0; PyTorch (BSD-3-Clause), Triton (MIT), and other Python packages under their own licences; bundles NVIDIA CUDA 13.0 runtime libraries under the NVIDIA CUDA EULA | Permissive, with proprietary redistributable runtime | Using the bundled CUDA libraries is permitted without a fee. Re-review before redistributing the image. Pinned by digest. Usage statistics are turned off (`VLLM_NO_USAGE_STATS`, `DO_NOT_TRACK`). |
 | `litellm-opensearch-tools:0.1.0` | `opensearch-certs`, `opensearch-setup`, `opensearch-dashboards-setup`, `opensearch-bridge` (core) | Repository code under MIT; packages listed under [repository Python dependencies](#repository-python-dependencies) | Mixed; see below | Local build. Includes psycopg (LGPL-3.0); internal use only. |
+| `litellm-stack-docs:0.1.0` | `docs` (docs) | Repository documentation and code under MIT; the Zensical toolchain and Mermaid.js listed under [documentation toolchain](#documentation-toolchain); uv (MIT OR Apache-2.0), Python (PSF-2.0), and Debian packages under their own licences | Permissive base, mixed OS packages | Local build of `docs-site/Dockerfile`, which runs `zensical serve`. The build stage's Graphviz (EPL-1.0) renders the diagrams and is not copied into the image. |
 | `litellm-image-security-monitor:0.1.0` | `image-security-monitor` (security) | Repository code under MIT plus Trivy (Apache-2.0), Docker CLI and buildx (Apache-2.0), uv (MIT OR Apache-2.0) | Permissive | Local build. |
 | `docker.langfuse.com/langfuse/langfuse:4.80.0` | `langfuse-web` (langfuse) | MIT; `ee/` code under the Langfuse Enterprise licence | Permissive, with commercial add-ons | Enterprise features (project-level retention, SCIM, organisation APIs, fine-grained project access) need a licence key and are not used. |
 | `docker.langfuse.com/langfuse/langfuse-worker:4.80.0` | `langfuse-worker` (langfuse) | Same as above | Permissive, with commercial add-ons | Same as above. |
@@ -75,7 +76,7 @@ Licence categories: **permissive** (MIT, Apache-2.0, BSD, PostgreSQL, PSF),
 | `litellm-presidio-analyzer:2.2.362-1` | `presidio-analyzer` (core) | Presidio: MIT; spaCy `en_core_web_lg` and `de_core_news_lg`: MIT; `fr_core_news_lg`: LGPL-LR (see [models](#models)) | Mixed: permissive, with a weak-copyleft linguistic resource | Local build of `presidio/Dockerfile`: the upstream analyzer plus the pinned German and French spaCy pipelines. LGPL-LR obligations (provide the model and its source data licence terms, allow modification) apply only if the image is distributed outside the organisation. |
 | `mcr.microsoft.com/presidio-anonymizer:2.2.362` | `presidio-anonymizer` (core) | MIT | Permissive | None. |
 | `searxng/searxng:2026.11.15-2d500cb6b` | `searxng` (core) | AGPL-3.0 | Strong copyleft | Unmodified internal use creates no AGPL obligation. The licence grants no right to use the queried search engines; see [external services](#external-services-and-terms) and [Search-engine terms of use](search-extraction-and-caching.md#search-engine-terms-of-use). |
-| `ghcr.io/xberg-io/xberg:1.3.10-core` | `xberg` (prod, dev) | MIT | Permissive | None. |
+| `ghcr.io/xberg-io/xberg:1.4.2-core` | `xberg` (prod, dev) | MIT | Permissive | None. |
 | `ubuntu/bind9:9.20-26.04_stable` | `xberg-dns` (prod, dev) | BIND 9: MPL-2.0; Ubuntu base packages under their own licences | Weak copyleft | Unmodified internal use creates no MPL obligation. |
 | `ubuntu/squid:7.2-26.04_edge` | `xberg-egress-proxy` (core) | Squid: GPL-2.0-or-later; Ubuntu base packages under their own licences | Strong copyleft | Unmodified internal use creates no GPL obligation. The `edge` track is not a long-term-support channel; this is a support concern, not a licence one. |
 | `qdrant/qdrant:v1.20.1` | `qdrant` (dev) | Apache-2.0 | Permissive | None. |
@@ -89,7 +90,7 @@ stack is built, scanned, or extended.
 | --- | --- | --- | --- | --- |
 | `python:3.11-slim-bookworm` | Base of `pgvector/Dockerfile` | Python: PSF-2.0; Debian packages under their own licences | Permissive base, mixed OS packages | None for internal use. |
 | `mcr.microsoft.com/presidio-analyzer:2.2.362` | Base of `presidio/Dockerfile` | MIT; includes the spaCy `en_core_web_lg` model (see [models](#models)) | Permissive | None. |
-| `ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm-slim` | Base of `opensearch/tools/Dockerfile` and `security/image-monitor.Dockerfile` | uv: MIT OR Apache-2.0; Python: PSF-2.0; Debian packages under their own licences | Permissive base, mixed OS packages | None for internal use. |
+| `ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm-slim` | Base of `opensearch/tools/Dockerfile`, `security/image-monitor.Dockerfile`, and `docs-site/Dockerfile` | uv: MIT OR Apache-2.0; Python: PSF-2.0; Debian packages under their own licences | Permissive base, mixed OS packages | None for internal use. |
 | `docker:29.9.3-cli` | Docker CLI and buildx copied into `security/image-monitor.Dockerfile` | Apache-2.0 | Permissive | None. |
 | `aquasec/trivy:0.76.2` | Trivy copied into the monitor image; also run directly by host-mode scans | Apache-2.0 | Permissive | Trivy vulnerability and Java databases are downloaded at scan time under Aqua's database terms; internal use is permitted. |
 | `ghcr.io/huggingface/text-embeddings-inference:cuda-1.9.4` | `gpu-host/compose.yml` (`bge-m3`, remote GPU host) | Text Embeddings Inference: Apache-2.0; bundles NVIDIA CUDA runtime libraries under the NVIDIA CUDA EULA | Permissive, with proprietary redistributable runtime | Using the bundled CUDA libraries is permitted without a fee. Re-review before redistributing the image. |
@@ -152,12 +153,14 @@ emoji, whose CC BY 4.0 licence would require attribution.
 | `tomli` | 2.5.0 | MIT | None. |
 
 The build also renders the diagrams with these tools, which are likewise
-build-time only. The published site contains their output, not their code.
+build-time only. The published site contains their output, not their code,
+except for Mermaid.js, which the diagram viewer pages run in the browser.
 
 | Tool | Version | Licence | Notes |
 | --- | --- | --- | --- |
 | dashmotion `layout.py` and `check_diagram.py` | 2.2.4, commit `ae2fe4f` | MIT | Downloaded by `scripts/render-diagrams.py` and checked against pinned SHA-256 digests; not redistributed. |
-| Graphviz (`dot`) | Debian bookworm package in CI | EPL-1.0 | Installed by `scripts/ci/docs.sh` in the CI image; a workstation uses its own. |
+| Graphviz (`dot`) | Debian bookworm package in CI and in the docs image's build stage | EPL-1.0 | Installed by `scripts/ci/docs.sh` in the CI image and by the build stage of `docs-site/Dockerfile`, which does not copy it into the `docs` image; a workstation uses its own. |
+| Mermaid.js (`mermaid` npm package, `dist/mermaid.min.js`) | 12.3.0 | MIT | Downloaded by `scripts/mermaid_viewer.py` and checked against pinned SHA-256 digests. Published unmodified on the site, with its licence as `diagrams/assets/mermaid-LICENSE.txt`, for the diagram viewer pages. The bundle includes libraries under their own licences, such as DOMPurify (Apache-2.0 or MPL-2.0), d3 (ISC), and lodash-es and Cytoscape.js (MIT), and keeps the licence comments its build preserves. |
 
 The CI jobs build the site in `ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm`
 (uv: MIT OR Apache-2.0; Python: PSF-2.0; Debian packages under their own
