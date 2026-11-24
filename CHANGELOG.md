@@ -8,6 +8,148 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- [Presidio PII masking and guardrails](docs/presidio-guardrails.md#check-what-the-guardrail-masks)
+  explains how administrators see what the `presidio-pii` guardrail masks
+  without calling a model: `POST /guardrails/apply_guardrail` and the admin
+  UI's guardrail test playground, both limited by LiteLLM to proxy
+  administrators.
+- German and French in the Presidio analyzer, and UK formats in English. See
+  [Languages and UK formats](docs/presidio-guardrails.md#languages-and-uk-formats).
+  - The new `litellm-presidio-analyzer:2.2.362-1` image (`presidio/Dockerfile`)
+    adds the `de_core_news_lg` (MIT) and `fr_core_news_lg` (LGPL-LR) 3.8.0
+    pipelines, pinned by hash, to the upstream analyzer. LGPL-LR obligations
+    apply only if the image is distributed outside the organisation.
+  - `presidio/analyzer-engine.yaml` and `presidio/recognizers.yaml` set the
+    languages and switch on UK National Insurance number, passport, and
+    postcode recognizers. Credit cards are also detected in German and French.
+  - Gunicorn preloads the pipelines, so workers share them: about 2.7 GiB for
+    two workers. A contract requires the preload.
+  - German and French street-address recognizers mask whole addresses
+    (street, house number, postcode, and city) as `LOCATION`. Before, the
+    house number and postcode stayed visible ("<LOCATION> 12, 80331
+    <LOCATION>"). Their repetitions are bounded so crafted input cannot make
+    matching slow; `scripts/tests/test_presidio_recognizers.py` covers matches,
+    non-matches such as amounts and years, and 100 KB inputs. The `pii-assist`
+    guardrail also folds a postcode or house number left between its own
+    placeholders into them.
+- Optional local-model assist (`pii-assist` guardrail,
+  `litellm/modules/pii_assist.py`). See
+  [Local-model assist](docs/presidio-guardrails.md#local-model-assist).
+  - Before Presidio, a model served by your own vLLM server on the Docker host
+    or a private network detects each prompt's language and personal data. The guardrail sets
+    the request's Presidio language and masks what the model found, except
+    organisation names. Presidio then masks the rest, so it remains the
+    baseline; on any model failure the request continues with Presidio alone.
+  - Enable it with `PII_ASSIST_API_BASE`, `PII_ASSIST_API_KEY`, and
+    `PII_ASSIST_VLLM_MODEL` (the served model name, default `gemma4`) in
+    `.env`; the gateways add it as `hosted_vllm/<name>`. They accept only
+    `host.docker.internal`, a Compose service, or a private address, and
+    require the vLLM server's API key, because the model reads prompts
+    unmasked. They reach the Docker host through
+    `extra_hosts: host.docker.internal:host-gateway`. Answers are constrained
+    to a JSON schema with vLLM's structured output.
+    `PII_ASSIST_MAX_CHUNK_CHARS`, `PII_ASSIST_MAX_CALLS`, and
+    `PII_ASSIST_TIMEOUT_SECONDS` bound the cost; results are cached per text.
+  - LiteLLM (checked up to 1.111.0-dev.4) ignores the per-request Presidio
+    language on chat requests. The module installs a narrow compatibility shim
+    that restores it and allows placeholders such as `<LOCATION>` through, so
+    the German and French models do not re-mask them. It is skipped with a
+    warning if LiteLLM changes the patched method; the upgrade check tests
+    German and French analysis and the guardrail order.
+  - The prompt and answer schema are in
+    `litellm/modules/pii_assist_prompt.json`; only items that occur verbatim
+    in the prompt are masked.
+  - Approach: the BerriAI Inference Stack has no data protection to compare.
+    LiteLLM cannot detect a request's language, so a local model through
+    LiteLLM was chosen; D3-mini was considered and not used. The model is
+    served by an operator-run vLLM server rather than Ollama, and the stack
+    does not run it: an on-host Compose profile like `d3` and the remote GPU
+    host were considered. The reference stack deploys vLLM through its
+    launcher and registers models at runtime, which this stack's static,
+    pinned model configuration does not allow.
+
+- Optional reversible masking (`PII_REVERSIBLE_MASKING=true`). See
+  [Reversible masking](docs/presidio-guardrails.md#reversible-masking).
+  - `pii-assist` and `presidio-pii` send numbered tokens such as `<PERSON_1>`
+    to the provider instead of `<PERSON>`; the same value keeps its token
+    across the request's messages.
+  - The originals are kept in the request's metadata, encrypted with
+    AES-256-GCM under a random key that exists only in the gateway process;
+    repeats are found by HMAC-SHA-256. Nothing is decryptable after the
+    request, and there is no decryption endpoint or stored key.
+  - The new `pii-restore` guardrail (`litellm/modules/pii_vault.py`), listed
+    after `presidio-pii` in the policy, decrypts the request's tokens in the
+    response after `presidio-pii` has masked what the model produced itself.
+    It covers chat completions, streamed (tokens split across chunks
+    included) or not, message text and tool-call arguments.
+  - Checked end to end with LiteLLM 1.108.9 and 1.111.0-dev.4, the stack's
+    Presidio services, and a recording fake provider: the provider received
+    only tokens, and the client received its own values back.
+  - Approach: the BerriAI Inference Stack has no data protection to compare.
+    LiteLLM can neither switch Presidio to its `encrypt` operator nor keep
+    tokens apart across messages (its `output_parse_pii` numbers each message
+    from 1 and keeps the originals in plain text), so a module wraps its
+    Presidio guardrail. Short tokens with an encrypted map were chosen over
+    putting AES ciphertext in the prompt, which models corrupt when they copy
+    it, and restoring in the response over an admin decryption endpoint.
+
+### Changed
+
+- The `eu-data-protection` policy now runs `pii-assist`, `presidio-pii`, then
+  `pii-restore`, and is the default attachment. A new `local-pii-assist`
+  policy exempts only the local `pii-assist` model, which must see text unmasked. A repository
+  contract allows no other policy attachment, because any other would replace
+  the default masking for the requests it matches.
+- `PRESIDIO_ANALYZER_MEMORY_LIMIT` defaults to `4g` (was `2g`), and
+  `PRESIDIO_SUPPORTED_LANGUAGES` is no longer read: the languages come from
+  `presidio/analyzer-engine.yaml`.
+
+### Upgrade notes
+
+- Raise `PRESIDIO_ANALYZER_MEMORY_LIMIT` in `.env` to at least `4g` (prod
+  hosts: `5g`) before deploying. With `2g` the analyzer is killed when it loads
+  the German and French pipelines, and masking stops.
+- Build the new analyzer image (`docker compose build presidio-analyzer`) and
+  recreate `presidio-analyzer` and both gateways.
+- To use the local-model assist, run a vLLM server with an API key on the
+  Docker host or a private network, and set `PII_ASSIST_API_BASE`,
+  `PII_ASSIST_API_KEY`, and `PII_ASSIST_VLLM_MODEL`. Without it, nothing else changes: Presidio
+  runs alone, in English, unless a client sets the language.
+
+### Fixed
+
+- [Presidio PII masking and guardrails](docs/presidio-guardrails.md) said the
+  gateway masks organisation names with a 0.7 threshold. The analyzer has
+  never mapped spaCy's `ORG` label, and the upgrade check asserts that it
+  does not, so the guide now says the gateway does not mask organisations.
+- The Presidio guardrail no longer masks file names, paths, and Rust or C++
+  code as personal data. See
+  [Code, file names, and paths](docs/presidio-guardrails.md#code-file-names-and-paths).
+  On sample coding prompts, detections fell from 39 to 11; the URLs, IP
+  addresses, and other personal data in the samples are still masked.
+  - `WebUrlRecognizer` replaces Presidio's `UrlRecognizer`, which matched any
+    `name.tld`: `.rs`, `.py`, `.md`, and `.sh` are country domains, so
+    `main.rs` and `self.name` were masked as URLs. A URL now needs a scheme or
+    `www.`. Bare domains such as `example.com` are no longer masked.
+  - `IpAddressRecognizer` replaces `IpRecognizer`, whose IPv6 pattern matched
+    the `::` in `std::io`. IPv6 now needs two hex groups and a digit, and
+    compressed addresses such as `2001:db8::1` are masked whole.
+  - `presidio_score_thresholds` ignores `US_DRIVER_LICENSE` below 0.4. Its
+    weak pattern matched Rust types (`i64`, `f32`) and compiler codes
+    (`E0382`). With a context word such as "license", a real one still scores
+    0.65.
+  - spaCy can still mask code identifiers as `PERSON` or `NRP` and paths as
+    `LOCATION`; the guide lists what remains.
+  - Approach: the BerriAI Inference Stack has no data protection to compare.
+    Stricter recognizers and one threshold were chosen over a code-aware
+    filter in LiteLLM, which would need custom code checked on every upgrade.
+- The guide's `apply_guardrail` example used `jane@example.test`, which
+  Presidio does not detect as an email address because `.test` is not a
+  public top-level domain. It now uses `example.com` and shows the real
+  output.
+
 ### Security
 
 - `security/exceptions.toml` records time-limited exceptions for the fixable

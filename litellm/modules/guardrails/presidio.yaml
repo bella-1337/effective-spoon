@@ -11,3 +11,19 @@ guardrails:
       # 500 KB default let one 1.5 MB prompt OOM-kill the analyzer for every
       # caller; 100 KB keeps each spaCy document within the worker memory.
       presidio_analyze_chunk_size_bytes: 100000
+      # Detections below these scores are not masked. Presidio's weak US
+      # driver's licence pattern (0.3) matches any letter followed by digits,
+      # so every Rust type (i64, u128, f32) and compiler code (E0382) was
+      # masked. A context word such as "license" raises a real one to 0.65.
+      presidio_score_thresholds:
+        US_DRIVER_LICENSE: 0.4
+
+  # With PII_REVERSIBLE_MASKING=true, presidio-pii and pii-assist send numbered
+  # tokens (<PERSON_1>) to the provider, and this guardrail puts the request's
+  # own values back into the response. Defined after presidio-pii so it runs
+  # after presidio-pii's output masking. Does nothing when the setting is off.
+  # See litellm/modules/pii_vault.py.
+  - guardrail_name: pii-restore
+    litellm_params:
+      guardrail: modules.pii_vault.PiiRestoreGuardrail
+      mode: post_call

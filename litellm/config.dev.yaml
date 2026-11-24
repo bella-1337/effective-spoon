@@ -1,5 +1,6 @@
 include:
   - modules/search.yaml
+  - modules/guardrails/pii-assist.yaml
   - modules/guardrails/presidio.yaml
   - modules/guardrails/prompt-injection.yaml
   - modules/policies/eu-data-protection.yaml

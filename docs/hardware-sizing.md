@@ -33,7 +33,7 @@ Planning peaks, not idle use. The core and prod profile idles at about 7 GiB.
 | Block | Services | RAM | vCPU |
 | --- | --- | --- | --- |
 | Edge and data | Traefik, socket proxies, PostgreSQL, vector-postgres, SearXNG, Xberg sandbox | 7 GB | 4 |
-| Presidio | Analyzer (3 GB limit) and anonymizer, 4 workers each | 3.5 GB | 4 |
+| Presidio | Analyzer (English, German, French; 5 GB limit) and anonymizer, 4 workers each | 5.5 GB | 4 |
 | Metrics and logs | Prometheus, Alloy, exporters, cAdvisor, blackbox, opensearch-bridge | 4 GB | 2 |
 | OpenSearch | OpenSearch (4 GB heap, 8 GB limit), Dashboards, Data Prepper | 12 GB | 5 |
 | LiteLLM prod | 4 workers × (1 vCPU, 4 GB) | 16 GB | 4 |
@@ -41,7 +41,7 @@ Planning peaks, not idle use. The core and prod profile idles at about 7 GiB.
 | `langfuse` | Web, worker, PostgreSQL, ClickHouse, Redis, MinIO | 11 GB | 4 |
 | `lens` | Lens (2 GB limit), ClickHouse | 6 GB | 3 |
 | `security` | Image scanner (bursty) | 2.5 GB | 2 |
-| **Total** | | **~65 GB** | **~30** |
+| **Total** | | **~67 GB** | **~30** |
 
 Add about 4 GB for the OS and Docker and at least 25 GB of page cache for
 OpenSearch, PostgreSQL, and ClickHouse. That makes 96 GB the minimum. At
@@ -72,7 +72,7 @@ On the prod host, set:
 | `RESOURCE_MEDIUM_CPU_LIMIT` / `_MEMORY_LIMIT` | `2` / `2g` | `4` / `4g` |
 | `RESOURCE_DATABASE_CPU_LIMIT` / `_MEMORY_LIMIT` | `2` / `4g` | `6` / `10g` |
 | `LITELLM_CPU_LIMIT` / `LITELLM_MEMORY_LIMIT` | `2` / `4g` | `4` / `16g` |
-| `PRESIDIO_ANALYZER_CPU_LIMIT` / `_MEMORY_LIMIT` | `2` / `2g` | `4` / `3g` |
+| `PRESIDIO_ANALYZER_CPU_LIMIT` / `_MEMORY_LIMIT` | `2` / `4g` | `4` / `5g` |
 | `PRESIDIO_ANALYZER_WORKERS` / `PRESIDIO_ANONYMIZER_WORKERS` | `2` / `2` | `4` / `4` |
 | `OPENSEARCH_JAVA_HEAP` / `OPENSEARCH_MEMORY_LIMIT` | `1g` / `3g` | `4g` / `8g` |
 | `DATA_PREPPER_JAVA_OPTS` / `DATA_PREPPER_MEMORY_LIMIT` | `-Xms256m -Xmx512m` / `2g` | `-Xms1g -Xmx2g` / `3g` |
@@ -101,16 +101,20 @@ the default resource limits.
 
 | Block | RAM | vCPU |
 | --- | --- | --- |
-| Edge, data, and Presidio (2 workers each) | 7.5 GB | 5 |
+| Edge, data, and Presidio (2 workers each) | 9.5 GB | 5 |
 | Metrics and logs | 3 GB | 1.5 |
 | OpenSearch and Data Prepper defaults | 6 GB | 3 |
 | LiteLLM prod and dev, 1 worker each | 8 GB | 2 |
 | Qdrant (2 GB limit plus 1 GB `tmpfs`) and litellm-pgvector | 3.5 GB | 1.5 |
 | `grafana`, `langfuse`, `security` | 11.5 GB | 5 |
 | `lens` with the default limits | 4 GB | 2 |
-| **Total** | **~44 GB** | **~20** |
+| **Total** | **~46 GB** | **~20** |
 
-BGE-M3 runs on the remote GPU host, so the dev host needs no GPU.
+BGE-M3 runs on the remote GPU host, so the dev host needs no GPU. The optional
+local `pii-assist` model runs outside the stack, in your own vLLM server on
+the Docker host or a private network. vLLM needs a GPU, sized for the chosen
+model's weights plus its KV cache; on the stack host it also competes with the
+optional `d3` profile for GPU memory (`--gpu-memory-utilization`).
 
 ## Remote GPU host
 

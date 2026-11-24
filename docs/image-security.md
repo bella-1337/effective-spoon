@@ -309,9 +309,10 @@ platform are reflected exactly:
 ```
 
 - Registry images are resolved to their platform-specific digest and read
-  remotely. The four locally built images (`litellm-pgvector`,
-  `litellm-opensearch-tools`, `litellm-image-security-monitor`, and the
-  optional `litellm-lens`) are exported
+  remotely. The five locally built images (`litellm-pgvector`,
+  `litellm-opensearch-tools`, `litellm-presidio-analyzer`,
+  `litellm-image-security-monitor`, and the optional `litellm-lens`) are
+  exported
   with `docker image save` to a temporary archive below
   `security-state/trivy-cache/sbom-input/` and keyed by their local image ID.
   The archive is deleted after the scan. Reserve free disk space of about the

@@ -1,0 +1,365 @@
+# Recognizer registry of presidio-analyzer. Presidio 2.2.362's
+# default_recognizers.yaml with these changes, which keep it in step with presidio/analyzer.yaml:
+# - languages: English, German, and French;
+# - credit cards also in German and French, with local context words;
+# - UK National Insurance numbers, passports, and postcodes switched on (the
+#   NHS number already was). UK vehicle registrations stay off: their short
+#   letter-number codes produce too many false positives;
+# - German and French street-address recognizers (at the end of this file);
+# - UrlRecognizer and IpRecognizer replaced by stricter custom recognizers (at
+#   the end of this file) that do not match file names, paths, or code.
+# Compare with the upstream file when upgrading the Presidio image.
+supported_languages:
+  - en
+  - de
+  - fr
+global_regex_flags: 26
+
+recognizers:
+  # Recognizers listed here can either be loaded from the recognizers defined in code (type: predefined),
+  # or created based on the provided configuration (type: custom).
+  # For predefined:
+  # - If only a recognizer name is provided, a predefined recognizer with this name and default parameters will be loaded.
+  # - If a parameter isn't provided, the default one would be loaded.
+  # - Use 'class_name' to specify the Python class when using a custom 'name' for display/metadata
+  # For custom:
+  # - See an example configuration here: https://github.com/microsoft/presidio/blob/main/presidio-analyzer/presidio_analyzer/conf/example_recognizers.yaml
+  # - Custom pattern recognizers with this configuration can be added to this file, with type: custom
+  #  For recognizers supporting more than one language, an instance of the recognizer for each language will be created.
+  # For example, see the CreditCardRecognizer definition below:
+  - name: CreditCardRecognizer
+    supported_languages:
+    - language: en
+      context: [credit, card, visa, mastercard, cc, amex, discover, jcb, diners, maestro, instapayment]
+    - language: es
+      context: [tarjeta, credito, visa, mastercard, cc, amex, discover, jcb, diners, maestro, instapayment]
+    - language: it
+    - language: pl
+    - language: de
+      context: [kreditkarte, karte, visa, mastercard, amex, maestro, girocard]
+    - language: fr
+      context: [carte, bancaire, credit, crédit, visa, mastercard, amex, cb]
+    type: predefined
+
+  - name: UsBankRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+
+  - name: UsLicenseRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+
+  - name: UsItinRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+  
+  - name: UsPassportRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+  
+  - name: UsSsnRecognizer
+    supported_languages:
+    - en
+    type: predefined
+
+  - name: UsMbiRecognizer
+    supported_languages:
+    - en
+    type: predefined
+    enabled: false
+
+  - name: UsNpiRecognizer
+    supported_languages:
+    - en
+    type: predefined
+    enabled: false
+
+  - name: NhsRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+
+  - name: UkNinoRecognizer
+    supported_languages:
+    - en
+    type: predefined
+
+  - name: UkPassportRecognizer
+    supported_languages:
+    - en
+    type: predefined
+
+  - name: UkPostcodeRecognizer
+    supported_languages:
+    - en
+    type: predefined
+
+  - name: UkVehicleRegistrationRecognizer
+    supported_languages:
+    - en
+    type: predefined
+    enabled: false
+
+  - name: SgFinRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+    enabled: false
+
+  - name: AuAbnRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+    enabled: false
+
+  - name: AuAcnRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+    enabled: false
+
+  - name: AuTfnRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+    enabled: false
+
+  - name: AuMedicareRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+    enabled: false
+
+  - name: NgNinRecognizer
+    supported_languages:
+    - en
+    type: predefined
+    enabled: false
+
+  - name: NgVehicleRegistrationRecognizer
+    supported_languages:
+    - en
+    type: predefined
+    enabled: false
+
+  - name: InPanRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+    enabled: false
+
+  - name: InAadhaarRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+    enabled: false
+
+  - name: InVehicleRegistrationRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+    enabled: false
+
+  - name: InPassportRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+    enabled: false
+
+  - name: EsNifRecognizer
+    supported_languages: 
+    - es
+    type: predefined
+
+  - name: EsNieRecognizer
+    supported_languages: 
+    - es
+    type: predefined
+
+  - name: ItDriverLicenseRecognizer
+    supported_languages: 
+    - it
+    type: predefined
+
+  - name: ItFiscalCodeRecognizer
+    supported_languages: 
+    - it
+    type: predefined
+
+  - name: ItVatCodeRecognizer
+    supported_languages: 
+    - it
+    type: predefined
+
+  - name: ItIdentityCardRecognizer
+    supported_languages: 
+    - it
+    type: predefined
+
+  - name: ItPassportRecognizer
+    supported_languages: 
+    - it
+    type: predefined
+
+  - name: PlPeselRecognizer
+    supported_languages: 
+    - pl
+    type: predefined
+
+  - name: KrBrnRecognizer
+    supported_languages: 
+    - ko
+    - kr
+    type: predefined
+    enabled: false
+
+  - name: KrRrnRecognizer
+    supported_languages: 
+    - ko
+    - kr
+    type: predefined
+    enabled: false
+
+  - name: KrDriverLicenseRecognizer
+    supported_languages: 
+    - ko
+    - kr
+    type: predefined
+    enabled: false
+
+  - name: KrFrnRecognizer
+    supported_languages: 
+    - ko
+    - kr
+    type: predefined
+    enabled: false
+
+  - name: ThTninRecognizer
+    supported_languages:
+    - th
+    type: predefined
+    enabled: false
+
+  - name: HuggingFaceNerRecognizer
+    supported_languages:
+    - en
+    type: predefined
+    enabled: false
+
+  - name: CryptoRecognizer
+    type: predefined
+
+  - name: DateRecognizer
+    type: predefined
+
+  - name: EmailRecognizer
+    type: predefined
+
+  - name: IbanRecognizer
+    type: predefined
+
+  # Replaced by IpAddressRecognizer at the end of this file: its IPv6 pattern
+  # matches a bare "::", the Rust and C++ path separator (std::io).
+  - name: IpRecognizer
+    type: predefined
+    enabled: false
+
+  - name: MedicalLicenseRecognizer
+    type: predefined
+
+  - name: MacAddressRecognizer
+    type: predefined
+
+  - name: PhoneRecognizer
+    type: predefined
+
+  # Replaced by WebUrlRecognizer at the end of this file: it matches any
+  # name.tld without a scheme, and file extensions such as .rs, .py, .md, and
+  # .sh are country domains, so file names (main.rs) and code (self.name)
+  # were masked as URLs.
+  - name: UrlRecognizer
+    type: predefined
+    enabled: false
+
+  - name: InVoterRecognizer
+    type: predefined
+    enabled: false
+
+  - name: InGstinRecognizer
+    supported_languages: 
+    - en
+    type: predefined
+    enabled: false
+
+  - name: BasicLangExtractRecognizer
+    supported_languages:
+      - en
+    type: predefined
+    enabled: false
+    config_path: presidio_analyzer/conf/langextract_config_basic.yaml
+
+  # Street addresses, which the German and French NER models detect only in
+  # part (the street or city, not the house number or postcode). Masked as
+  # LOCATION like Presidio's other place detections. Every repetition is
+  # bounded, so a crafted input cannot make matching slow (CWE-1333); the
+  # unit tests time them on 100 KB inputs and list the matched and rejected
+  # examples. Years are not house numbers: at most three digits.
+  - name: DeStreetAddressRecognizer
+    supported_language: de
+    supported_entity: LOCATION
+    type: custom
+    patterns:
+      - name: street, house number, optional postcode and city
+        regex: "\\b(?:(?-i:[A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ.-]{0,40})(?:straße|strasse|str\\.|weg|gasse|platz|allee|ring|damm|ufer|chaussee|steig|pfad|graben|kamp|stieg)|(?-i:[A-ZÄÖÜ][a-zäöüß-]{1,40}(?:\\s[A-ZÄÖÜ][a-zäöüß-]{1,40})?)\\s(?-i:Straße|Strasse|Str\\.|Weg|Gasse|Platz|Allee|Ring|Damm|Ufer|Chaussee|Markt))\\s\\d{1,3}(?:\\s?[a-zA-Z])?(?:\\s?[-/]\\s?\\d{1,3}[a-zA-Z]?)?\\b(?:(?:\\s*,\\s*|\\s*\\n\\s*|\\s+)\\d{5}\\s(?-i:[A-ZÄÖÜ][a-zäöüß]{1,30}(?:-[A-ZÄÖÜ][a-zäöüß]{1,30}){0,3}(?: (?:am|an der|im|in der|ob der|vor der) [A-ZÄÖÜ][a-zäöüß]{1,30})?))?"
+        score: 0.7
+    context: [anschrift, adresse, wohnhaft, wohnt, straße, plz]
+
+  - name: FrStreetAddressRecognizer
+    supported_language: fr
+    supported_entity: LOCATION
+    type: custom
+    patterns:
+      - name: house number, street, optional postcode and city
+        regex: "\\b\\d{1,4}(?:\\s?(?:bis|ter))?,?\\s(?:rue|avenue|av\\.|boulevard|bd|place|allée|allee|chemin|impasse|quai|route|cours|square|passage|rond-point|esplanade|faubourg)\\s(?:de la |de l'|de l’|du |des |de |d'|d’|la |le |les |l'|l’)?(?-i:[A-ZÉÈÊÀÂÎÔÛÇ][a-zéèêëàâîïôöûüç'’]{0,30}(?:-[A-ZÉÈÊÀÂÎÔÛÇa-zéèêàâîôûç][a-zéèêëàâîïôöûüç'’]{0,30}){0,4})(?: (?:de la |de l'|de l’|du |des |de |d'|d’|la |le |les |l'|l’)?(?-i:[A-ZÉÈÊÀÂÎÔÛÇ][a-zéèêëàâîïôöûüç'’]{0,30}(?:-[A-ZÉÈÊÀÂÎÔÛÇa-zéèêàâîôûç][a-zéèêëàâîïôöûüç'’]{0,30}){0,4})){0,3}(?:(?:\\s*,\\s*|\\s*\\n\\s*|\\s+)\\d{5}\\s(?-i:[A-ZÉÈÊÀÂÎÔÛÇ][a-zéèêëàâîïôöûüç]{1,30}(?:-(?:sur|sous|en|le|la|les|de|du|des|lès|[A-ZÉÈÊÀÂÎÔÛÇ][a-zéèêëàâîïôöûüç]{1,30})){0,4})(?:\\s(?-i:CEDEX)(?:\\s\\d{1,2})?)?)?"
+        score: 0.7
+    context: [adresse, domicile, habite, demeurant, rue, code postal]
+
+  # URLs and IP addresses, replacing UrlRecognizer and IpRecognizer, which
+  # masked file names, paths, and code. Every repetition is bounded
+  # (CWE-1333); scripts/tests/test_presidio_recognizers.py lists the matched
+  # and rejected examples and times them on 100 KB inputs.
+  # - A URL needs a scheme (https://, http://, ftp://) or www. and a dotted
+  #   host with an alphabetic top-level domain. Scores are the upstream ones.
+  #   Bare domains (example.com) are no longer masked; localhost and
+  #   single-label hosts (http://presidio-analyzer:3000) never were.
+  - name: WebUrlRecognizer
+    supported_entity: URL
+    type: custom
+    patterns:
+      - name: URL with a scheme
+        regex: "\\b(?:https?|ftp)://(?:[a-z0-9-]{1,63}\\.){1,10}[a-z]{2,63}(?::[0-9]{1,5})?(?:[/?#][^\\s<>\\\"'`]{0,2048})?"
+        score: 0.6
+      - name: URL starting with www
+        regex: "\\bwww[0-9]{0,3}\\.(?:[a-z0-9-]{1,63}\\.){1,10}[a-z]{2,63}(?::[0-9]{1,5})?(?:[/?#][^\\s<>\\\"'`]{0,2048})?"
+        score: 0.5
+    context: [url, website, link]
+
+  # - IPv4 is the upstream pattern. IPv6 needs at least two hex groups and a
+  #   digit, so "::" (std::io), "de::" (serde::de), and "f32::" (f32::MAX) are
+  #   not addresses; the unspecified "::" and loopback "::1" are not personal
+  #   data.
+  - name: IpAddressRecognizer
+    supported_entity: IP_ADDRESS
+    type: custom
+    patterns:
+      - name: IPv4
+        regex: "\\b(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:\\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}\\b"
+        score: 0.6
+      - name: IPv6
+        regex: "(?<![\\w:.])(?=[0-9a-f:]{0,45}[0-9])(?:(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,6}(?::[0-9a-f]{1,4}){1,6})(?![\\w:])"
+        score: 0.6
+    context: [ip, ipv4, ipv6]

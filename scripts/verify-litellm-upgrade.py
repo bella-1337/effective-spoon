@@ -609,6 +609,35 @@ WHERE vector_store_id = 'sme-knowledge'
         else:
             self.fail_("presidio: anonymizer output did not match the expected masking behavior")
             bad = True
+        # German and French pipelines (presidio/Dockerfile) and the placeholder
+        # allow-list the pii-assist guardrail adds to every gateway analysis.
+        for language, probe in (
+            ("de", "Bitte rufen Sie Frau Brunhilde Beispiel in München an."),
+            ("fr", "Veuillez appeler Madame Brunhilde Exemple à Lyon."),
+        ):
+            status, body = container_http_request(
+                "presidio-analyzer",
+                "http://localhost:3000/analyze",
+                method="POST",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps({"text": probe + " <LOCATION>", "language": language,
+                                 "allow_list": [r"^[\W_]*(?-i:LOCATION)[\W_]*$"], "allow_list_match": "regex"}).encode(),
+            )
+            try:
+                found = json.loads(body) if status == 200 else None
+            except json.JSONDecodeError:
+                found = None
+            person = any(
+                isinstance(item, dict) and item.get("entity_type") == "PERSON"
+                and "Brunhilde" in probe[item.get("start", 0):item.get("end", 0)]
+                for item in found or []
+            )
+            placeholder = any(isinstance(item, dict) and item.get("start", 0) >= len(probe) for item in found or [])
+            if isinstance(found, list) and person and not placeholder:
+                self.pass_(f"presidio: {language} analysis found the PERSON name and ignored a placeholder")
+            else:
+                self.fail_(f"presidio: {language} analysis is unavailable or did not behave as expected")
+                bad = True
         headers = self.auth_headers()
         if headers:
             for profile, running, url in (("prod", self.prod_running, self.prod_url), ("dev", self.dev_running, self.dev_url)):
@@ -618,10 +647,12 @@ WHERE vector_store_id = 'sme-knowledge'
                                               {"Authorization": headers["Authorization"], "Content-Type": "application/json"},
                                               {"model": verification_chat_model() or "d3-mini"})
                 guards = resolution.get("effective_guardrails", []) if isinstance(resolution, dict) else []
-                if "presidio-pii" in guards:
-                    self.pass_(f"presidio: {profile} policy resolution includes the presidio-pii guardrail")
+                if guards == ["pii-assist", "presidio-pii", "pii-restore"]:
+                    self.pass_(f"presidio: {profile} policy resolution runs pii-assist, presidio-pii, then pii-restore")
                 else:
-                    self.fail_(f"presidio: {profile} policy resolution does not include the presidio-pii guardrail")
+                    self.fail_(
+                        f"presidio: {profile} policy resolution is not pii-assist, presidio-pii, then pii-restore: {guards}"
+                    )
                     bad = True
         return int(bad)
 

@@ -13,7 +13,8 @@ It provides:
   OpenAI, and Google Vertex AI, with none required;
 - locally trusted HTTPS termination;
 - separate production and development LiteLLM profiles;
-- PII masking through Microsoft Presidio;
+- PII masking through Microsoft Presidio in English, German, and French, with
+  optional language and personal-data detection by a local model;
 - PostgreSQL-backed LiteLLM state and spend records;
 - optional Langfuse tracing backed by PostgreSQL, ClickHouse, Redis, and MinIO;
 - D3-assisted coding routing, Qdrant-backed semantic caching, and
@@ -158,7 +159,16 @@ It also refuses a `D3_DECISION_API_BASE` that is not an HTTPS base URL, except
    `CODING_ROUTER_*_MODEL` list and scores the request locally if D3-mini
    fails or times out. The router exists only when
    `CODING_ROUTER_DEFAULT_MODEL` is set.
-5. The production guardrail calls Presidio analyzer and anonymizer services.
+5. The `eu-data-protection` policy runs two guardrails. When
+   `PII_ASSIST_API_BASE` is set, `pii-assist` first asks the local
+   `pii-assist` model (served by your own vLLM server on the Docker host or a
+   private network, never a cloud API) for the prompt's language and personal
+   data and masks what it finds.
+   `presidio-pii` then calls the Presidio analyzer, in English, German, or
+   French, and the anonymizer. With `PII_REVERSIBLE_MASKING=true`, both send
+   numbered tokens such as `<PERSON_1>` to the provider instead of
+   placeholders, and `pii-restore` puts the request's own values back into the
+   response after `presidio-pii` has masked it.
 6. LiteLLM stores request/spend telemetry in its profile-specific PostgreSQL
    database and emits Prometheus metrics.
 

@@ -476,6 +476,7 @@ updates:
             ("pgvector/Dockerfile", "python:3.11@sha256:" + "a" * 64),
             ("opensearch/tools/Dockerfile", "base:1"),
             ("security/image-monitor.Dockerfile", "base:1 AS builder"),
+            ("presidio/Dockerfile", "base:1"),
             ("docs-site/Dockerfile", "base:1 AS build"),
         ):
             path = root / relative
@@ -750,7 +751,7 @@ class EdgeAndAbuseContractTests(unittest.TestCase):
                 "cap_drop": ["NET_RAW"],
             },
             "litellm-prod": {"cap_drop": ["NET_RAW"]},
-            "presidio-analyzer": {"environment": {"WORKERS": "2"}},
+            "presidio-analyzer": {"environment": {"WORKERS": "2", "GUNICORN_CMD_ARGS": "--preload"}},
             "presidio-anonymizer": {"environment": {"WORKERS": "2"}},
         }
         self.assertEqual(contracts.edge_and_abuse_compose_failures(hardened), [])
@@ -772,6 +773,7 @@ class EdgeAndAbuseContractTests(unittest.TestCase):
             "traefik must drop NET_RAW",
             "litellm-prod must drop NET_RAW",
             "presidio-analyzer needs at least two workers",
+            "presidio-analyzer must preload its models",
         ):
             self.assertTrue(any(expected in failure for failure in failures), (expected, failures))
 

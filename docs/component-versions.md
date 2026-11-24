@@ -29,7 +29,7 @@ Profile `core` services run without a profile. Other profiles are described in
 
 | Component | Version | Image | Used by (profile) |
 | --- | --- | --- | --- |
-| Presidio analyzer | `2.2.362` | `mcr.microsoft.com/presidio-analyzer` | `presidio-analyzer` (core) |
+| Presidio analyzer, English, German, and French (local build) | `2.2.362-1` | `litellm-presidio-analyzer` | `presidio-analyzer` (core) |
 | Presidio anonymizer | `2.2.362` | `mcr.microsoft.com/presidio-anonymizer` | `presidio-anonymizer` (core) |
 | SearXNG | `2026.11.15-2d500cb6b` | `searxng/searxng` | `searxng` (core) |
 | Xberg | `1.4.2-core` | `ghcr.io/xberg-io/xberg` | `xberg` (prod, dev) |
@@ -116,6 +116,7 @@ listed under Langfuse. See [On-host D3-mini](d3-mini-on-host.md).
 | Component | Version | Image | Used by (profile) |
 | --- | --- | --- | --- |
 | Python | `3.11-slim-bookworm` | `python` | Base of `pgvector/Dockerfile` |
+| Presidio analyzer (upstream) | `2.2.362` | `mcr.microsoft.com/presidio-analyzer` | Base of `presidio/Dockerfile` |
 | uv with Python 3.13 | `0.9.30-python3.13-bookworm-slim` | `ghcr.io/astral-sh/uv` | Base of `opensearch/tools/Dockerfile`, `security/image-monitor.Dockerfile`, and `docs-site/Dockerfile` |
 
 ## Remote GPU host
@@ -135,6 +136,9 @@ Deployed separately with [`gpu-host/`](../gpu-host/README.md).
 | `vllm-sr/d3-mini` | `a475367de0d8133a3c1a2a0dc12303d89cfa2ab4` (tag `v3.1.0`) | `d3-mini` on the remote GPU host; `d3-mini` (d3 profile) |
 | `BAAI/bge-m3` | `5617a9f61b028005a4858fdac845db406aefb181` | `bge-m3` on the remote GPU host |
 | `spacy/en_core_web_lg` | Bundled in Presidio analyzer `2.2.362` | `presidio-analyzer` |
+| `spacy/de_core_news_lg` | `3.8.0` (`presidio/spacy-models.txt`) | `presidio-analyzer` |
+| `spacy/fr_core_news_lg` | `3.8.0` (`presidio/spacy-models.txt`) | `presidio-analyzer` |
+| `pii-assist` model (your vLLM server, outside the stack) | As served under `PII_ASSIST_VLLM_MODEL` (default `gemma4`); the revision is pinned by the operator | `pii-assist` model of both gateways, when `PII_ASSIST_API_BASE` is set |
 
 ## Host tools
 

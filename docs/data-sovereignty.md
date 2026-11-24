@@ -212,6 +212,13 @@ an upgrade that drops one of them fails the check.
 
 ## What this does not cover
 
+The optional `pii-assist` model is not a provider model: it detects personal
+data before masking, so it reads prompts unmasked. `prepare_runtime_config.py`
+therefore accepts its vLLM server only on `host.docker.internal`, a Compose
+service, or a private address, requires that server's API key, and refuses to
+start the gateway otherwise. See
+[Local-model assist](presidio-guardrails.md#local-model-assist).
+
 The region lock checks only the models wired from the environment at startup.
 Both configs set `store_model_in_db: true`, so an administrator can still add a
 model through the LiteLLM admin UI or the `/model/new` API, and that model is
