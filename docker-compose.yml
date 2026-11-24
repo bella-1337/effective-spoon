@@ -634,7 +634,7 @@ services:
   xberg:
     logging: *default-logging
     profiles: [prod, dev]
-    image: ghcr.io/xberg-io/xberg:1.4.2-core@sha256:9c09c5a7027e102653433bce458f05b88eaaf6d9c37e65583b9831bc47988935
+    image: ghcr.io/xberg-io/xberg:1.5.1-core@sha256:46602967f54ed007fcf261a70822f819a80a3f63e24f53052bf0bb1e0e7c9a4a
     command:
       - mcp
       - --transport
