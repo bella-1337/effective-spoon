@@ -8,6 +8,8 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-11-27
+
 ### Added
 
 - Reader versions of the guides and a **Copy for LLM** button on every page of
@@ -645,7 +647,8 @@ Initial release of the self-hosted LiteLLM gateway stack.
   versioned documentation site built with Zensical and published to GitHub
   Pages or GitLab Pages.
 
-[Unreleased]: https://github.com/bella-1337/effective-spoon/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/bella-1337/effective-spoon/compare/v0.5.0...HEAD
+[v0.5.0]: https://github.com/bella-1337/effective-spoon/compare/v0.4.1...v0.5.0
 [v0.4.1]: https://github.com/bella-1337/effective-spoon/compare/v0.4.0...v0.4.1
 [v0.4.0]: https://github.com/bella-1337/effective-spoon/compare/v0.3.1...v0.4.0
 [v0.3.1]: https://github.com/bella-1337/effective-spoon/compare/v0.3.0...v0.3.1
