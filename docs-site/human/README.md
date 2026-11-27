@@ -1,0 +1,229 @@
+<!-- human-version-of: README.md sha256: 3b33edd812faa4bdff95ea593af2fe5ce88a185b291b9beda01ecbe9174e3432 -->
+
+# Sovereign LLM Gateway
+
+<!-- badges:start -->
+[![CI](https://github.com/bella-1337/effective-spoon/actions/workflows/validate.yml/badge.svg)](https://github.com/bella-1337/effective-spoon/actions/workflows/validate.yml)
+[![Supply chain](https://github.com/bella-1337/effective-spoon/actions/workflows/supply-chain.yml/badge.svg)](https://github.com/bella-1337/effective-spoon/actions/workflows/supply-chain.yml)
+[![Documentation](https://github.com/bella-1337/effective-spoon/actions/workflows/docs.yml/badge.svg)](https://github.com/bella-1337/effective-spoon/actions/workflows/docs.yml)
+[![Release](https://github.com/bella-1337/effective-spoon/actions/workflows/release.yml/badge.svg)](https://github.com/bella-1337/effective-spoon/actions/workflows/release.yml)
+[![Dev container](https://github.com/bella-1337/effective-spoon/actions/workflows/devcontainer.yml/badge.svg)](https://github.com/bella-1337/effective-spoon/actions/workflows/devcontainer.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/bella-1337/effective-spoon/badge)](https://scorecard.dev/viewer/?uri=github.com/bella-1337/effective-spoon)
+[![Latest release](https://img.shields.io/github/v/release/bella-1337/effective-spoon?sort=semver)](https://github.com/bella-1337/effective-spoon/releases/latest)
+[![Docs site](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://bella-1337.github.io/effective-spoon/)
+[![Dependabot](https://img.shields.io/badge/dependabot-enabled-brightgreen?logo=dependabot)](https://github.com/bella-1337/effective-spoon/blob/master/.github/dependabot.yml)
+<!-- badges:end -->
+
+This is the starting point of the documentation. Read it to learn what the
+gateway does, what you need before you install it, and which guide to open
+next.
+
+The gateway is a region-locked AI gateway: every prompt stays in the
+data-sovereignty region you choose. It works like this:
+
+1. In `.env`, set `DATA_SOVEREIGNTY_REGION` to `eu` or `us`.
+2. In `.env`, list the models to serve from Amazon Bedrock, Azure OpenAI, or
+   Google Vertex AI.
+3. The gateway wires only those models into LiteLLM. It refuses to start when
+   a provider location could process prompts outside the region.
+
+You don't need any cloud model. With none configured, the gateway serves only
+its self-hosted models. See
+[Data sovereignty and regional models](docs/data-sovereignty.md).
+
+Under the hood, the gateway is a Docker Compose stack. It runs separate
+LiteLLM production and development proxies behind Traefik, together with:
+
+- PostgreSQL, Presidio, SearXNG, and Xberg MCP;
+- development vLLM model servers;
+- Prometheus and host/container exporters;
+- OpenSearch with OpenSearch Dashboards, the default multi-user observability
+  platform for logs, metrics, LiteLLM usage, tracing, alerting, and audit
+  trails.
+
+Optional profiles add Grafana/Loki, Langfuse, and LiteLLM Lens (AI review of
+agent traces inside the LiteLLM dashboard).
+
+In this documentation, `prod` and `dev` name LiteLLM runtime profiles.
+
+For TLS, the on-prem deployment expects a certificate delivery process to
+place the configured TLS certificate and private key on the host. The bundled
+`mkcert` workflow is available only for a private workstation or a trusted
+development network.
+
+## Prerequisites
+
+Have these ready before your first deployment:
+
+- Docker Engine or Docker Desktop with Docker Compose v2.20.0 or newer. The
+  stack needs that version for the top-level `include` model.
+- Python 3.11 or newer, for the local CI validation entrypoint.
+- A remote GPU host, deployed with the separate
+  [`gpu-host/`](gpu-host/README.md) stack. It serves the D3-mini Decisions
+  endpoint and, for the development profile, the BGE-M3 embedding endpoint.
+  Both use TLS with a certificate from the host's mkcert CA. See
+  [Hardware sizing](docs/hardware-sizing.md#remote-gpu-host).
+- `GPU_HOST_CA_BUNDLE`: the public roots plus that mkcert CA. Build it with
+  `./scripts/build-gpu-host-ca-bundle.py --root-ca rootCA.pem`.
+- About 4.5 GB of additional RAM for OpenSearch, OpenSearch Dashboards, and
+  Data Prepper. On Linux hosts, OpenSearch requires `vm.max_map_count` of at
+  least 262144:
+
+  ```sh
+  sudo sysctl -w vm.max_map_count=262144
+  echo 'vm.max_map_count=262144' | sudo tee /etc/sysctl.d/99-opensearch.conf
+  ```
+- [`uv`](https://docs.astral.sh/uv/getting-started/installation/), for the
+  maintenance scripts.
+- A delivered TLS certificate and matching private key. For local development
+  only, `mkcert` instead.
+- `curl`, for the documented manual API and health checks.
+- Administrator access, to install the local CA and update host resolution.
+
+Run all commands from this repository's root.
+
+## Hardware sizing
+
+Run each environment on its own host. D3-mini and BGE-M3 run on a separate
+remote GPU host, so neither stack host needs a GPU.
+
+For about 100,000 production requests a day with every optional profile, plan
+on roughly:
+
+- 128 GB RAM for prod;
+- 64 GB for dev;
+- one 48 GB GPU for the remote host.
+
+The [hardware sizing guide](docs/hardware-sizing.md) has the details:
+
+- [Host specifications](docs/hardware-sizing.md) and cloud equivalents
+- [Prod host budget](docs/hardware-sizing.md#prod-host-budget) of memory, CPU,
+  and disk
+- [Resource limits](docs/hardware-sizing.md#resource-limits) to set on the
+  prod host
+- [Dev host budget](docs/hardware-sizing.md#dev-host-budget)
+- [Remote GPU host](docs/hardware-sizing.md#remote-gpu-host) memory budget and
+  network placement
+
+## Getting started
+
+For a first deployment, follow the
+[getting-started guide](docs/getting-started.md) step by step:
+
+1. [Configure the environment](docs/getting-started.md#1-configure-the-environment)
+2. [Deliver TLS certificates](docs/getting-started.md#2-deliver-tls-certificates)
+3. [Resolve the hostnames](docs/getting-started.md#3-resolve-the-hostnames)
+4. [Fetch Grafana dashboards](docs/getting-started.md#4-fetch-grafana-dashboards-optional-grafana-profile-only)
+   (optional `grafana` profile only)
+5. [Configure Prometheus metrics authentication](docs/getting-started.md#5-configure-prometheus-metrics-authentication)
+6. [Validate configuration](docs/getting-started.md#6-validate-configuration)
+7. [Start a profile](docs/getting-started.md#7-start-a-profile)
+8. [Verify the stack](docs/getting-started.md#8-verify-the-stack)
+
+To stop, restart, or remove the stack, see
+[Stop, restart, and remove](docs/getting-started.md#stop-restart-and-remove).
+
+## Documentation
+
+The guides below are also published as a versioned documentation site on
+GitHub Pages or GitLab Pages. It has a version selector for each release and
+for the unreleased `dev` branch. You can view it two other ways:
+
+- Preview it locally with `./scripts/build-docs.py serve`.
+- Serve the deployed revision from the stack with the optional `docs` profile.
+  It runs `zensical serve` at `gateway-deployment-docs.${STACK_DOMAIN}`.
+
+See [Documentation site](docs/documentation-site.md).
+
+### Guides
+
+| Guide | Covers |
+| --- | --- |
+| [Data sovereignty and regional models](docs/data-sovereignty.md) | `DATA_SOVEREIGNTY_REGION`, allowed provider locations per region, wiring Bedrock, Azure OpenAI, and Vertex AI models from `.env`, coding-router, provider-side controls |
+| [Getting started](docs/getting-started.md) | Environment files, `STACK_DOMAIN` hostnames, TLS certificates, host resolution, Prometheus authentication, validation, starting and verifying profiles, stopping and removing the stack |
+| [DNS entries](docs/dns-entries.md) | Every internal DNS record of an on-prem deployment: the stack's public hostnames per profile, the remote GPU host's names, names that need no record, and generating and checking the records |
+| [Hardware sizing](docs/hardware-sizing.md) | Prod, dev, and remote GPU host specifications, memory, CPU, and disk budgets, prod resource limits |
+| [Development and delivery workflow](docs/development-workflow.md) | Feature requests, development container, local, GitHub Actions, and GitLab CI checks, release delivery |
+| [Reference stack: BerriAI Inference Stack](docs/reference-inference-stack.md) | How to check feature requests against LiteLLM's reference deployment, and how the two stacks differ |
+| [Documentation site](docs/documentation-site.md) | Local preview, versions and the dev switch, the optional `docs` profile that serves the deployed revision at `DOCS_HOST`, GitHub Pages and GitLab Pages publishing |
+| [Corporate branding and virtual-key management](docs/branding-and-key-management.md) | Admin UI branding, Enterprise virtual-key rotation, key email notifications |
+| [Observability](docs/observability.md) | OpenSearch users, roles, tenants, alerting and recovery; optional Langfuse and Grafana profiles; demonstration data and telemetry stores |
+| [LiteLLM Lens](docs/lens.md) | Optional `lens` profile: AI review of agent traces in the LiteLLM dashboard, secrets, gateway connection, analysis models, data protection, backup, and upgrades |
+| [Search, document extraction, and caching](docs/search-extraction-and-caching.md) | SearXNG search and engine terms of use, Xberg MCP document extraction, development semantic response cache |
+| [Presidio PII masking and guardrails](docs/presidio-guardrails.md) | Presidio masking in English, German, and French with UK formats, the optional local-model assist, checking what the guardrail masks, and changing, adding, disabling, and verifying LiteLLM guardrails |
+| [Edge and abuse protection](docs/edge-and-abuse-protection.md) | TLS policy, HSTS, per-client rate limits, per-key defaults, Xberg sandbox egress and DNS, prompt-injection screening, and residual risks |
+| [EU technical-control baseline](docs/eu-technical-controls.md) | Modular policy configuration, data minimisation and retention, integrity and transport, deployment decisions outside this repository |
+| [Databases and pgvector storage](docs/databases-and-pgvector.md) | LiteLLM schema verification, pgvector store, opt-in Xberg auto-indexing |
+| [Maintenance runtime](docs/maintenance-runtime.md) | Installing `uv` for the maintenance scripts, why they use Python, and where their logs are kept for review |
+| [Image security and supply-chain evidence](docs/image-security.md) | Trivy and CISA KEV image scanning, exceptions, alerts, scheduling, SBOMs, licence evidence, OCI image labels |
+| [Remote GPU host](gpu-host/README.md) | D3-mini and BGE-M3 on one shared GPU: engine choice, memory budget, deployment, network security |
+| [On-host D3-mini](docs/d3-mini-on-host.md) | Optional `d3` profile: D3-mini on the stack host's NVIDIA GPU (sized for a 16 GB RTX PRO 2000 Blackwell), settings, GPU memory, verification on the card |
+| [Back up and restore the databases](docs/backup-and-restore.md) | Database backups, restore, and the game-day preflight |
+| [Validate and roll back a LiteLLM image upgrade](docs/upgrades-and-rollback.md) | Maintenance entry point, upgrade compatibility checks, regression suite, rollback |
+
+### Reference
+
+| Document | Covers |
+| --- | --- |
+| [Changelog](CHANGELOG.md) | Notable changes in each release |
+| [Architecture](ARCHITECTURE.md) | Stack components and their interactions |
+| [Diagrams](diagrams/README.md) | Animated architecture diagrams and flow sequence diagrams, including clients and external services, generated from Mermaid sources |
+| [Environment variable reference](docs/environment-variables.md) | Every variable, its format, default, classification, rotation, and change impact |
+| [Component versions](docs/component-versions.md) | Version of every image, model, and host tool the stack uses |
+| [Third-party licence register](docs/third-party-licences.md) | Licences of the deployed images and external services |
+| [Development-to-production promotion register](docs/dev-to-prod-promotion-register.md) | Development-only capabilities and their production promotion status |
+| [Operations game day](OPERATIONS-GAME-DAY.md) | Quarterly failure and recovery exercise |
+| [DDoS, MITM, and prompt-injection probe (2026-11-01)](docs/security-probe-2026-11-01.md) | Live probe evidence, findings, applied fixes, and residual risks |
+
+## Security notes
+
+- Report vulnerabilities privately, as described in the
+  [security policy](https://github.com/bella-1337/effective-spoon/blob/master/.github/SECURITY.md).
+- Keep `.env` and everything under `traefik/certs/` private.
+- Rotate any credential that is accidentally exposed.
+- Restrict host access: the Docker socket mounted by Traefik is
+  security-sensitive.
+- Do not expose the `dev` profile or its logs to untrusted users.
+- Keep image digests immutable in deployed revisions. Review updates rather
+  than returning to floating tags.
+
+## Contributing
+
+This project does not accept outside contributions at the moment. Please do
+not open pull requests or feature requests; they will not be reviewed or
+merged. You are welcome to fork the repository under the terms of its licence.
+
+The one exception is security. If you find a vulnerability:
+
+1. Do not open a public issue, pull request, or discussion.
+2. If a live credential was exposed, rotate it first, and say so in the
+   report.
+3. Report it privately through
+   [GitHub private vulnerability reporting](https://github.com/bella-1337/effective-spoon/security/advisories/new).
+   Include:
+    - the affected file, service, or release tag;
+    - steps to reproduce, or a proof of concept that uses placeholder
+      credentials only;
+    - the impact you expect, for example credential exposure, privilege
+      escalation, or data leaving the stack.
+
+The [security policy](https://github.com/bella-1337/effective-spoon/blob/master/.github/SECURITY.md)
+describes the supported versions and what is in scope.
+
+## Licence and warranty
+
+This stack is published as is, **without warranty of any kind**, express or
+implied, including the warranties of merchantability, fitness for a particular
+purpose, and non-infringement. Use it at your own risk; the authors are not
+liable for any claim, damage, or other liability arising from its use.
+
+- The stack's own container images (`litellm-opensearch-tools` and
+  `litellm-image-security-monitor`) are released under the
+  [MIT License](https://opensource.org/license/mit). The packages and tools
+  they bundle keep their own licences.
+- Every third-party tool the stack uses, including each container image,
+  model, and package, is distributed under its own licence, which you must
+  comply with. The [third-party licence register](docs/third-party-licences.md)
+  lists them.
+- The repository's own files are licensed under the
+  [Apache License 2.0](https://github.com/bella-1337/effective-spoon/blob/master/LICENSE).

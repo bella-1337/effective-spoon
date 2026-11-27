@@ -5,7 +5,11 @@
 # except Markdown, the rendered diagrams with their Mermaid viewer pages and
 # self-hosted Mermaid.js, and the site assets out of the site.
 # Build and preview with scripts/build-docs.py, which installs the hash-locked
-# toolchain from docs-site/requirements.txt. Guide: docs/documentation-site.md
+# toolchain from docs-site/requirements.txt and builds a staged copy: it shows
+# the reader version of a page from docs-site/human/ when one is current, and
+# publishes the page's own Markdown under llm/ for the "Copy for LLM" button.
+# Run Zensical on this file only through that script. Guide:
+# docs/documentation-site.md
 
 site_name: Sovereign LLM Gateway
 site_description: >-
@@ -39,6 +43,8 @@ exclude_docs: |
   !/docs/**/*.png
   !/docs/**/*.svg
   !/docs-site/assets/**
+  !/llm/**
+  /docs-site/human/**
   **/.*/**
   /site/**
   /public/**
@@ -167,6 +173,7 @@ nav:
   - Home: README.md
   - Get started:
       - First deployment: docs/getting-started.md
+      - DNS entries: docs/dns-entries.md
       - Hardware sizing: docs/hardware-sizing.md
       - Remote GPU host: gpu-host/README.md
       - On-host D3-mini: docs/d3-mini-on-host.md

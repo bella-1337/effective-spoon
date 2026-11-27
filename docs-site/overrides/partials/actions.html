@@ -1,0 +1,41 @@
+{#-
+  Content actions: "Copy for LLM", then the theme's edit and view buttons.
+
+  The site shows the reader version of a page when docs-site/human/ has a
+  current one. The button copies the page's own Markdown instead, the full
+  reference text written for AI models, which scripts/build-docs.py publishes
+  at llm/<page URL>index.md.txt. The theme's clipboard handler fetches any
+  button[data-md-copy-url] and copies the response, so no script is added.
+  The rest is identical to the theme's partials/actions.html.
+-#}
+{%- if page and page.url is string and ".html" not in page.url %}
+  <button type="button" class="md-content__button docs-copy-llm" data-md-copy-url="{{ ('llm/' ~ page.url ~ 'index.md.txt') | url }}" title="Copy this page's full Markdown source, written for AI models, to paste into an LLM" aria-label="Copy this page as Markdown for an LLM">
+    {% include ".icons/material/robot-outline.svg" %}
+    <span>Copy for LLM</span>
+  </button>
+{%- endif %}
+{% if "content.action.copy" in features and page.markdown_url %}
+  <button type="button" title="{{ lang.t('action.copy') }}" aria-label="{{ lang.t('action.copy') }}" class="md-content__button md-icon" data-md-copy-url="{{ page.markdown_url | url }}">
+    {% set icon = config.theme.icon.copy or "material/content-copy" %}
+    {% include ".icons/" ~ icon ~ ".svg" %}
+  </button>
+{% endif %}
+{% if page.edit_url %}
+  {% if "content.action.edit" in features %}
+    <a href="{{ page.edit_url }}" title="{{ lang.t('action.edit') }}" class="md-content__button md-icon" rel="edit">
+      {% set icon = config.theme.icon.edit or "material/file-edit-outline" %}
+      {% include ".icons/" ~ icon ~ ".svg" %}
+    </a>
+  {% endif %}
+  {% if "content.action.view" in features %}
+    {% if "/blob/" in page.edit_url %}
+      {% set part = "/blob/" %}
+    {% else %}
+      {% set part = "/edit/" %}
+    {% endif %}
+    <a href="{{ page.edit_url | replace(part, '/raw/') }}" title="{{ lang.t('action.view') }}" class="md-content__button md-icon">
+      {% set icon = config.theme.icon.view or "material/file-eye-outline" %}
+      {% include ".icons/" ~ icon ~ ".svg" %}
+    </a>
+  {% endif %}
+{% endif %}

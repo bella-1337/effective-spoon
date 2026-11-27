@@ -10,11 +10,18 @@ from mkdocs.yml, plus the diagrams rendered from diagrams/*.mmd. The toolchain i
 docs-site/requirements.txt of each version into a cached uv virtual
 environment, so an old release is rebuilt with the toolchain it was released
 with.
+
+Every build runs on a staged copy of the published files. Where
+docs-site/human/ holds a reader version of a page, written for the current
+text of that page, the site shows it; otherwise it shows the page itself.
+The page's own Markdown, the reference text for AI models, is published next
+to it under llm/, and the "Copy for LLM" button copies it.
 """
 
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -25,14 +32,15 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Sequence
+from pathlib import Path, PurePosixPath
+from typing import Iterator, Sequence
 
-from maintenance_common import LOG, ROOT, capture, fail, run_main
+from maintenance_common import LOG, ROOT, ScriptError, capture, fail, run_main
 
 USAGE = """Usage: scripts/build-docs.py COMMAND [OPTIONS]
 
@@ -54,6 +62,17 @@ Commands:
       Print the versions the site command would build, as JSON.
   verify-private URL
       Fail when URL serves content to an anonymous visitor.
+  stage --output DIR
+      Copy the published files of the working tree into DIR, an absent or
+      empty directory, with the reader versions swapped in and the Markdown
+      for AI models under llm/ (the docs image builds from this).
+  human-status
+      List every page and its reader version: fresh, stale (written for an
+      older text), missing (a guide without one), or as-is (a page that the
+      site shows as written, such as the agent instructions).
+  human-stamp PAGE...
+      Record that the reader version of each PAGE (for example
+      docs/getting-started.md) now matches the page's current text.
 
 Options for build, site, and versions:
   --repo-url URL        Repository for source and edit links
@@ -65,7 +84,6 @@ Environment:
   DOCS_ALLOW_PUBLIC_PAGES=true  let verify-private accept a public site
 """
 
-CONFIG = ROOT / "mkdocs.yml"
 REQUIREMENTS = Path("docs-site") / "requirements.txt"
 CACHE = ROOT / ".docs-cache"
 DOCS_PYTHON = "3.13"
@@ -80,6 +98,39 @@ HTTP_TIMEOUT_SECONDS = 20
 # Pages of releases up to and including this one carry no warranty disclaimer
 # or licence notice, so those releases are no longer published.
 LAST_UNPUBLISHED_RELEASE = (0, 1, 0)
+# Reader versions of pages, at the same relative path as the page.
+HUMAN_DIR = PurePosixPath("docs-site") / "human"
+# Each page's own Markdown is published at llm/<page URL>index.md.txt; .txt
+# because Zensical turns every .md file into a page.
+LLM_DIR = "llm"
+LLM_FILE = "index.md.txt"
+# First line of a reader version: the page it was written for and the SHA-256
+# of that page's text at the time. A changed page makes the stamp stale.
+HUMAN_STAMP = re.compile(
+    r"\A<!-- human-version-of: (?P<page>\S+) sha256: (?P<digest>[0-9a-f]{64}) -->\n+"
+)
+# Directories that exclude_docs in mkdocs.yml never publishes, at any depth.
+UNPUBLISHED_DIRS = frozenset(
+    {
+        "site", "public", "dist", "logs", "backups", "upgrade-state",
+        "security-metrics", "security-reports", "security-state",
+        "node_modules", "__pycache__",
+    }
+)
+SYNC_INTERVAL_SECONDS = 1.0
+# Pages the site shows as written, with no reader version: instructions for
+# agents, the changelog, dated reports, the promotion register, and prompts.
+# Every other page needs a reader version; the unit tests enforce it, so a new
+# guide ships with its reader version in the same change.
+WITHOUT_READER_VERSION = (
+    "AGENTS.md",
+    "SKILL.md",
+    "CHANGELOG.md",
+    "STACK-REVIEW-*.md",
+    "docs/security-probe-*.md",
+    "docs/dev-to-prod-promotion-register.md",
+    "docs/prompts/*.md",
+)
 
 
 @dataclass(frozen=True)
@@ -378,6 +429,168 @@ def export_tree(ref: str, destination: Path) -> None:
 
 
 # --------------------------------------------------------------------------
+# Staging: reader versions and the Markdown for AI models
+
+
+def walk_files(tree: Path) -> Iterator[PurePosixPath]:
+    """Regular files under tree, outside hidden and never-published directories."""
+    for directory, subdirectories, files in os.walk(tree):
+        subdirectories[:] = sorted(
+            name
+            for name in subdirectories
+            if not name.startswith(".") and name not in UNPUBLISHED_DIRS
+        )
+        relative = PurePosixPath(Path(directory).relative_to(tree).as_posix())
+        for name in sorted(files):
+            if not name.startswith(".") and not Path(directory, name).is_symlink():
+                yield relative / name
+
+
+def is_human_path(path: PurePosixPath) -> bool:
+    return path.parts[: len(HUMAN_DIR.parts)] == HUMAN_DIR.parts
+
+
+def is_staged(path: PurePosixPath) -> bool:
+    """The files the site reads, mirroring the re-included rules of exclude_docs.
+
+    An allowlist, so secrets and runtime state next to the documentation (such
+    as litellm/provider-secrets/) are never copied into the staging tree.
+    """
+    parts = path.parts
+    if is_human_path(path):
+        return False
+    if path.suffix == ".md" or path.as_posix() == "mkdocs.yml" or parts[0] == "docs-site":
+        return True
+    if parts[0] == "diagrams":
+        return (len(parts) == 2 and path.suffix in {".html", ".mmd"}) or parts[1:2] == ("assets",)
+    return parts[0] == "docs" and path.suffix in {".png", ".svg"}
+
+
+def published_pages(tree: Path) -> list[str]:
+    return [
+        path.as_posix()
+        for path in walk_files(tree)
+        if path.suffix == ".md" and not is_human_path(path)
+    ]
+
+
+def human_pages(tree: Path) -> list[str]:
+    human = tree / HUMAN_DIR
+    if not human.is_dir():
+        return []
+    return [path.as_posix() for path in walk_files(human) if path.suffix == ".md"]
+
+
+def needs_reader_version(page: str) -> bool:
+    # Whole-path match: AGENTS.md exempts only the root file, not docs/AGENTS.md.
+    return not any(fnmatch.fnmatchcase(page, pattern) for pattern in WITHOUT_READER_VERSION)
+
+
+def page_url(page: str) -> str:
+    """The directory URL Zensical gives a page: README.md and index.md name their folder."""
+    path = PurePosixPath(page).with_suffix("")
+    if path.name in {"README", "index"}:
+        path = path.parent
+    return "" if path == PurePosixPath(".") else f"{path.as_posix()}/"
+
+
+def llm_copy(page: str) -> str:
+    return f"{LLM_DIR}/{page_url(page)}{LLM_FILE}"
+
+
+def sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def human_stamp(page: str, original: bytes) -> str:
+    return f"<!-- human-version-of: {page} sha256: {sha256(original)} -->\n"
+
+
+def human_state(source: Path, page: str) -> tuple[str, str]:
+    """(state, body) of a page's reader version: missing, fresh, or stale."""
+    human = source / HUMAN_DIR / page
+    if human.is_symlink():
+        fail(f"{HUMAN_DIR / page} must be a regular file, not a symlink")
+    if not human.is_file():
+        return "missing", ""
+    text = human.read_text(encoding="utf-8")
+    match = HUMAN_STAMP.match(text)
+    if match is None or match["page"] != page:
+        fail(
+            f"{HUMAN_DIR / page} must start with its stamp; run "
+            f"scripts/build-docs.py human-stamp {page}"
+        )
+    original = (source / page).read_bytes()
+    state = "fresh" if match["digest"] == sha256(original) else "stale"
+    return state, text[match.end() :]
+
+
+def stage_pages(source: Path, tree: Path) -> None:
+    """Publish each page's Markdown under llm/ and swap in fresh reader versions.
+
+    source holds the pages and docs-site/human/; tree is the staging tree and
+    may be source itself when that is a disposable export. A stale reader
+    version is skipped with a warning, so the site never shows text written
+    for an older page; the unit tests fail on it in CI.
+    """
+    if tree.resolve() == ROOT.resolve():
+        fail("refusing to stage the documentation inside the repository itself")
+    pages = published_pages(source)
+    orphans = sorted(set(human_pages(source)) - set(pages))
+    if orphans:
+        fail(f"reader versions without a page: {', '.join(str(HUMAN_DIR / o) for o in orphans)}")
+    for page in pages:
+        original = (source / page).read_bytes()
+        copy = tree / llm_copy(page)
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        copy.write_bytes(original)
+        state, body = human_state(source, page)
+        if state == "stale":
+            LOG.warning(
+                f"WARNING: {HUMAN_DIR / page} was written for an older {page}; the site "
+                f"shows {page} instead. Update the reader version, then run "
+                f"scripts/build-docs.py human-stamp {page}."
+            )
+        target = tree / page
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body.encode("utf-8") if state == "fresh" else original)
+    shutil.rmtree(tree / HUMAN_DIR, ignore_errors=True)
+
+
+def stage_working_tree(stage: Path) -> None:
+    """Copy the published files of the working tree into stage, then stage the pages."""
+    for path in walk_files(ROOT):
+        if is_staged(path):
+            target = stage / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / path, target)
+    stage_pages(ROOT, stage)
+
+
+def source_signature() -> tuple[tuple[str, int, int], ...]:
+    entries = []
+    for path in walk_files(ROOT):
+        if is_staged(path) or is_human_path(path):
+            stat = (ROOT / path).stat()
+            entries.append((path.as_posix(), stat.st_mtime_ns, stat.st_size))
+    return tuple(entries)
+
+
+def keep_staged(stage: Path, stop: threading.Event) -> None:
+    """Re-stage after each change, so the preview's live reload still works."""
+    signature = source_signature()
+    while not stop.wait(SYNC_INTERVAL_SECONDS):
+        current = source_signature()
+        if current == signature:
+            continue
+        signature = current
+        try:
+            stage_working_tree(stage)
+        except ScriptError as error:
+            LOG.warning(f"WARNING: could not refresh the preview: {error}")
+
+
+# --------------------------------------------------------------------------
 # Site assembly
 
 
@@ -449,6 +662,7 @@ def build_site(args: argparse.Namespace) -> None:
             source.mkdir()
             export_tree(version.commit, source)
             render_diagrams(source)
+            stage_pages(source, source)
             python = ensure_toolchain(source / REQUIREMENTS)
             site_url = f"{args.site_url.rstrip('/')}/{version.name}/" if args.site_url else ""
             env = docs_environment(
@@ -482,8 +696,10 @@ def build_working_tree(args: argparse.Namespace) -> None:
         commit=commit,
     )
     render_diagrams(ROOT, always=True)
-    zensical(python, ["build", "--strict", "--clean"], config=CONFIG, env=env)
-    check_published(ROOT / SITE_DIR)
+    with tempfile.TemporaryDirectory(prefix="litellm-docs-") as work:
+        stage = Path(work) / "src"
+        stage_working_tree(stage)
+        build_into(python, stage, ROOT / SITE_DIR, env)
     LOG.info(f"PASS: built the working tree into {ROOT / SITE_DIR}")
 
 
@@ -499,7 +715,59 @@ def serve(args: argparse.Namespace) -> None:
     )
     # Rendered once at start; re-run ./scripts/render-diagrams.py after editing a .mmd.
     render_diagrams(ROOT, always=True)
-    zensical(python, ["serve", "--dev-addr", args.dev_addr], config=CONFIG, env=env)
+    # Zensical serves a staged copy, which a watcher refreshes on every change.
+    with tempfile.TemporaryDirectory(prefix="litellm-docs-") as work:
+        stage = Path(work) / "src"
+        stage_working_tree(stage)
+        stop = threading.Event()
+        watcher = threading.Thread(target=keep_staged, args=(stage, stop), daemon=True)
+        watcher.start()
+        try:
+            zensical(
+                python, ["serve", "--dev-addr", args.dev_addr], config=stage / "mkdocs.yml", env=env
+            )
+        finally:
+            stop.set()
+
+
+def stage_command(args: argparse.Namespace) -> None:
+    output = Path(args.output).expanduser()
+    output = (output if output.is_absolute() else ROOT / output).resolve()
+    if output == ROOT or output.is_relative_to(ROOT) or ROOT.is_relative_to(output):
+        fail(f"refusing to stage into {output}; use a directory outside the repository")
+    if output.is_symlink() or (output.exists() and (not output.is_dir() or any(output.iterdir()))):
+        fail(f"{output} must be an absent or empty directory")
+    output.mkdir(parents=True, exist_ok=True)
+    stage_working_tree(output)
+    LOG.info(f"PASS: staged the documentation into {output}")
+
+
+def human_status(args: argparse.Namespace) -> None:
+    human = set(human_pages(ROOT))
+    for page in published_pages(ROOT):
+        if page in human:
+            print(f"{human_state(ROOT, page)[0]:8} {page}")
+        elif needs_reader_version(page):
+            print(f"{'missing':8} {page}")
+        else:
+            print(f"{'as-is':8} {page}")
+
+
+def human_stamp_command(args: argparse.Namespace) -> None:
+    pages = set(published_pages(ROOT))
+    for page in args.pages:
+        # Only published pages, so a path cannot leave the repository.
+        page = PurePosixPath(page).as_posix()
+        if page not in pages:
+            fail(f"{page} is not a published Markdown page of this repository")
+        human = ROOT / HUMAN_DIR / page
+        if human.is_symlink() or not human.is_file():
+            fail(f"{HUMAN_DIR / page} must exist as a regular file")
+        text = human.read_text(encoding="utf-8")
+        match = HUMAN_STAMP.match(text)
+        body = text[match.end() :] if match else text.lstrip("\n")
+        human.write_text(human_stamp(page, (ROOT / page).read_bytes()) + "\n" + body, encoding="utf-8")
+        LOG.info(f"PASS: {HUMAN_DIR / page} is stamped for the current {page}")
 
 
 def print_versions(args: argparse.Namespace) -> None:
@@ -577,6 +845,9 @@ def parser() -> argparse.ArgumentParser:
     site.add_argument("--site-url", default="")
     with_context(commands.add_parser("versions", add_help=False)).add_argument("--dev-ref")
     commands.add_parser("verify-private", add_help=False).add_argument("url")
+    commands.add_parser("stage", add_help=False).add_argument("--output", required=True)
+    commands.add_parser("human-status", add_help=False)
+    commands.add_parser("human-stamp", add_help=False).add_argument("pages", nargs="+")
     return root
 
 
@@ -597,6 +868,9 @@ def main() -> None:
         "site": build_site,
         "versions": print_versions,
         "verify-private": verify_private,
+        "stage": stage_command,
+        "human-status": human_status,
+        "human-stamp": human_stamp_command,
     }
     handlers[args.command](args)
 

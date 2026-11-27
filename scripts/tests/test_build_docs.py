@@ -245,6 +245,9 @@ class RepositoryContractTests(unittest.TestCase):
             subdirectories[:] = [
                 name for name in subdirectories if not name.startswith(".") and name not in excluded
             ]
+            if Path(directory).relative_to(ROOT).as_posix() == "docs-site":
+                # Reader versions replace their page at build time.
+                subdirectories[:] = [name for name in subdirectories if name != "human"]
             for name in files:
                 if name.endswith(".md"):
                     path = Path(directory, name).relative_to(ROOT).as_posix()
@@ -258,6 +261,73 @@ class RepositoryContractTests(unittest.TestCase):
         # Zensical honours a directory exclusion only in the /** form.
         for hidden in ("**/.*/**", "/site/**", "/public/**"):
             self.assertIn(hidden, rules)
+        # The Markdown for AI models is published; the reader versions are
+        # never published as pages of their own.
+        self.assertIn("!/llm/**", rules)
+        self.assertIn("/docs-site/human/**", rules)
+        self.assertGreater(rules.index("/docs-site/human/**"), rules.index("!*.md"))
+
+    def test_every_reader_version_matches_the_current_page(self) -> None:
+        # A page changed without its reader version: the site would fall back
+        # to the page, so refresh docs-site/human/<page> and stamp it.
+        pages = set(build_docs.published_pages(ROOT))
+        for page in build_docs.human_pages(ROOT):
+            with self.subTest(page=page):
+                self.assertIn(page, pages, f"docs-site/human/{page} has no page")
+                state, body = build_docs.human_state(ROOT, page)
+                self.assertEqual(
+                    state,
+                    "fresh",
+                    f"{page} changed after its reader version was written; update "
+                    f"docs-site/human/{page}, then run scripts/build-docs.py human-stamp {page}",
+                )
+                self.assertTrue(body.strip())
+
+    def test_every_guide_has_a_reader_version(self) -> None:
+        # New guides ship with their reader version; only the pages listed in
+        # WITHOUT_READER_VERSION are shown as written.
+        human = set(build_docs.human_pages(ROOT))
+        missing = [
+            page
+            for page in build_docs.published_pages(ROOT)
+            if build_docs.needs_reader_version(page) and page not in human
+        ]
+        self.assertEqual(
+            missing,
+            [],
+            "write docs-site/human/<page> for each page, then run "
+            "scripts/build-docs.py human-stamp <page> (see docs/documentation-site.md)",
+        )
+
+    def test_exempt_patterns_match_existing_pages(self) -> None:
+        pages = build_docs.published_pages(ROOT)
+        for pattern in build_docs.WITHOUT_READER_VERSION:
+            with self.subTest(pattern=pattern):
+                self.assertTrue(any(build_docs.fnmatch.fnmatchcase(page, pattern) for page in pages))
+
+    def test_reader_versions_keep_every_heading_of_their_page(self) -> None:
+        # Other pages link to headings by anchor; the strict build checks the
+        # links of the reader versions only, so check the anchors here.
+        def headings(text: str) -> list[str]:
+            found, fenced = [], False
+            for line in text.splitlines():
+                if line.startswith(("```", "~~~")):
+                    fenced = not fenced
+                elif not fenced and line.startswith("#"):
+                    found.append(line.rstrip())
+            return found
+
+        for page in build_docs.human_pages(ROOT):
+            with self.subTest(page=page):
+                original = (ROOT / page).read_text(encoding="utf-8")
+                body = build_docs.human_state(ROOT, page)[1]
+                missing = [h for h in headings(original) if h not in headings(body)]
+                self.assertEqual(missing, [], f"docs-site/human/{page} drops headings")
+
+    def test_docs_image_build_context_includes_the_staging_script(self) -> None:
+        ignore = (ROOT / "docs-site" / "Dockerfile.dockerignore").read_text(encoding="utf-8")
+        self.assertIn("!scripts/build-docs.py\n", ignore)
+        self.assertIn("build-docs.py stage --output /stage", (ROOT / "docs-site" / "Dockerfile").read_text())
 
     def test_build_refuses_a_site_with_hidden_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -268,6 +338,150 @@ class RepositoryContractTests(unittest.TestCase):
             leaked.mkdir(parents=True)
             with self.assertRaises(maintenance_common.ScriptError):
                 build_docs.check_published(site)
+
+
+class StagingTests(unittest.TestCase):
+    PAGE = "docs/guide.md"
+    ORIGINAL = "# Guide\n\nThe full reference text.\n"
+
+    def tree(self, root: Path) -> Path:
+        for path, text in {
+            "README.md": "# Home\n",
+            self.PAGE: self.ORIGINAL,
+            "mkdocs.yml": "site_name: Test\n",
+            "diagrams/README.md": "# Diagrams\n",
+            "diagrams/01-a.html": "<svg/>",
+            "diagrams/assets/mermaid.min.js": "//",
+            "docs-site/overrides/main.html": "",
+            "litellm/provider-secrets/vertex.json": "{}",
+            "litellm/config.prod.yaml": "model_list: []\n",
+            ".env": "SECRET=1\n",
+            "site/old.md": "# Old build\n",
+        }.items():
+            (root / path).parent.mkdir(parents=True, exist_ok=True)
+            (root / path).write_text(text, encoding="utf-8")
+        return root
+
+    def human(self, root: Path, body: str, original: str | None = None) -> None:
+        human = root / "docs-site" / "human" / self.PAGE
+        human.parent.mkdir(parents=True, exist_ok=True)
+        stamp = build_docs.human_stamp(self.PAGE, (original or self.ORIGINAL).encode())
+        human.write_text(stamp + "\n" + body, encoding="utf-8")
+
+    def test_page_urls_follow_directory_urls(self) -> None:
+        self.assertEqual(build_docs.page_url("README.md"), "")
+        self.assertEqual(build_docs.page_url("diagrams/README.md"), "diagrams/")
+        self.assertEqual(build_docs.page_url("docs/getting-started.md"), "docs/getting-started/")
+        self.assertEqual(build_docs.llm_copy("README.md"), "llm/index.md.txt")
+        self.assertEqual(
+            build_docs.llm_copy("docs/getting-started.md"), "llm/docs/getting-started/index.md.txt"
+        )
+
+    def test_exemptions_match_whole_paths(self) -> None:
+        self.assertFalse(build_docs.needs_reader_version("AGENTS.md"))
+        self.assertFalse(build_docs.needs_reader_version("docs/prompts/create-dev-to-prod-delta.md"))
+        self.assertTrue(build_docs.needs_reader_version("docs/AGENTS.md"))
+        self.assertTrue(build_docs.needs_reader_version("docs/dns-entries.md"))
+
+    def test_published_pages_skip_hidden_build_and_reader_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.tree(Path(directory))
+            self.human(root, "# Guide\n")
+            self.assertEqual(
+                build_docs.published_pages(root), ["README.md", "diagrams/README.md", self.PAGE]
+            )
+            self.assertEqual(build_docs.human_pages(root), [self.PAGE])
+
+    def test_fresh_reader_version_is_shown_and_the_original_is_published(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.tree(Path(directory))
+            self.human(root, "# Guide\n\nIn plain words.\n")
+            build_docs.stage_pages(root, root)
+            self.assertEqual((root / self.PAGE).read_text(), "# Guide\n\nIn plain words.\n")
+            self.assertEqual(
+                (root / "llm/docs/guide/index.md.txt").read_text(), self.ORIGINAL
+            )
+            self.assertEqual((root / "llm/index.md.txt").read_text(), "# Home\n")
+            self.assertFalse((root / "docs-site" / "human").exists())
+
+    def test_stale_reader_version_falls_back_to_the_page(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.tree(Path(directory))
+            self.human(root, "# Guide\n\nOutdated.\n", original="# Guide\n\nOlder text.\n")
+            self.assertEqual(build_docs.human_state(root, self.PAGE)[0], "stale")
+            build_docs.stage_pages(root, root)
+            self.assertEqual((root / self.PAGE).read_text(), self.ORIGINAL)
+
+    def test_unstamped_or_orphaned_reader_versions_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.tree(Path(directory))
+            human = root / "docs-site" / "human" / self.PAGE
+            human.parent.mkdir(parents=True)
+            human.write_text("# Guide\n", encoding="utf-8")
+            with self.assertRaisesRegex(maintenance_common.ScriptError, "stamp"):
+                build_docs.stage_pages(root, root)
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.tree(Path(directory))
+            orphan = root / "docs-site" / "human" / "docs" / "gone.md"
+            orphan.parent.mkdir(parents=True)
+            orphan.write_text("# Gone\n", encoding="utf-8")
+            with self.assertRaisesRegex(maintenance_common.ScriptError, "without a page"):
+                build_docs.stage_pages(root, root)
+
+    def test_staging_copies_only_published_files(self) -> None:
+        with tempfile.TemporaryDirectory() as source_dir, tempfile.TemporaryDirectory() as stage_dir:
+            source = self.tree(Path(source_dir))
+            self.human(source, "# Guide\n\nIn plain words.\n")
+            stage = Path(stage_dir)
+            with mock.patch.object(build_docs, "ROOT", source):
+                build_docs.stage_working_tree(stage)
+            staged = sorted(
+                path.relative_to(stage).as_posix() for path in stage.rglob("*") if path.is_file()
+            )
+            self.assertEqual(staged, [
+                "README.md",
+                "diagrams/01-a.html",
+                "diagrams/README.md",
+                "diagrams/assets/mermaid.min.js",
+                "docs-site/overrides/main.html",
+                "docs/guide.md",
+                "llm/diagrams/index.md.txt",
+                "llm/docs/guide/index.md.txt",
+                "llm/index.md.txt",
+                "mkdocs.yml",
+            ])
+            self.assertIn("In plain words.", (stage / self.PAGE).read_text())
+            self.assertEqual((source / self.PAGE).read_text(), self.ORIGINAL)
+
+    def test_staging_refuses_the_repository_itself(self) -> None:
+        with self.assertRaises(maintenance_common.ScriptError):
+            build_docs.stage_pages(build_docs.ROOT, build_docs.ROOT)
+
+    def test_stamp_refuses_paths_outside_the_published_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.tree(Path(directory))
+            self.human(root, "# Guide\n")
+            with mock.patch.object(build_docs, "ROOT", root):
+                for page in ("../outside.md", "litellm/config.prod.yaml", "docs/missing.md"):
+                    with self.assertRaises(maintenance_common.ScriptError):
+                        build_docs.human_stamp_command(types.SimpleNamespace(pages=[page]))
+
+    def test_symlinked_reader_version_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.tree(Path(directory))
+            human = root / "docs-site" / "human" / self.PAGE
+            human.parent.mkdir(parents=True)
+            human.symlink_to(root / "README.md")
+            with self.assertRaisesRegex(maintenance_common.ScriptError, "symlink"):
+                build_docs.stage_pages(root, root)
+
+    def test_stamp_records_the_current_page(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.tree(Path(directory))
+            self.human(root, "# Guide\n", original="# Guide\n\nOlder text.\n")
+            with mock.patch.object(build_docs, "ROOT", root):
+                build_docs.human_stamp_command(types.SimpleNamespace(pages=[self.PAGE]))
+                self.assertEqual(build_docs.human_state(root, self.PAGE), ("fresh", "# Guide\n"))
 
 
 class DiagramRenderingTests(unittest.TestCase):

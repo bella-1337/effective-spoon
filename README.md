@@ -112,6 +112,7 @@ see [Documentation site](docs/documentation-site.md).
 | --- | --- |
 | [Data sovereignty and regional models](docs/data-sovereignty.md) | `DATA_SOVEREIGNTY_REGION`, allowed provider locations per region, wiring Bedrock, Azure OpenAI, and Vertex AI models from `.env`, coding-router, provider-side controls |
 | [Getting started](docs/getting-started.md) | Environment files, `STACK_DOMAIN` hostnames, TLS certificates, host resolution, Prometheus authentication, validation, starting and verifying profiles, stopping and removing the stack |
+| [DNS entries](docs/dns-entries.md) | Every internal DNS record of an on-prem deployment: the stack's public hostnames per profile, the remote GPU host's names, names that need no record, and generating and checking the records |
 | [Hardware sizing](docs/hardware-sizing.md) | Prod, dev, and remote GPU host specifications, memory, CPU, and disk budgets, prod resource limits |
 | [Development and delivery workflow](docs/development-workflow.md) | Feature requests, development container, local, GitHub Actions, and GitLab CI checks, release delivery |
 | [Reference stack: BerriAI Inference Stack](docs/reference-inference-stack.md) | How to check feature requests against LiteLLM's reference deployment, and how the two stacks differ |

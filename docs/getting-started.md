@@ -153,6 +153,9 @@ host's private IP.
 
 ## 3. Resolve the hostnames
 
+For an on-prem deployment, create the internal DNS records listed in
+[DNS entries](dns-entries.md) instead of editing host files.
+
 For a stack running on this machine, generate the `/etc/hosts` line from the
 configured names and append it:
 

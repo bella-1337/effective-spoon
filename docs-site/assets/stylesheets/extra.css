@@ -343,3 +343,38 @@ body {
     animation: none;
   }
 }
+
+/* "Copy for LLM" (docs-site/overrides/partials/actions.html): a labelled
+   pill next to the icon-only edit and view buttons, so readers can tell it
+   apart from them. It copies the page's full Markdown, not the reader text. */
+.md-typeset .md-content__button.docs-copy-llm {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+  padding: 0.2rem 0.6rem;
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+  border-radius: 1rem;
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color--light);
+  font-size: 0.65rem;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: color 125ms, border-color 125ms, background-color 125ms;
+}
+.md-typeset .md-content__button.docs-copy-llm svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  fill: currentcolor;
+}
+.md-typeset .md-content__button.docs-copy-llm:hover,
+.md-typeset .md-content__button.docs-copy-llm:focus-visible {
+  border-color: var(--md-accent-fg-color);
+  background: var(--md-accent-fg-color--transparent);
+  color: var(--md-accent-fg-color);
+}
+.md-typeset .md-content__button.docs-copy-llm[aria-busy="true"] {
+  cursor: progress;
+  opacity: 0.6;
+}

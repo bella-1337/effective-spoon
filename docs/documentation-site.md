@@ -5,8 +5,12 @@
 The guides in this repository are also published as a searchable, versioned
 documentation site built with [Zensical](https://zensical.org/), the successor
 of Material for MkDocs by the same team. The site is built from the same
-Markdown files you read on GitHub or GitLab, where they already live; there is
-no second copy to keep in step and no build plugin.
+Markdown files you read on GitHub or GitLab, where they already live, without a
+build plugin. Those files are the full reference text, which agents and AI
+models read. Where `docs-site/human/` holds a shorter
+[reader version](#reader-versions-and-copy-for-llm) of a page, written for its
+current text, the site shows that version instead, and every page has a
+**Copy for LLM** button that copies the page's own Markdown.
 
 Like the repository, the site is published as is, without warranty of any kind.
 Its footer says so on every page and states the licences: the stack's own
@@ -22,7 +26,12 @@ require. The first run installs the hash-locked toolchain from
 ```sh
 ./scripts/build-docs.py serve      # live preview on http://127.0.0.1:8000
 ./scripts/build-docs.py build      # strict build of the working tree into site/
+./scripts/build-docs.py human-status   # which pages have a current reader version
 ```
+
+Both build a staged copy of the published files in a temporary directory, with
+the reader versions swapped in; `serve` refreshes that copy within a second of
+each change, so live reload still works.
 
 `build` and the CI builds run Zensical in strict mode, so they fail on a broken
 link to a page or heading and on any other warning. A unit test fails when a
@@ -67,21 +76,24 @@ file at the release tag for a release.
 | --- | --- |
 | `mkdocs.yml` | Site configuration, theme, navigation, and the rules for which files are published |
 | `docs-site/overrides/main.html` | The home page banner, the dev, local, deployment, and older-release banners, and the `noindex` header |
-| `docs-site/overrides/partials/` | The footer with the warranty disclaimer, licence notice, and build information, a repository link without the GitHub API call, a fix for the older-release banner script, and page content without the README's status badges, which would load third-party images |
+| `docs-site/overrides/partials/` | The footer with the warranty disclaimer, licence notice, and build information, a repository link without the GitHub API call, a fix for the older-release banner script, page content without the README's status badges, which would load third-party images, and the **Copy for LLM** button |
+| `docs-site/human/` | [Reader versions](#reader-versions-and-copy-for-llm) of pages, at the same paths as the pages they replace on the site |
 | `docs-site/assets/` | Logo, favicon, banner illustration, and stylesheet |
 | `docs-site/requirements.in`, `requirements.txt` | The toolchain and its hash-locked pins |
-| `scripts/build-docs.py` | Installs the toolchain, previews, builds, and assembles the versioned site |
+| `scripts/build-docs.py` | Installs the toolchain, stages the pages with their reader versions, previews, builds, and assembles the versioned site |
 | `scripts/ci/docs.sh` | The single build entry point shared by GitHub Actions and GitLab CI |
 | `docs-site/Dockerfile`, `Dockerfile.dockerignore` | The image of the optional [`docs` profile](#serve-the-site-from-the-stack), which runs `zensical serve` |
 
 Zensical reads `mkdocs.yml` with the repository root as its `docs_dir`, so
 every page keeps its repository path and the relative links between guides
-work unchanged. `README.md` is the home page, and each other `README.md` is the
+work unchanged. `scripts/build-docs.py` runs it on a staged copy of the
+published files, so always build through that script. `README.md` is the home page, and each other `README.md` is the
 index page of its directory. `exclude_docs` first excludes everything, then
 re-includes only Markdown, the rendered diagrams, their Mermaid sources and
 viewer pages, the self-hosted Mermaid.js in `diagrams/assets/`, images under
-`docs/`, and the site assets; hidden directories, build output,
-and runtime state stay excluded. Compose files, scripts, and other source
+`docs/`, the site assets, and the Markdown for AI models in `llm/`; hidden
+directories, build output, runtime state, and `docs-site/human/` stay
+excluded. Compose files, scripts, and other source
 files are not published, so a guide links to them only as code (for example
 `searxng/settings.yml`) or with an absolute link to the repository.
 
@@ -95,12 +107,68 @@ page views to third parties.
    `docs/`, and link it from the [README](../README.md#documentation) table.
 2. Add it to `nav:` in `mkdocs.yml`; the unit tests fail on a Markdown file
    that is not in the navigation.
-3. Run `./scripts/build-docs.py build`.
+3. Write its [reader version](#reader-versions-and-copy-for-llm) at the same
+   path under `docs-site/human/` and stamp it with
+   `./scripts/build-docs.py human-stamp <path>`; the unit tests fail on a guide
+   without one.
+4. Run `./scripts/build-docs.py build`.
 
 Use relative links between Markdown files, as GitHub and GitLab expect, and
 link to a heading with its GitHub-style anchor; the site uses the same
 anchors. Do not link to a line number (`#L12`) of a page or to a source file
 with a relative link: neither exists on the site.
+
+## Reader versions and Copy for LLM
+
+Each guide is written as complete reference text: every rule, default, and
+exception, in the order an operator or an AI model needs them. That makes a
+good source for agents, and a slow read for a person. So a guide can also
+have a reader version, a rewrite in plainer and shorter language with the
+same facts, which the site shows in its place.
+
+- **The guide stays the source of truth.** Agents, GitHub, and GitLab read the
+  guide itself. Change the guide first, then its reader version.
+- **The reader version lives at the same path** under `docs-site/human/`, for
+  example `docs-site/human/docs/getting-started.md` for
+  `docs/getting-started.md`.
+- **Every guide has one.** A new guide ships with its reader version in the
+  same change, and the unit tests fail on a guide without one. Only the pages
+  matched by `WITHOUT_READER_VERSION` in `scripts/build-docs.py` are shown as
+  written: the agent instructions (`AGENTS.md`, `SKILL.md`), the changelog,
+  the dated reports, the dev-to-prod promotion register, and the prompts
+  under `docs/prompts/`. `./scripts/build-docs.py human-status` shows each
+  page as `fresh`, `stale`, `missing`, or `as-is`.
+- **Copy for LLM** on every page copies the guide's own Markdown, not the
+  reader text. The build publishes it at `llm/<page>/index.md.txt` (for
+  example `llm/docs/getting-started/index.md.txt`), and each page links it in
+  its head as `text/markdown`. The theme's own clipboard handler copies it, so
+  the site loads no extra script.
+- **A stamp keeps them in step.** The first line of a reader version records
+  the guide it was written for and the SHA-256 of that guide's text. When the
+  guide changes, the stamp no longer matches: the build shows the guide
+  instead, with a warning, so the site never shows outdated reader text, and
+  the unit tests fail until the reader version is updated.
+
+After changing a guide that has a reader version:
+
+1. Update `docs-site/human/<same path>` to match the new text.
+2. Run `./scripts/build-docs.py human-stamp <path>`, for example
+   `./scripts/build-docs.py human-stamp docs/getting-started.md`.
+3. Run `./scripts/build-docs.py build`.
+
+Rules for a reader version:
+
+- Keep every heading of the guide, word for word, so links to its anchors from
+  other pages keep working; a unit test checks this. You may add headings.
+- Keep every fact, command, value, file path, and link. Copy code blocks
+  unchanged.
+- Start with what the page is for and when to read it. Prefer short sentences,
+  plain words, and lists over long paragraphs.
+- Avoid the habits of machine-written text: inflated or promotional words,
+  filler such as "it is important to note", lists padded to three items, and
+  chains of dashes.
+- Relative links resolve as they do from the guide, because the reader version
+  replaces the guide at its path.
 
 ## Serve the site from the stack
 
@@ -129,9 +197,10 @@ revision is unknown; a value that is not a commit SHA fails the build.
 
 How it works:
 
-- `docs-site/Dockerfile` renders the diagrams and installs the hash-locked
-  toolchain from `docs-site/requirements.txt` in a build stage, outside the
-  docs directory, and runs the same strict build as `build`, because
+- `docs-site/Dockerfile` renders the diagrams, stages the published files with
+  their reader versions (`scripts/build-docs.py stage`), installs the
+  hash-locked toolchain from `docs-site/requirements.txt` in a build stage,
+  outside the docs directory, and runs the same strict build as `build`, because
   `zensical serve` does not support strict mode. A broken link therefore fails
   the image build. Graphviz stays in the build stage. The build needs network
   access to install the toolchain and to download the pinned diagram renderer

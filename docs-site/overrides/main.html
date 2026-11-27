@@ -9,6 +9,10 @@
   {#- Keep the site out of search engines and caches. -#}
   <meta name="robots" content="noindex, nofollow, noarchive">
   <meta name="referrer" content="strict-origin-when-cross-origin">
+  {#- The page's own Markdown for AI models; see partials/actions.html. -#}
+  {%- if page and page.url is string and ".html" not in page.url %}
+  <link rel="alternate" type="text/markdown" href="{{ ('llm/' ~ page.url ~ 'index.md.txt') | url }}" title="Markdown for AI models">
+  {%- endif %}
 {% endblock %}
 
 {% block announce -%}

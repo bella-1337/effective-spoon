@@ -1,16 +1,19 @@
 # Documentation site for the optional docs profile (compose.optional.yml).
 #
-# The container runs `zensical serve` on the repository's own Markdown, and
+# The container runs `zensical serve` on the staged repository Markdown, and
 # Traefik routes DOCS_HOST to it and adds the security headers. It serves one
 # version: the checked-out revision the stack was built from. The published
 # versioned site with its version selector stays on GitHub or GitLab Pages.
 #
-# The build stage renders the diagrams (Graphviz) and installs the hash-locked
-# Zensical toolchain (docs-site/requirements.txt) outside the docs directory,
-# then runs the same strict build as scripts/build-docs.py, because
-# `zensical serve` does not support strict mode. Graphviz stays in the build
-# stage. docs-site/Dockerfile.dockerignore keeps the build context to the
-# published files and the build scripts; .env and every other secret stay out.
+# The build stage renders the diagrams (Graphviz), stages the published files
+# with scripts/build-docs.py (reader versions from docs-site/human/ swapped in,
+# each page's own Markdown under llm/ for the "Copy for LLM" button), installs
+# the hash-locked Zensical toolchain (docs-site/requirements.txt) outside the
+# docs directory, and runs the same strict build as scripts/build-docs.py,
+# because `zensical serve` does not support strict mode. The image serves the
+# staged tree. Graphviz stays in the build stage.
+# docs-site/Dockerfile.dockerignore keeps the build context to the published
+# files and the build scripts; .env and every other secret stay out.
 
 FROM ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm-slim@sha256:531f855bda2c73cd6ef67d56b733b357cea384185b3022bd09f05e002cd144ca AS build
 
@@ -35,6 +38,8 @@ RUN uv venv --quiet --python 3.13 /opt/zensical \
     && uv pip install --quiet --require-hashes --python /opt/zensical/bin/python \
          --requirement docs-site/requirements.txt \
     && python3 scripts/render-diagrams.py \
+    && python3 scripts/build-docs.py stage --output /stage \
+    && cd /stage \
     && /opt/zensical/bin/zensical build --strict --clean --config-file mkdocs.yml \
     && rm -rf site .cache
 
@@ -46,7 +51,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /opt/zensical /opt/zensical
-COPY --from=build /src /src
+COPY --from=build /stage /src
 RUN chmod -R a=rX /src /opt/zensical
 
 # The repository commit the stack was built from: the page banner names it and
