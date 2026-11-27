@@ -8,6 +8,12 @@ All notable changes to this stack are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The docs image's strict build switches to the staged tree with `WORKDIR`
+  instead of `cd`. Hadolint's DL3003 warning failed the lint job, so the
+  v0.5.0 tag pipeline did not publish a release.
+
 ## [v0.5.0] - 2026-11-27
 
 ### Added

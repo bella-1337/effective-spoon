@@ -38,9 +38,12 @@ RUN uv venv --quiet --python 3.13 /opt/zensical \
     && uv pip install --quiet --require-hashes --python /opt/zensical/bin/python \
          --requirement docs-site/requirements.txt \
     && python3 scripts/render-diagrams.py \
-    && python3 scripts/build-docs.py stage --output /stage \
-    && cd /stage \
-    && /opt/zensical/bin/zensical build --strict --clean --config-file mkdocs.yml \
+    && python3 scripts/build-docs.py stage --output /stage
+
+# The strict build runs in the staged tree, then drops its output: the image
+# serves the sources, and `zensical serve` builds again at start.
+WORKDIR /stage
+RUN /opt/zensical/bin/zensical build --strict --clean --config-file mkdocs.yml \
     && rm -rf site .cache
 
 FROM ghcr.io/astral-sh/uv:0.9.30-python3.13-bookworm-slim@sha256:531f855bda2c73cd6ef67d56b733b357cea384185b3022bd09f05e002cd144ca
