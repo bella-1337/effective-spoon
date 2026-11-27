@@ -65,6 +65,9 @@ Map the change across these surfaces:
 - the Mermaid diagram sources in `diagrams/*.mmd`;
 - `mkdocs.yml` `nav:` when a Markdown file is added, moved, or removed, so the
   [documentation site](docs/documentation-site.md) strict build keeps passing;
+- the reader version in `docs-site/human/` of every changed guide that has
+  one, restamped with `./scripts/build-docs.py human-stamp`, as described in
+  [Reader versions](docs/documentation-site.md#reader-versions-and-copy-for-llm);
 - the optional `docs` profile (`docs-site/Dockerfile` and its
   `Dockerfile.dockerignore` allowlist), when the documentation build starts
   reading a new script or file type.

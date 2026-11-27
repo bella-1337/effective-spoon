@@ -10,6 +10,19 @@ All notable changes to this stack are recorded here. The format follows
 
 ### Added
 
+- Reader versions of the guides and a **Copy for LLM** button on every page of
+  the [documentation site](docs/documentation-site.md#reader-versions-and-copy-for-llm).
+  - The site shows a plainer rewrite of each reader guide from
+    `docs-site/human/`; the Markdown guides stay the full reference text for
+    agents and AI models.
+  - **Copy for LLM** copies the page's own Markdown, which the build publishes
+    under `llm/` and links from each page as `text/markdown`.
+  - Each reader version is stamped with the SHA-256 of the guide it was written
+    for. A changed guide makes the stamp stale: the site then shows the guide
+    itself, and the unit tests fail until the reader version is updated with
+    `scripts/build-docs.py human-stamp`.
+  - The build and the `docs` image run on a staged copy of the published files
+    (`scripts/build-docs.py stage`), which copies only the files the site reads.
 - [Presidio PII masking and guardrails](docs/presidio-guardrails.md#check-what-the-guardrail-masks)
   explains how administrators see what the `presidio-pii` guardrail masks
   without calling a model: `POST /guardrails/apply_guardrail` and the admin

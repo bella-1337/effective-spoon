@@ -7,7 +7,7 @@ flowchart TD
   %% @mode architecture
   %% @subtitle zensical serve behind Traefik at DOCS_HOST, serving the checked-out revision the stack runs
   %% @card cyan | One version | The site is the checked-out revision, and its banner names the commit | No version selector; the versioned site stays on Pages | Rebuild the image after each upgrade
-  %% @card violet | Build | The build stage renders the diagrams and installs the pinned Zensical toolchain | A strict build fails the image on a broken link | Dockerfile.dockerignore keeps .env and runtime state out of the context
+  %% @card violet | Build | The build stage renders the diagrams, stages the pages with their reader versions and the Markdown for AI models, and installs the pinned Zensical toolchain | A strict build fails the image on a broken link | Dockerfile.dockerignore keeps .env and runtime state out of the context
   %% @card rose | Serving | Non-root, read-only root, no capabilities, and tmpfs only for site and .cache | Traefik answers only GET and HEAD and adds the CSP and frame headers | No sign-in, so DOCS_HOST stays on the private network
   %% @journey #22d3ee: RD TR DS
   %% @journey #a78bfa: SRC BLD IMG DS
@@ -17,8 +17,8 @@ flowchart TD
   end
   subgraph BH["Image build — docker compose build docs"]
     SRC["Checked-out tree<br/>Markdown · diagrams · build scripts"]:::bus
-    BLD["build stage<br/>render diagrams · Zensical toolchain · strict build"]:::security
-    IMG[("litellm-stack-docs image<br/>sources · rendered diagrams · Zensical")]:::database
+    BLD["build stage<br/>render diagrams · stage reader versions and llm/ Markdown · strict build"]:::security
+    IMG[("litellm-stack-docs image<br/>staged pages · llm/ Markdown · rendered diagrams · Zensical")]:::database
   end
   subgraph ST["LiteLLM stack — Docker Compose host"]
     TR["Traefik<br/>DOCS_HOST · GET/HEAD · docs-headers"]:::cloud

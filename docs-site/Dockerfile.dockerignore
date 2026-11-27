@@ -9,6 +9,7 @@
 !docs/**/*.png
 !docs/**/*.svg
 !docs-site/
+!scripts/build-docs.py
 !scripts/maintenance_common.py
 !scripts/render-diagrams.py
 !scripts/diagram_controls.py

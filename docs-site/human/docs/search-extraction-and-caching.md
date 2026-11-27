@@ -1,0 +1,383 @@
+<!-- human-version-of: docs/search-extraction-and-caching.md sha256: fbdbc149a6eb864c71e4a8b5d9bac6e6d1b8598e256f0b482e52e8aa785f7b9c -->
+
+# Search, document extraction, and caching
+
+[← Back to the README](../README.md#documentation). Run all commands from the repository root.
+
+This page covers the internal services that clients reach through the
+LiteLLM gateways: SearXNG web search, Xberg document extraction over
+MCP, the D3-mini coding router and BGE-M3 embeddings on the remote GPU host,
+and the development semantic response cache. Read it to call these services,
+change what Xberg may fetch, or understand their limits.
+
+Commands that use hostname variables such as `$LITELLM_PROD_HOST` expect them
+to be loaded first with `eval "$(python3 scripts/maintenance.py stack-env)"`;
+see [Public hostnames and `STACK_DOMAIN`](getting-started.md#public-hostnames-and-stack_domain).
+
+## Use SearXNG search through LiteLLM
+
+Both LiteLLM profiles expose the internal SearXNG service as the native
+`searxng-search` search tool. SearXNG is internal-only in every profile:
+
+- it is attached only to the internal Compose network;
+- it has no Traefik route;
+- it publishes no host port.
+
+Clients authenticate to LiteLLM, which is the only way to reach it. There is
+no public search UI.
+
+Test production search with:
+
+```sh
+curl --fail --show-error --silent \
+  "https://$LITELLM_PROD_HOST/v1/search/searxng-search" \
+  -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"LiteLLM SearXNG integration","max_results":5}'
+```
+
+Use `https://$LITELLM_DEV_HOST` to test the development profile. SearXNG
+returns a fixed page of results, so `max_results` may not reduce the number of
+results returned by the upstream service.
+
+### Search-engine terms of use
+
+SearXNG itself is AGPL-3.0 and free to run internally unmodified, but it
+grants no right to use the search engines it queries.
+
+- `searxng/settings.yml` sets `use_default_settings: true`, so the image's
+  default engine set is active (for example DuckDuckGo, Brave, Wikipedia, and
+  Bing and Google news/media engines).
+- SearXNG obtains those results by scraping the public web pages, not through
+  a licensed API.
+- Most commercial engines' terms of service prohibit automated querying and
+  reuse of results.
+- This deployment also sends traffic from a single egress IP on behalf of
+  every LiteLLM user, and feeds results to LLMs.
+
+Consequences:
+
+- Using the default engines is not covered by any agreement; treat it as a
+  legal and compliance risk to be accepted or mitigated, not as licensed.
+- Engines can rate-limit, CAPTCHA, or block the egress IP without notice, so
+  search results can degrade or disappear silently.
+- Search terms leave the organisation and are sent to each queried engine.
+
+Before production use, have the decision recorded by the responsible owner
+and choose one of these options:
+
+1. Restrict SearXNG to sources whose terms allow automated use (for example
+   Wikipedia/Wikidata and other open-data or internal sources) by replacing
+   `use_default_settings: true` with an explicit `use_default_settings.engines.keep_only`
+   list.
+2. Use engines through their contracted APIs (for example a paid Brave Search
+   or Google Programmable Search API key) under the provider's commercial
+   terms.
+3. Formally accept the residual risk of scraping the default engines for
+   internal use.
+
+Review this decision whenever the SearXNG image or its default engine list
+changes.
+
+### Chat UI and the search tool
+
+The beta LiteLLM Chat UI is enabled for both profiles, at
+`https://$LITELLM_DEV_HOST/ui/chat` and `https://$LITELLM_PROD_HOST/ui/chat`.
+
+- Users must sign in and can only select models allowed by their LiteLLM
+  access policy.
+- Both proxies also accept the `admin` user with the master key at UI sign-in
+  (`disable_env_credential_login: false`). Treat the master key as the
+  production administrator password.
+- The native `searxng-search` endpoint is available through both gateways. It
+  is separate from the Chat UI's MCP tool picker.
+
+## Use Xberg MCP document extraction
+
+Both LiteLLM profiles register the internal Xberg Streamable HTTP MCP server
+as `xberg`. The container has no published host port, and LiteLLM is the
+authentication boundary. Only the `extract`, `detect_mime_type`,
+`get_version`, and `list_formats` tools are exposed; cache mutation and
+warming tools are intentionally excluded.
+
+List the available tools:
+
+```sh
+curl --fail --show-error --silent \
+  "https://$LITELLM_PROD_HOST/mcp-rest/tools/list?server_id=xberg" \
+  -H "x-litellm-api-key: ******"
+```
+
+Extract the official Xberg Docker guide through LiteLLM:
+
+```sh
+curl --fail --show-error --silent \
+  "https://$LITELLM_PROD_HOST/mcp-rest/tools/call" \
+  -H "x-litellm-api-key: ******" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "server_id": "xberg",
+    "name": "extract",
+    "arguments": {
+      "input": {
+        "kind": "uri",
+        "uri": "https://docs.xberg.io/guides/docker/"
+      }
+    }
+  }'
+```
+
+Use `https://$LITELLM_DEV_HOST` for the development profile.
+
+!!! warning "Xberg fetches URLs for its callers"
+
+    Xberg accepts remote URLs and therefore acts as a server-side fetcher.
+    Grant MCP access only to trusted keys and teams.
+
+Xberg has no direct route to the Internet or the stack's `internal` network:
+
+- outbound traffic must be an HTTPS `CONNECT` tunnel through the Squid proxy,
+  which denies plaintext HTTP and private, loopback, link-local, and
+  non-allowlisted destinations before resolving them;
+- the `xberg-dns` resolver answers `NXDOMAIN` for every name that is not
+  explicitly forwarded, so a URL cannot leak data through DNS lookups;
+- local paths and `file://` URIs are disabled in `security/xberg-config.toml`;
+  send local documents as `kind: bytes` instead;
+- a default-on `prompt-injection-tool-output` guardrail redacts explicit
+  injection phrases, such as "ignore all previous instructions", from tool
+  results.
+
+### Allowed destinations
+
+The secure default permits only the documented Xberg documentation host.
+Xberg's SSRF policy, its DNS resolver, and the Squid proxy each check the
+destination, and each needs it in its own file. All four files are generated
+from `security/xberg-destinations.toml`, so that is the only file to edit:
+
+```toml
+[[destination]]
+host = "docs.example.com"
+subdomains = false            # true also allows every name below the host
+dns_aliases = ["example.cdn.net"]  # CNAME targets: dig +noall +answer <host>
+```
+
+Then apply it. A plain `docker compose up -d` does not restart the sandbox
+services after a configuration file changes, and they read it only at start:
+
+```sh
+python3 scripts/maintenance.py xberg-allowlist apply
+```
+
+- A host that redirects elsewhere needs the redirect target as its own
+  destination.
+- `python3 scripts/maintenance.py doctor` rejects hand-edited or stale
+  allowlist files.
+- If you remove `docs.xberg.io`, set `XBERG_HEALTHCHECK_DOMAIN` to a remaining
+  destination, or the Xberg healthcheck fails.
+
+See [Edge and abuse protection](edge-and-abuse-protection.md).
+
+### Semantic tool filtering in development
+
+The development gateway uses `BAAI/bge-m3` on the remote GPU host (see
+[Remote BGE-M3 embeddings](#remote-bge-m3-embeddings)) to semantically select
+up to three relevant MCP tools with a minimum similarity score of `0.3`.
+
+- This affects MCP tools offered automatically through Chat Completions and
+  the Responses API.
+- It does not change MCP permissions or direct `/mcp-rest/tools/call`
+  requests.
+- Production keeps semantic filtering disabled, because the embedding model
+  is intentionally development-only.
+
+### D3-mini coding router
+
+Both LiteLLM profiles register a remote `vllm-sr/d3-mini` deployment as a
+native Decisions model. The `coding-router` Auto Router works like this:
+
+1. It sends only the classification request to D3.
+2. It then sends the request to a model configured for its tier in
+   `CODING_ROUTER_SIMPLE_MODEL`, `CODING_ROUTER_MEDIUM_MODEL`,
+   `CODING_ROUTER_COMPLEX_MODEL`, or `CODING_ROUTER_REASONING_MODEL`.
+3. If the classifier is unavailable or takes longer than
+   `CODING_ROUTER_CLASSIFIER_TIMEOUT_MS` (default 3 seconds), LiteLLM scores
+   the request locally instead.
+
+The router exists only when `CODING_ROUTER_DEFAULT_MODEL` names a configured
+provider model; see
+[Data sovereignty and regional models](data-sovereignty.md#coding-router).
+BGE-M3 is a separate remote pooling service; embeddings never pass through
+D3.
+
+Deploy D3-mini on the separate NVIDIA GPU host before starting this stack,
+with the [`gpu-host/`](../gpu-host/README.md) Compose project, which also
+serves BGE-M3. It needs:
+
+- Docker Compose;
+- one CUDA-capable GPU;
+- `mkcert`;
+- two DNS names that resolve to the host;
+- a random API key of at least 32 characters per model.
+
+```sh
+cd gpu-host
+install -m 600 .env.example .env   # set the server names and keys
+./deploy.py
+```
+
+What the deployment sets up:
+
+- D3-mini runs on the vLLM Semantic Router model runtime behind an
+  unprivileged Nginx TLS proxy, both pinned by digest.
+- The model revision is pinned, and model downloads persist.
+- Only the three Decisions routes are published.
+- The deployment checks a real four-tier decision before reporting success.
+
+Restrict the port at the firewall to the LiteLLM hosts. Copy the endpoint and
+the same secret to `D3_DECISION_API_BASE` and `D3_DECISION_API_KEY` in this
+stack's `.env`.
+
+### Trusting the GPU host's certificate
+
+The proxy's certificate for both models comes from a dedicated mkcert CA on
+the GPU host. Copy its public `rootCA.pem` (never `rootCA-key.pem`) to each
+LiteLLM host and build the combined bundle:
+
+```sh
+./scripts/build-gpu-host-ca-bundle.py --root-ca /path/to/rootCA.pem
+```
+
+The script joins the operating system's public roots with that CA in
+`traefik/certs/gpu-host-ca-bundle.pem`. `GPU_HOST_CA_BUNDLE` mounts it into
+both LiteLLM containers as `SSL_CERT_FILE`.
+
+LiteLLM verifies D3, BGE-M3, and every completion provider against this
+bundle, so it must contain the public roots as well. A bundle holding only the
+mkcert CA would break the cloud model providers.
+
+!!! warning "Protect the CA's private key"
+
+    Because mkcert CAs carry no name constraints, the CA's private key can
+    impersonate any server to LiteLLM. Protect it as described in the
+    [GPU host guide](../gpu-host/README.md#network-and-security).
+
+### Calling the router
+
+Start the stack and call the router through the normal LiteLLM hostname and
+credential:
+
+```sh
+docker compose --profile dev up -d
+```
+
+
+```sh
+curl --fail --silent "https://$LITELLM_DEV_HOST/v1/chat/completions" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "coding-router",
+    "messages": [{
+      "role": "user",
+      "content": "Analyze this architecture and compare its tradeoffs."
+    }],
+    "temperature": 0
+  }'
+```
+
+- LiteLLM remains the only client-facing authentication, policy, guardrail,
+  provider, spend, and observability boundary.
+- The remote listener uses a separate bearer credential, TLS 1.2+, and a
+  narrow route allowlist.
+- Neither endpoint logs prompt content by default.
+
+Validate D3's coding-tier accuracy on representative internal prompts before
+relying on cost savings.
+
+## Remote BGE-M3 embeddings
+
+The development profile's embeddings come from `BAAI/bge-m3` on the remote
+GPU host. They are used for MCP tool filtering, the semantic cache, the
+`sme-knowledge` store, and Xberg auto-indexing. Production does not use
+BGE-M3.
+
+The [`gpu-host/`](../gpu-host/README.md) stack serves it with Hugging Face
+Text Embeddings Inference next to D3-mini on the same GPU; that README
+explains the engine choice and the 48 GB memory budget.
+
+BGE-M3 is reached over the same verified TLS as D3:
+
+- the proxy publishes only `/v1/embeddings` and `/health`;
+- TEI's image and the model revision are pinned;
+- the container runs unprivileged on a read-only root filesystem;
+- its API key guards every compute route;
+- inputs over 8,192 tokens are rejected rather than truncated, so a long
+  prompt cannot match a cached answer for a shared prefix.
+
+The deployment reports success only after an unauthenticated request is
+refused and a real embedding has 1,024 dimensions.
+
+Set `BGE_M3_API_BASE` (for example `https://bge-m3.${STACK_DOMAIN}:9443/v1`)
+and the same `BGE_M3_API_KEY` in the dev host's `.env`. LiteLLM's
+`hosted_vllm` provider is its generic OpenAI-compatible adapter and works with
+TEI.
+
+## Development semantic response cache
+
+The development profile uses an authenticated, internal Qdrant service for an
+opt-in semantic response cache. LiteLLM embeds request messages with the
+remote `bge-m3` model and reuses a previous complete response only when
+cosine similarity is at least `0.92`. A cache hit does not call the
+configured generation model.
+
+The cache is intentionally:
+
+- development-only and disabled by default for each request;
+- limited to asynchronous Chat Completions calls;
+- scoped by the authenticated end-user identity in addition to the LiteLLM
+  virtual key, team, and organization;
+- stored on a bounded 1 GB `tmpfs`, so stopping or recreating Qdrant deletes
+  all cached prompts and responses.
+
+Set `QDRANT_API_KEY` to a separate random secret. Opt in only for
+single-turn, non-sensitive requests, and send a stable authenticated end-user
+identifier:
+
+```sh
+curl --fail --silent "https://$LITELLM_DEV_HOST/v1/chat/completions" \
+  -H "Authorization: ******" \
+  -H "x-litellm-customer-id: example-user-123" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "<configured model>",
+    "messages": [{"role": "user", "content": "What is LiteLLM?"}],
+    "cache": {"use-cache": true}
+  }'
+```
+
+!!! warning "When not to use the cache"
+
+    Do not opt in:
+
+    - multi-turn conversations;
+    - tool-calling or agent loops;
+    - permission-sensitive RAG;
+    - personalized responses;
+    - time-sensitive queries.
+
+    Semantically similar text can have materially different answers, and a
+    false match replays the earlier answer without calling the model.
+
+After the remote BGE-M3 and D3-mini endpoints are healthy, run the end-to-end
+verification:
+
+```sh
+./scripts/verify-semantic-cache.py
+```
+
+The check authenticates to Qdrant and sends two different but semantically
+similar single-turn prompts. It requires the second request to replay the
+first response without creating another cached point.
+
+Semantic-cache hits also carry the `x-litellm-semantic-similarity` response
+header for clients that inspect response headers.
