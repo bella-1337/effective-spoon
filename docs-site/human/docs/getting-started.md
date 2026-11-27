@@ -1,4 +1,4 @@
-<!-- human-version-of: docs/getting-started.md sha256: 4f60387321ae1000b9341e9417691f7cf5915e901924f459d0ee52f22290c5b4 -->
+<!-- human-version-of: docs/getting-started.md sha256: 87128b44a9ed5d6965042a77351094e0905cc73559ced33a20219d410e3c60ba -->
 
 # Getting started
 
@@ -185,6 +185,9 @@ records for the names in `D3_DECISION_API_BASE` and `BGE_M3_API_BASE` that
 point at the GPU host's private IP.
 
 ## 3. Resolve the hostnames
+
+For an on-prem deployment, create the internal DNS records listed in
+[DNS entries](dns-entries.md) instead of editing host files.
 
 For a stack running on this machine, generate the `/etc/hosts` line from the
 configured names and append it:

@@ -283,6 +283,28 @@ class RepositoryContractTests(unittest.TestCase):
                 )
                 self.assertTrue(body.strip())
 
+    def test_every_guide_has_a_reader_version(self) -> None:
+        # New guides ship with their reader version; only the pages listed in
+        # WITHOUT_READER_VERSION are shown as written.
+        human = set(build_docs.human_pages(ROOT))
+        missing = [
+            page
+            for page in build_docs.published_pages(ROOT)
+            if build_docs.needs_reader_version(page) and page not in human
+        ]
+        self.assertEqual(
+            missing,
+            [],
+            "write docs-site/human/<page> for each page, then run "
+            "scripts/build-docs.py human-stamp <page> (see docs/documentation-site.md)",
+        )
+
+    def test_exempt_patterns_match_existing_pages(self) -> None:
+        pages = build_docs.published_pages(ROOT)
+        for pattern in build_docs.WITHOUT_READER_VERSION:
+            with self.subTest(pattern=pattern):
+                self.assertTrue(any(build_docs.fnmatch.fnmatchcase(page, pattern) for page in pages))
+
     def test_reader_versions_keep_every_heading_of_their_page(self) -> None:
         # Other pages link to headings by anchor; the strict build checks the
         # links of the reader versions only, so check the anchors here.
@@ -354,6 +376,12 @@ class StagingTests(unittest.TestCase):
         self.assertEqual(
             build_docs.llm_copy("docs/getting-started.md"), "llm/docs/getting-started/index.md.txt"
         )
+
+    def test_exemptions_match_whole_paths(self) -> None:
+        self.assertFalse(build_docs.needs_reader_version("AGENTS.md"))
+        self.assertFalse(build_docs.needs_reader_version("docs/prompts/create-dev-to-prod-delta.md"))
+        self.assertTrue(build_docs.needs_reader_version("docs/AGENTS.md"))
+        self.assertTrue(build_docs.needs_reader_version("docs/dns-entries.md"))
 
     def test_published_pages_skip_hidden_build_and_reader_directories(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

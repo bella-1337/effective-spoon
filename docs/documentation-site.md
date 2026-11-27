@@ -107,7 +107,11 @@ page views to third parties.
    `docs/`, and link it from the [README](../README.md#documentation) table.
 2. Add it to `nav:` in `mkdocs.yml`; the unit tests fail on a Markdown file
    that is not in the navigation.
-3. Run `./scripts/build-docs.py build`.
+3. Write its [reader version](#reader-versions-and-copy-for-llm) at the same
+   path under `docs-site/human/` and stamp it with
+   `./scripts/build-docs.py human-stamp <path>`; the unit tests fail on a guide
+   without one.
+4. Run `./scripts/build-docs.py build`.
 
 Use relative links between Markdown files, as GitHub and GitLab expect, and
 link to a heading with its GitHub-style anchor; the site uses the same
@@ -126,8 +130,14 @@ same facts, which the site shows in its place.
   guide itself. Change the guide first, then its reader version.
 - **The reader version lives at the same path** under `docs-site/human/`, for
   example `docs-site/human/docs/getting-started.md` for
-  `docs/getting-started.md`. Pages without one, such as the agent
-  instructions, the changelog, and the reports, are shown as they are.
+  `docs/getting-started.md`.
+- **Every guide has one.** A new guide ships with its reader version in the
+  same change, and the unit tests fail on a guide without one. Only the pages
+  matched by `WITHOUT_READER_VERSION` in `scripts/build-docs.py` are shown as
+  written: the agent instructions (`AGENTS.md`, `SKILL.md`), the changelog,
+  the dated reports, the dev-to-prod promotion register, and the prompts
+  under `docs/prompts/`. `./scripts/build-docs.py human-status` shows each
+  page as `fresh`, `stale`, `missing`, or `as-is`.
 - **Copy for LLM** on every page copies the guide's own Markdown, not the
   reader text. The build publishes it at `llm/<page>/index.md.txt` (for
   example `llm/docs/getting-started/index.md.txt`), and each page links it in

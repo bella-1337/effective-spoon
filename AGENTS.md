@@ -21,11 +21,12 @@ If Graphviz (`dot`) is unavailable, commit the Mermaid changes and say that
 they were not rendered locally; the CI documentation build renders them and
 fails on a source that does not render.
 
-Keep the reader versions current. The Markdown guides are the reference text
-for agents; the documentation site shows a plainer reader version of a guide
-from `docs-site/human/` at the same path. When you change a guide that has
-one, update the reader version with the same facts, keep every heading of the
-guide, and stamp it, as described in
+Always write documentation in two versions. The Markdown guides are the
+reference text for agents and AI models; the documentation site shows a
+plainer reader version of each guide from `docs-site/human/` at the same path.
+When you add a guide, write its reader version in the same change. When you
+change a guide, update its reader version with the same facts. Keep every
+heading of the guide, and stamp the reader version, as described in
 [Reader versions](docs/documentation-site.md#reader-versions-and-copy-for-llm):
 
 ```sh

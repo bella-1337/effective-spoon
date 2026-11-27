@@ -173,6 +173,7 @@ nav:
   - Home: README.md
   - Get started:
       - First deployment: docs/getting-started.md
+      - DNS entries: docs/dns-entries.md
       - Hardware sizing: docs/hardware-sizing.md
       - Remote GPU host: gpu-host/README.md
       - On-host D3-mini: docs/d3-mini-on-host.md

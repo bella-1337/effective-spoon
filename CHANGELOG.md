@@ -23,6 +23,13 @@ All notable changes to this stack are recorded here. The format follows
     `scripts/build-docs.py human-stamp`.
   - The build and the `docs` image run on a staged copy of the published files
     (`scripts/build-docs.py stage`), which copies only the files the site reads.
+  - Every guide must have a reader version; the unit tests fail on a new guide
+    without one. Agent instructions, the changelog, dated reports, the
+    promotion register, and prompts are shown as written.
+- [DNS entries](docs/dns-entries.md) lists every internal DNS record of an
+  on-prem deployment: the stack's public hostnames per profile, the remote GPU
+  host's names, the names that need no record, and commands that generate and
+  check the records.
 - [Presidio PII masking and guardrails](docs/presidio-guardrails.md#check-what-the-guardrail-masks)
   explains how administrators see what the `presidio-pii` guardrail masks
   without calling a model: `POST /guardrails/apply_guardrail` and the admin

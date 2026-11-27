@@ -21,6 +21,7 @@ to it under llm/, and the "Copy for LLM" button copies it.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -66,8 +67,9 @@ Commands:
       empty directory, with the reader versions swapped in and the Markdown
       for AI models under llm/ (the docs image builds from this).
   human-status
-      List the reader versions in docs-site/human/ and whether each was
-      written for the current text of its page.
+      List every page and its reader version: fresh, stale (written for an
+      older text), missing (a guide without one), or as-is (a page that the
+      site shows as written, such as the agent instructions).
   human-stamp PAGE...
       Record that the reader version of each PAGE (for example
       docs/getting-started.md) now matches the page's current text.
@@ -116,6 +118,19 @@ UNPUBLISHED_DIRS = frozenset(
     }
 )
 SYNC_INTERVAL_SECONDS = 1.0
+# Pages the site shows as written, with no reader version: instructions for
+# agents, the changelog, dated reports, the promotion register, and prompts.
+# Every other page needs a reader version; the unit tests enforce it, so a new
+# guide ships with its reader version in the same change.
+WITHOUT_READER_VERSION = (
+    "AGENTS.md",
+    "SKILL.md",
+    "CHANGELOG.md",
+    "STACK-REVIEW-*.md",
+    "docs/security-probe-*.md",
+    "docs/dev-to-prod-promotion-register.md",
+    "docs/prompts/*.md",
+)
 
 
 @dataclass(frozen=True)
@@ -466,6 +481,11 @@ def human_pages(tree: Path) -> list[str]:
     return [path.as_posix() for path in walk_files(human) if path.suffix == ".md"]
 
 
+def needs_reader_version(page: str) -> bool:
+    # Whole-path match: AGENTS.md exempts only the root file, not docs/AGENTS.md.
+    return not any(fnmatch.fnmatchcase(page, pattern) for pattern in WITHOUT_READER_VERSION)
+
+
 def page_url(page: str) -> str:
     """The directory URL Zensical gives a page: README.md and index.md name their folder."""
     path = PurePosixPath(page).with_suffix("")
@@ -727,8 +747,10 @@ def human_status(args: argparse.Namespace) -> None:
     for page in published_pages(ROOT):
         if page in human:
             print(f"{human_state(ROOT, page)[0]:8} {page}")
+        elif needs_reader_version(page):
+            print(f"{'missing':8} {page}")
         else:
-            print(f"{'-':8} {page}")
+            print(f"{'as-is':8} {page}")
 
 
 def human_stamp_command(args: argparse.Namespace) -> None:
